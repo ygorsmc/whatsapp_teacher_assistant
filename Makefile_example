@@ -1,0 +1,199 @@
+# ==========================================
+# LOCAL OPERATIONS — Infrastructure & CI/CD
+# ==========================================
+
+PROJECT_PREFIX := $(shell grep PROJECT_PREFIX global.env | cut -d '=' -f2 | tr -d '"')
+
+ENV = dev
+RG = $(PROJECT_PREFIX)-$(ENV)-rg
+WS = $(PROJECT_PREFIX)-$(ENV)-ws
+ENDPOINT_NAME = $(PROJECT_PREFIX)-ep-$(ENV)
+PYTHONPATH_VAL = .
+
+.PHONY: help permissions infra-up build-image index-standards train-pipeline \
+        setup-compute-permissions deploy-canary env-gen run-app infra-down \
+        test test-integration test-all validate-dataset generate-dataset \
+        dev dev-api dev-frontend dev-worker
+
+help:
+	@echo ""
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "  Concrete Pathology Inspector — MLOps Commands"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo ""
+	@echo "  🔧 LOCAL DEVELOPMENT"
+	@echo "  make dev                 - Start full stack (docker-compose)"
+	@echo "  make dev-api             - Start FastAPI server locally"
+	@echo "  make dev-frontend        - Start React frontend (Vite dev server)"
+	@echo "  make dev-worker          - Start Celery worker locally"
+	@echo ""
+	@echo "  📊 DATA & VALIDATION"
+	@echo "  make generate-dataset    - Generate synthetic dev dataset"
+	@echo "  make validate-dataset    - Validate dataset (format + distribution + leakage)"
+	@echo "  make index-standards     - Index ABNT standards into Azure AI Search"
+	@echo ""
+	@echo "  🧪 TESTING"
+	@echo "  make test                - Run unit tests"
+	@echo "  make test-integration    - Run integration/cascade tests"
+	@echo "  make test-all            - Run all tests with coverage"
+	@echo ""
+	@echo "  🏗️  INFRASTRUCTURE"
+	@echo "  make permissions         - Grant execute permissions to scripts"
+	@echo "  make infra-up            - Provision core Azure infrastructure"
+	@echo "  make build-image         - Build Docker image and push to ACR"
+	@echo "  make infra-down          - Permanently delete all Azure resources"
+	@echo ""
+	@echo "  🤖 ML PIPELINE"
+	@echo "  make train-pipeline      - Submit YOLOv8 training to Azure ML"
+	@echo "  make setup-compute-permissions - Assign RBAC roles to compute"
+	@echo "  make deploy-canary       - Deploy model with canary rollout"
+	@echo ""
+
+# ==========================================
+# 0. LOCAL SETUP
+# ==========================================
+permissions:
+	@echo "[INFO] Granting execute permissions to shell scripts..."
+	chmod +x scripts/finops/*.sh scripts/infrastructure/*.sh scripts/auth/*.sh scripts/utils/*.sh scripts/build/*.sh
+
+# ==========================================
+# 1. LOCAL DEVELOPMENT
+# ==========================================
+dev:
+	@echo "[INFO] Starting full stack with docker-compose..."
+	docker-compose up -d
+	@echo "[INFO] Stack running: API (8000), Frontend (5173), Redis, Postgres, MLflow (5000)"
+
+dev-api:
+	@echo "[INFO] Starting FastAPI server..."
+	export PYTHONPATH=$(PYTHONPATH_VAL) && \
+	export ENVIRONMENT=$(ENV) && \
+	uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+
+dev-frontend:
+	@echo "[INFO] Starting React frontend (Vite dev server)..."
+	cd frontend && npm run dev
+
+dev-worker:
+	@echo "[INFO] Starting Celery worker..."
+	export PYTHONPATH=$(PYTHONPATH_VAL) && \
+	export ENVIRONMENT=$(ENV) && \
+	celery -A src.api.celery_app worker --loglevel=info
+
+# ==========================================
+# 2. DATA & VALIDATION
+# ==========================================
+generate-dataset:
+	@echo "[INFO] Generating synthetic development dataset..."
+	export PYTHONPATH=$(PYTHONPATH_VAL) && \
+	python scripts/utils/create_sample_dataset.py
+	@echo "[INFO] Dataset generated in data/images/ and data/labels/"
+
+validate-dataset:
+	@echo "[INFO] Validating dataset (format + distribution + leakage check)..."
+	export PYTHONPATH=$(PYTHONPATH_VAL) && \
+	python -m src.data.validator --dataset_path data --validated_output data/validated
+
+index-standards:
+	@echo "[INFO] Indexing ABNT standards into Azure AI Search..."
+	export PYTHONPATH=$(PYTHONPATH_VAL) && \
+	export ENVIRONMENT=$(ENV) && \
+	python -m src.rag.standards_loader
+
+# ==========================================
+# 3. TESTING
+# ==========================================
+test:
+	@echo "[INFO] Running unit tests..."
+	export PYTHONPATH=$(PYTHONPATH_VAL) && \
+	pytest tests/unit/ -v
+
+test-integration:
+	@echo "[INFO] Running integration and cascade error tests..."
+	export PYTHONPATH=$(PYTHONPATH_VAL) && \
+	pytest tests/integration/ -v
+
+test-all:
+	@echo "[INFO] Running full test suite with coverage..."
+	export PYTHONPATH=$(PYTHONPATH_VAL) && \
+	pytest tests/ -v --cov=src --cov-report=term-missing
+
+# ==========================================
+# 4. INFRASTRUCTURE (IaC)
+# ==========================================
+infra-up: permissions
+	@echo "[INFO] Step 1/6: Creating resource groups, storage, and ML workspace..."
+	./scripts/infrastructure/create-environments.sh $(ENV)
+	@echo "[INFO] Step 2/6: Creating Managed Identity..."
+	./scripts/auth/create-managed-identity.sh $(ENV)
+	@echo "[INFO] Step 3/6: Creating Key Vault..."
+	./scripts/infrastructure/create-keyvault.sh $(ENV)
+	@echo "[INFO] Step 4/6: Creating Azure AI Search..."
+	./scripts/infrastructure/create-ai-search.sh $(ENV)
+	@echo "[INFO] Step 5/6: Granting local developer access..."
+	./scripts/auth/grant_local_access.sh $(ENV)
+	@echo "[INFO] Step 6/6: Configuring FinOps Budget Limits..."
+	./scripts/finops/create-budget.sh $(ENV)
+	@echo "[WARNING] Azure Entra ID propagation can take up to 3 minutes."
+
+build-image:
+	@echo "[INFO] Building and pushing Docker image to ACR..."
+	./scripts/build/build_training_image.sh $(ENV)
+
+# ==========================================
+# 5. ML PIPELINE
+# ==========================================
+setup-compute-permissions:
+	@echo "[INFO] Assigning RBAC roles to the compute cluster..."
+	./scripts/auth/configure_compute_permissions.sh $(ENV)
+
+train-pipeline: test validate-dataset
+	@echo "[INFO] Submitting YOLOv8 training pipeline to Azure ML..."
+	export PYTHONPATH=$(PYTHONPATH_VAL) && \
+	export ENVIRONMENT=$(ENV) && \
+	python -m deployments.aml_pipeline.pipeline
+
+# ==========================================
+# 6. DEPLOYMENT
+# ==========================================
+deploy-canary:
+	@echo "[INFO] Starting canary deployment..."
+	export PYTHONPATH=$(PYTHONPATH_VAL) && \
+	export ENVIRONMENT=$(ENV) && \
+	python -m scripts.deploy.canary_deployment
+
+# ==========================================
+# 7. LEGACY FRONTEND (Streamlit)
+# ==========================================
+env-gen:
+	@echo "[INFO] Fetching endpoint URL and credentials for local use..."
+	./scripts/utils/generate_env.sh $(ENV)
+
+run-app: env-gen
+	@echo "[INFO] Starting Streamlit app (legacy dashboard)..."
+	export PYTHONPATH=$(PYTHONPATH_VAL) && \
+	export ENVIRONMENT=$(ENV) && \
+	streamlit run streamlit_app/app.py
+
+# ==========================================
+# 8. TEARDOWN
+# ==========================================
+infra-down:
+	@read -p "[DANGER] This will permanently delete resource group $(RG). Continue? (y/n): " confirm; \
+	if [ "$$confirm" = "y" ] || [ "$$confirm" = "Y" ]; then \
+		echo "[INFO] Looking up Key Vault name..."; \
+		KV=$$(az keyvault list --resource-group $(RG) --query "[0].name" -o tsv); \
+		if [ -n "$$KV" ]; then \
+			echo "[INFO] Step 1/3: Deleting Key Vault $$KV..."; \
+			az keyvault delete --name $$KV --resource-group $(RG) || true; \
+			echo "[INFO] Step 2/3: Purging Key Vault..."; \
+			az keyvault purge --name $$KV || true; \
+		else \
+			echo "[INFO] No Key Vault found. Skipping."; \
+		fi; \
+		echo "[INFO] Step 3/3: Deleting resource group $(RG)..."; \
+		az group delete --name $(RG) --yes --no-wait; \
+		echo "[SUCCESS] Deletion initiated. Resources will be removed asynchronously."; \
+	else \
+		echo "[INFO] Teardown cancelled."; \
+	fi

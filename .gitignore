@@ -1,0 +1,69 @@
+# Variáveis de ambiente e credenciais (MUITO IMPORTANTE)
+*.env
+global.env
+.env
+.env.local
+
+# Bancos de dados locais
+*.db
+*.sqlite
+*.sqlite3
+local_dev.db
+local_dev.db-journal
+
+# Ambientes Virtuais (Python)
+venv/
+.venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# IDEs e Editores
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs e arquivos temporários
+*.log
+tmp/
+temp/
+
+# Dependências Python adicionais (ex: build)
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Testes e Cobertura
+.pytest_cache/
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+coverage.xml
+
+# Diretórios de debug locais criados via docker-compose (se houver mount de volume em pasta)
+redis_data/
+qdrant_data/
+azurite_data/

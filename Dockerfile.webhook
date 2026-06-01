@@ -1,0 +1,29 @@
+FROM python:3.12-slim
+
+# Evita que o Python grave arquivos .pyc no disco (melhor performance no container)
+ENV PYTHONDONTWRITEBYTECODE=1
+# Garante que as mensagens de stdout/stderr não fiquem em buffer (logs em tempo real)
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Instala dependências do sistema necessárias para drivers ODBC (SQL Server)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl apt-transport-https gnupg2 unixodbc-dev build-essential \
+    && curl https://packages.microsoft.com/keys/microsoft.asc | apt-key add - \
+    && curl https://packages.microsoft.com/config/debian/11/prod.list > /etc/apt/sources.list.d/mssql-release.list \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y msodbcsql18 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# Expõe a porta 80 conforme padrão do Azure Container Apps
+EXPOSE 80
+
+# Comando para iniciar o Webhook (O KEDA escalará este container)
+CMD ["uvicorn", "src.webhook.main:app", "--host", "0.0.0.0", "--port", "80"]

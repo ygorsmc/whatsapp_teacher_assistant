@@ -1,0 +1,33 @@
+# keda-scaler.yaml
+# Escalonamento Automático (KEDA) para o Worker do Azure Container Apps
+# Este manifesto instrui o ACA a criar réplicas baseadas no tamanho da fila do Service Bus.
+
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: llm-worker-scaler
+  namespace: whatsapp-assistant
+spec:
+  scaleTargetRef:
+    name: worker-llm # Nome do container app do worker
+  pollingInterval: 10 # Verifica a fila a cada 10 segundos
+  cooldownPeriod: 60  # Espera 60s antes de matar o container após a fila esvaziar
+  minReplicaCount: 0  # Escala para ZERO para economizar 100% quando não houver alunos enviando mensagens!
+  maxReplicaCount: 10 # Previne estourar o limite de custo ou rate-limit das APIs
+  triggers:
+  - type: azure-servicebus
+    metadata:
+      queueName: inbound_messages
+      messageCount: "5" # Uma nova réplica sobe a cada 5 mensagens na fila
+    authenticationRef:
+      name: keda-mi-auth # Usa Managed Identity (sem connection strings no código)
+
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: keda-mi-auth
+  namespace: whatsapp-assistant
+spec:
+  podIdentity:
+    provider: azure
