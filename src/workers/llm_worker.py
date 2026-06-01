@@ -396,6 +396,8 @@ async def process_inbound(receiver, message):
             track_event("llm_pipeline_success")
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             track_event("worker_error", {"error": str(e)[:500]})
             await send_whatsapp_message(phone, ERROR_TECHNICAL, reply_to_message_id=message_id)
             await receiver.dead_letter_message(message, reason="Pipeline Error", error_description=str(e)[:500])
