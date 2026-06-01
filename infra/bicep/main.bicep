@@ -170,6 +170,16 @@ resource secretDbUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   }
 }
 
+var sbConnectionString = listKeys(sbAuthRule.id, sbAuthRule.apiVersion).primaryConnectionString
+
+resource secretSbUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'SERVICEBUS-CONNECTION-STRING'
+  properties: {
+    value: sbConnectionString
+  }
+}
+
 output acrLoginServer string = acr.properties.loginServer
 output acrName string = acr.name
 output keyVaultUri string = keyVault.properties.vaultUri
