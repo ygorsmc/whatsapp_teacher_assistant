@@ -76,7 +76,7 @@ if settings.AZURE_KEY_VAULT_URL:
         keys_to_fetch = [
             "META-APP-SECRET", "META-VERIFY-TOKEN", "WHATSAPP-TOKEN",
             "DOCUMENT-INTELLIGENCE-KEY", "OPENAI-API-KEY", "GOOGLE-API-KEY", "DEEPSEEK-API-KEY",
-            "AZURE-OPENAI-API-KEY", "SERVICEBUS-CONNECTION-STRING"
+            "AZURE-OPENAI-API-KEY", "SERVICEBUS-CONNECTION-STRING", "DATABASE-URL"
         ]
         
         for kv_key in keys_to_fetch:
@@ -84,7 +84,21 @@ if settings.AZURE_KEY_VAULT_URL:
                 secret = client.get_secret(kv_key)
                 # Converte o padrão do Key Vault (hífen) para o padrão do Python (underscore)
                 env_key = kv_key.replace("-", "_")
-                setattr(settings, env_key, secret.value)
+                
+                # SQLAlchemy expects a URL format, not an ODBC string
+                if env_key == "DATABASE_URL" and "Driver=" in secret.value:
+                    import re
+                    import urllib.parse
+                    val = secret.value
+                    server = re.search(r"Server=tcp:([^,;]+)", val).group(1)
+                    database = re.search(r"Database=([^;]+)", val).group(1)
+                    uid = re.search(r"Uid=([^;]+)", val).group(1)
+                    pwd = re.search(r"Pwd=([^;]+)", val).group(1)
+                    pwd_encoded = urllib.parse.quote_plus(pwd)
+                    sa_url = f"mssql+aioodbc://{uid}:{pwd_encoded}@{server}:1433/{database}?driver=ODBC+Driver+18+for+SQL+Server"
+                    setattr(settings, env_key, sa_url)
+                else:
+                    setattr(settings, env_key, secret.value)
             except Exception as e:
                 logger.warning(f"KeyVault secret '{kv_key}' not found or could not be loaded. Fallback to .env")
                 

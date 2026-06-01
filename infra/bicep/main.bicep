@@ -20,6 +20,10 @@ param whatsappToken string
 param metaVerifyToken string
 
 @secure()
+@description('App Secret do Meta (usado para validar assinaturas)')
+param metaAppSecret string
+
+@secure()
 @description('Chave da API do Google Gemini')
 param googleApiKey string
 
@@ -140,6 +144,14 @@ resource secretMetaVerify 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   name: 'META-VERIFY-TOKEN'
   properties: {
     value: metaVerifyToken
+  }
+}
+
+resource secretMetaApp 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'META-APP-SECRET'
+  properties: {
+    value: metaAppSecret
   }
 }
 

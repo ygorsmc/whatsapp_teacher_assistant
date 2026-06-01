@@ -28,6 +28,7 @@ az deployment group create \
     sqlAdminPassword="$SQL_PASSWORD" \
     whatsappToken="$WHATSAPP_TOKEN" \
     metaVerifyToken="$META_VERIFY_TOKEN" \
+    metaAppSecret="$META_APP_SECRET" \
     googleApiKey="$GOOGLE_API_KEY" \
     azureOpenaiApiKey="$AZURE_OPENAI_API_KEY"
 
