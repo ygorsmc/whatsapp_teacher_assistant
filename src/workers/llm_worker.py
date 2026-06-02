@@ -87,8 +87,8 @@ async def run_rag_pipeline(student_context: dict, phone: str, text: str) -> str:
 async def get_student_context_by_phone(phone: str, course_id: str | None = None):
     """Fetches real DB data: Student, Enrollment, CourseClass, Course, and Teacher.
     
-    If course_id is provided, filters for the specific enrollment.
-    Otherwise returns the first enrollment found.
+    If course_id is provided, filters for the specific enrollment and returns a dict.
+    Otherwise returns a list of all active enrollments.
     """
     from src.db.database import AsyncSessionLocal
     from src.db.models import Student, StudentEnrollment, CourseClass, Course, Teacher
@@ -108,22 +108,32 @@ async def get_student_context_by_phone(phone: str, course_id: str | None = None)
         # Filter by specific course if provided (e.g., from review button)
         if course_id:
             stmt = stmt.where(Course.id == course_id)
-        
-        result = await session.execute(stmt)
-        row = result.first()
-        
-        if not row:
-            return None
-            
-        student, enrollment, class_obj, course, teacher = row
-        
-        return {
-            "student": student,
-            "enrollment": enrollment,
-            "class_obj": class_obj,
-            "course": course,
-            "teacher": teacher
-        }
+            result = await session.execute(stmt)
+            row = result.first()
+            if not row:
+                return None
+            return {
+                "student": row[0],
+                "enrollment": row[1],
+                "class_obj": row[2],
+                "course": row[3],
+                "teacher": row[4]
+            }
+        else:
+            result = await session.execute(stmt)
+            rows = result.all()
+            if not rows:
+                return []
+            return [
+                {
+                    "student": r[0],
+                    "enrollment": r[1],
+                    "class_obj": r[2],
+                    "course": r[3],
+                    "teacher": r[4]
+                }
+                for r in rows
+            ]
 
 async def send_whatsapp_typing(phone: str):
     """Sends typing indicator."""
@@ -290,10 +300,10 @@ async def process_inbound(receiver, message):
     message_id = event.get("message_id")
     
     with structlog.contextvars.bound_contextvars(correlation_id=correlation_id, phone=phone):
-        student_context = await get_student_context_by_phone(phone)
+        student_contexts = await get_student_context_by_phone(phone)
 
         # Guard clause: student may have been deactivated or not enrolled
-        if not student_context:
+        if not student_contexts:
             from src.db.database import AsyncSessionLocal
             from src.db.models import Teacher
             from sqlalchemy import select
@@ -308,6 +318,8 @@ async def process_inbound(receiver, message):
                     
             await receiver.complete_message(message)
             return
+
+        student_context = student_contexts[0]  # Default fallback context
 
         # Fast-path: resposta interativa de quiz (validação determinística)
         if message_type == "interactive" and interactive_payload:
@@ -373,6 +385,37 @@ async def process_inbound(receiver, message):
             await receiver.complete_message(message)
             return
 
+        # --- INTENT CLASSIFICATION FOR MULTIPLE ENROLLMENTS ---
+        if message_type == "text" and len(student_contexts) > 1:
+            from src.llm.classifier import classify_course_intent
+            
+            enrolled_courses = [
+                {"id": ctx["course"].id, "name": ctx["course"].name}
+                for ctx in student_contexts
+            ]
+            
+            classified_course_id = await classify_course_intent(combined, enrolled_courses)
+            
+            if classified_course_id:
+                # Override the default context with the classified one
+                for ctx in student_contexts:
+                    if ctx["course"].id == classified_course_id:
+                        student_context = ctx
+                        break
+            else:
+                # Ambiguous intent - ask the student to specify
+                course_list_str = "\n".join(f"- {c['name']}" for c in enrolled_courses)
+                ambiguous_msg = (
+                    "🤔 Pareceu que você fez uma pergunta genérica, mas eu vi que você está "
+                    f"matriculado(a) em mais de um curso comigo:\n\n{course_list_str}\n\n"
+                    "Por favor, reformule sua pergunta informando o **nome do curso** que deseja consultar! 👇"
+                )
+                await send_whatsapp_message(phone, ambiguous_msg, reply_to_message_id=message_id)
+                await receiver.complete_message(message)
+                track_event("intent_ambiguous", {"phone": phone})
+                return
+        # --------------------------------------------------------
+
         # Background lock renewal
         async def renew_lock_periodically(rcv, msg, interval=60):
             while True:
@@ -414,37 +457,64 @@ async def main_worker():
     
     is_dev = os.getenv("ENVIRONMENT", "development") in ("dev", "development")
     
+    logger.info("main_worker_starting", environment="dev" if is_dev else "production")
+    
     client = await service_bus.get_client()
+    logger.info("service_bus_client_acquired")
         
     async with client:
+        logger.info("service_bus_client_context_entered", mode="dev" if is_dev else "session-fifo")
+        poll_count = 0
         while True:
             try:
+                poll_count += 1
+                if poll_count % 30 == 1:
+                    logger.info("worker_poll_heartbeat", poll_count=poll_count, mode="dev" if is_dev else "session")
+                    
                 if is_dev:
-                    # Dev mode: plain receiver (emulator doesn't support sessions)
                     receiver = client.get_queue_receiver(
                         queue_name="inbound_messages",
                         max_wait_time=10
                     )
+                    async with receiver:
+                        messages = await receiver.receive_messages(max_message_count=10, max_wait_time=5)
+                        if messages:
+                            logger.info("messages_received", count=len(messages))
+                        for msg in messages:
+                            await process_inbound(receiver, msg)
                 else:
                     # Production: session-enabled FIFO per student
+                    # NEXT_AVAILABLE_SESSION can block indefinitely on `async with receiver:`
+                    # We wrap it in wait_for to prevent the worker from hanging.
                     receiver = client.get_queue_receiver(
                         queue_name="inbound_messages", 
                         session_id=NEXT_AVAILABLE_SESSION,
                         max_wait_time=10
                     )
-                async with receiver:
-                    messages = await receiver.receive_messages(max_message_count=10, max_wait_time=5)
-                    for msg in messages:
-                        await process_inbound(receiver, msg)
+                    try:
+                        async with receiver:
+                            logger.info("session_acquired")
+                            messages = await receiver.receive_messages(max_message_count=10, max_wait_time=5)
+                            if messages:
+                                logger.info("messages_received", count=len(messages))
+                            for msg in messages:
+                                await process_inbound(receiver, msg)
+                    except OperationTimeoutError:
+                        # No sessions available right now, retry
+                        pass
+                        
             except OperationTimeoutError:
                 # No active sessions available, just loop and wait
+                if poll_count % 30 == 0:
+                    logger.info("worker_idle_no_sessions", poll_count=poll_count)
                 await asyncio.sleep(2)
             except Exception as e:
+                logger.error("main_worker_error", error=str(e)[:500], error_type=type(e).__name__)
                 if "amqp:socket-error" in str(e).lower() or "connection closed" in str(e).lower():
-                    print("[WAIT] Service Bus Emulator starting up... retrying in 10s...")
                     await asyncio.sleep(10)
                 else:
-                    print(f"Error in main worker loop: {e}")
+                    import traceback
+                    traceback.print_exc()
                     await asyncio.sleep(5)
 
 if __name__ == "__main__":

@@ -76,7 +76,8 @@ if settings.AZURE_KEY_VAULT_URL:
         keys_to_fetch = [
             "META-APP-SECRET", "META-VERIFY-TOKEN", "WHATSAPP-TOKEN",
             "DOCUMENT-INTELLIGENCE-KEY", "OPENAI-API-KEY", "GOOGLE-API-KEY", "DEEPSEEK-API-KEY",
-            "AZURE-OPENAI-API-KEY", "SERVICEBUS-CONNECTION-STRING", "DATABASE-URL"
+            "AZURE-OPENAI-API-KEY", "AZURE-OPENAI-ENDPOINT", "SERVICEBUS-CONNECTION-STRING", "DATABASE-URL",
+            "QDRANT-URL", "QDRANT-API-KEY"
         ]
         
         for kv_key in keys_to_fetch:

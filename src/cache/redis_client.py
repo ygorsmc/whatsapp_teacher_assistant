@@ -24,6 +24,12 @@ class InMemoryRedis:
         if nx and key in self._store:
             return False
         self._store[key] = str(value)
+        if ex:
+            import asyncio
+            async def _expire():
+                await asyncio.sleep(ex)
+                self._store.pop(key, None)
+            asyncio.create_task(_expire())
         return True
 
     async def incr(self, key: str):
@@ -32,7 +38,13 @@ class InMemoryRedis:
         return val
 
     async def expire(self, key: str, seconds: int):
-        return True  # No-op in memory — keys never expire
+        import asyncio
+        async def _expire():
+            await asyncio.sleep(seconds)
+            self._store.pop(key, None)
+            self._lists.pop(key, None)
+        asyncio.create_task(_expire())
+        return True
 
     async def exists(self, key: str):
         return 1 if key in self._store or key in self._lists else 0
@@ -76,9 +88,14 @@ class InMemoryRedis:
         # Drain the buffer
         messages = self._lists.pop(buffer_key, []) if buffer_key else []
 
-        # Reset the debounce lock with a short TTL (no-op for TTL in memory)
+        # Reset the debounce lock with a short TTL
         if lock_key:
             self._store[lock_key] = "1"
+            import asyncio
+            async def _expire():
+                await asyncio.sleep(cooldown / 1000.0)
+                self._store.pop(lock_key, None)
+            asyncio.create_task(_expire())
 
         return messages
 

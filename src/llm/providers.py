@@ -110,8 +110,12 @@ class GeminiLLMProvider(LLMProvider):
         
         # Gemini usage metadata
         usage = response.response_metadata.get("token_usage", {}) if response.response_metadata else {}
-        prompt_tokens = usage.prompt_token_count if hasattr(usage, "prompt_token_count") else 0
-        completion_tokens = usage.candidates_token_count if hasattr(usage, "candidates_token_count") else 0
+        if isinstance(usage, dict):
+            prompt_tokens = usage.get("prompt_token_count", 0)
+            completion_tokens = usage.get("candidates_token_count", 0)
+        else:
+            prompt_tokens = getattr(usage, "prompt_token_count", 0)
+            completion_tokens = getattr(usage, "candidates_token_count", 0)
         
         track_event("llm_generation", {
             "model": self.llm.model,

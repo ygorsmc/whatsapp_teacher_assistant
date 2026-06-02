@@ -14,6 +14,9 @@ class ServiceBusWrapper:
         if not self.client:
             if settings.SERVICEBUS_CONNECTION_STRING:
                 # Local dev only — plain AMQP (emulator doesn't support WebSockets)
+                import structlog
+                _logger = structlog.get_logger(__name__)
+                _logger.info("sb_using_connection_string", cs_prefix=settings.SERVICEBUS_CONNECTION_STRING[:60])
                 self.client = ServiceBusClient.from_connection_string(
                     conn_str=settings.SERVICEBUS_CONNECTION_STRING,
                     retry_total=10,
@@ -22,6 +25,9 @@ class ServiceBusWrapper:
                 )
             else:
                 # Production Managed Identity
+                import structlog
+                _logger = structlog.get_logger(__name__)
+                _logger.info("sb_using_managed_identity", fqdn=settings.SERVICEBUS_FQDN)
                 self.credential = DefaultAzureCredential()
                 self.client = ServiceBusClient(
                     fully_qualified_namespace=settings.SERVICEBUS_FQDN,

@@ -1,0 +1,17 @@
+.env
+.env.local
+.env.*
+__pycache__
+*.pyc
+.git
+.gitignore
+.agent
+*.md
+tests/
+docs/
+*.db
+local_dev.db
+peek_dlq.py
+.venv
+venv
+node_modules
