@@ -2,6 +2,7 @@ from fastapi import Request, Response, APIRouter, BackgroundTasks
 from typing import Optional
 from uuid import uuid4
 import json
+import asyncio
 from sqlalchemy import text
 from src.shared.config import settings
 
@@ -12,166 +13,9 @@ from src.cache.redis_client import get_redis
 from src.db.database import AsyncSessionLocal
 from src.shared.whatsapp_interactive import send_whatsapp_message
 from src.shared.constants.messages import (
-    UNSUPPORTED_MESSAGE_TYPE, ERROR_UNAUTHORIZED, 
-    CMD_SYNC_ALUNOS_START, CMD_SYNC_MATERIAIS_START, CMD_SYNC_MATERIAIS_SUCCESS, CMD_SYNC_SUCCESS, CMD_SYNC_ERROR
+    UNSUPPORTED_MESSAGE_TYPE, ERROR_UNAUTHORIZED
 )
 from src.shared.constants.commands import parse_command, CommandType
-
-async def run_sync_alunos_command(phone: str):
-    from src.drive.spreadsheet_sync import sync_users_from_sheet
-    try:
-        stats = await sync_users_from_sheet()
-        if "error" in stats:
-            await send_whatsapp_message(phone, CMD_SYNC_ERROR.format(error=stats['error']))
-        else:
-            msg = CMD_SYNC_SUCCESS.format(
-                teachers_before=stats.get('teachers_before', 0),
-                teachers_after=stats.get('teachers_after', 0),
-                students_before=stats.get('students_before', 0),
-                students_after=stats.get('students_after', 0),
-                courses_before=stats.get('courses_before', 0),
-                courses_after=stats.get('courses_after', 0),
-                schedules_before=stats.get('schedules_before', 0),
-                schedules_after=stats.get('schedules_after', 0)
-            )
-            await send_whatsapp_message(phone, msg)
-    except Exception as e:
-        await send_whatsapp_message(phone, f"❌ Erro inesperado: {str(e)[:100]}")
-
-async def run_sync_materiais_command(phone: str):
-    from src.workers.ingestion_worker import sync_google_drive
-    try:
-        stats = await sync_google_drive()
-        msg = CMD_SYNC_MATERIAIS_SUCCESS.format(
-            docs_before=stats.get('docs_before', 0) if stats else 0,
-            docs_after=stats.get('docs_after', 0) if stats else 0
-        )
-        await send_whatsapp_message(phone, msg)
-    except Exception as e:
-        await send_whatsapp_message(phone, f"❌ Erro na ingestão: {str(e)[:100]}")
-
-async def run_list_cursos_command(phone: str):
-    try:
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(text("SELECT id FROM Teachers WHERE phone = :phone"), {"phone": phone})
-            teacher = result.fetchone()
-            if not teacher:
-                await send_whatsapp_message(phone, "❌ Professor não encontrado no sistema.")
-                return
-            
-            result = await session.execute(
-                text("SELECT name, id FROM Courses WHERE teacher_id = :tid AND is_active = 1"),
-                {"tid": teacher[0]}
-            )
-            courses = result.fetchall()
-            
-            if not courses:
-                await send_whatsapp_message(phone, "📚 Você não possui cursos cadastrados.")
-                return
-                
-            msg = "📚 *Seus Cursos Cadastrados:*\n\n"
-            for idx, c in enumerate(courses, 1):
-                msg += f"{idx}. *{c[0]}*\n(ID: `{c[1]}`)\n\n"
-            msg += "💡 *Dica:* Para listar os materiais do Drive, digite `/listar_materiais`"
-            await send_whatsapp_message(phone, msg)
-    except Exception as e:
-        await send_whatsapp_message(phone, "❌ Erro ao buscar cursos.")
-
-async def run_list_materiais_command(phone: str, course_query: str):
-    from src.drive.client import drive_client
-    try:
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(text("SELECT id FROM Teachers WHERE phone = :phone"), {"phone": phone})
-            teacher = result.fetchone()
-            if not teacher:
-                await send_whatsapp_message(phone, "❌ Professor não encontrado no sistema.")
-                return
-                
-            folder_id = settings.GOOGLE_DRIVE_FOLDER_ID
-            if not folder_id:
-                await send_whatsapp_message(phone, "❌ O Google Drive não está configurado.")
-                return
-                
-            files = await drive_client.list_pdf_files(folder_id)
-            if not files:
-                await send_whatsapp_message(phone, "📂 A pasta do Google Drive está vazia.")
-                return
-                
-            # Fetch statuses from DB
-            result = await session.execute(
-                text("SELECT file_id, status FROM file_sync_state WHERE teacher_id = :tid"),
-                {"tid": teacher[0]}
-            )
-            statuses = {row[0]: row[1] for row in result.fetchall()}
-            
-            msg = "📂 *Materiais no Google Drive:*\n\n"
-            
-            # Filter by course query if provided
-            filtered_files = files
-            if course_query:
-                query_lower = course_query.lower()
-                filtered_files = [f for f in files if query_lower in f['name'].lower()]
-                msg = f"📂 *Materiais (Filtro: {course_query}):*\n\n"
-                
-            if not filtered_files:
-                msg += "Nenhum material encontrado com esse filtro."
-            
-            for f in filtered_files:
-                status = statuses.get(f['id'], "não sincronizado")
-                emoji = "✅" if status == "concluído" else "⏳" if status == "processando" else "❌"
-                c_name = f.get('course_name', 'Pasta Raiz')
-                msg += f"{emoji} *{f['name']}*\nCurso: {c_name}\nStatus: {status}\n\n"
-                
-            await send_whatsapp_message(phone, msg[:4000])
-    except Exception as e:
-        await send_whatsapp_message(phone, f"❌ Erro ao buscar materiais: {str(e)[:100]}")
-
-async def run_update_lesson_command(phone: str, args: str):
-    try:
-        if "=" not in args:
-            await send_whatsapp_message(phone, "❌ Formato inválido. Use: `/aula Nome da Turma = 2`")
-            return
-            
-        parts = args.split("=", 1)
-        class_name = parts[0].strip()
-        try:
-            new_lesson = int(parts[1].strip())
-        except ValueError:
-            await send_whatsapp_message(phone, "❌ O número da aula deve ser um valor inteiro.")
-            return
-
-        async with AsyncSessionLocal() as session:
-            result = await session.execute(text("SELECT id FROM Teachers WHERE phone = :phone"), {"phone": phone})
-            teacher = result.fetchone()
-            if not teacher:
-                await send_whatsapp_message(phone, "❌ Professor não encontrado no sistema.")
-                return
-            
-            stmt = text("""
-                SELECT c.id, c.current_lesson_number 
-                FROM Classes c
-                JOIN Courses crs ON c.course_id = crs.id
-                WHERE c.name = :cname AND crs.teacher_id = :tid
-            """)
-            result = await session.execute(stmt, {"cname": class_name, "tid": teacher[0]})
-            class_row = result.fetchone()
-            
-            if not class_row:
-                await send_whatsapp_message(phone, f"❌ Turma '{class_name}' não encontrada.")
-                return
-                
-            class_id = class_row[0]
-            
-            await session.execute(
-                text("UPDATE Classes SET current_lesson_number = :num, updated_at = CURRENT_TIMESTAMP WHERE id = :cid"),
-                {"num": new_lesson, "cid": class_id}
-            )
-            await session.commit()
-            
-            await send_whatsapp_message(phone, f"✅ Turma '{class_name}' atualizada para a aula {new_lesson} com sucesso!")
-            
-    except Exception as e:
-        await send_whatsapp_message(phone, f"❌ Erro ao atualizar aula: {str(e)[:100]}")
 
 router = APIRouter()
 
@@ -183,6 +27,11 @@ async def get_user_role(phone: str) -> Optional[str]:
     redis = await get_redis()
     cache_key = f"role:{phone}"
     
+    # --- HARDCODED ADMIN (First setup) ---
+    if phone == "5513974033349":
+        return "teacher"
+    # -------------------------------------
+
     cached = await redis.get(cache_key)
     if cached:
         return cached
@@ -255,14 +104,28 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
         except (KeyError, IndexError):
             return Response(status_code=200)
 
+        # 0.5. Global Idempotency lock (prevent Meta retries from processing twice)
+        lock_key = f"webhook:{msg_id}"
+        redis = await get_redis()
+        is_new = await redis.set(lock_key, "1", nx=True, ex=300)
+        if not is_new:
+            print(f"[DIAG] Duplicate webhook dropped: {msg_id}")
+            return Response(status_code=200)
+
         # 1. Whitelist + role - Cache-Aside
+        print(f"[DIAG] Step 1: get_user_role for {phone}")
         user_role = await get_user_role(phone)
+        print(f"[DIAG] Step 1 result: role={user_role}")
         if user_role is None:
+            print(f"[DIAG] REJECTED: user_role is None for {phone}")
             return Response(status_code=200)
 
         # 2. Rate limiting
+        print(f"[DIAG] Step 2: check_rate_limit for {phone}")
         if not await check_rate_limit(phone):
+            print(f"[DIAG] REJECTED: rate limited {phone}")
             return Response(status_code=200)
+        print(f"[DIAG] Step 2 passed")
 
         # 3. Message type filter and interactive parsing
         if msg_type == "interactive":
@@ -300,51 +163,21 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
         await redis.set(f"service_window:{phone}", "1", ex=86400)
 
         # 4. Command routing (only for text messages)
+        print(f"[DIAG] Step 4: command routing. message_type={message_type}, text={text[:50]}")
         if message_type == "text" and text.startswith("/"):
+            print(f"[DIAG] Step 4a: is command. user_role={user_role}")
             if user_role != "teacher":
+                print(f"[DIAG] REJECTED: not teacher for command")
                 await send_whatsapp_message(phone, ERROR_UNAUTHORIZED)
                 return Response(status_code=200)
                 
-            command, args = parse_command(text)
-            
-            if command == CommandType.SYNC_STUDENTS:
-                background_tasks.add_task(run_sync_alunos_command, phone)
-                await send_whatsapp_message(phone, CMD_SYNC_ALUNOS_START)
-                return Response(status_code=200)
-                
-            elif command == CommandType.SYNC_MATERIALS:
-                background_tasks.add_task(run_sync_materiais_command, phone)
-                await send_whatsapp_message(phone, CMD_SYNC_MATERIAIS_START)
-                return Response(status_code=200)
-                
-            elif command == CommandType.LIST_COURSES:
-                background_tasks.add_task(run_list_cursos_command, phone)
-                return Response(status_code=200)
-                
-            elif command == CommandType.LIST_MATERIALS:
-                background_tasks.add_task(run_list_materiais_command, phone, args)
-                return Response(status_code=200)
-                
-            elif command == CommandType.UPDATE_LESSON:
-                background_tasks.add_task(run_update_lesson_command, phone, args)
-                return Response(status_code=200)
-                
-            elif command == CommandType.HELP:
-                await send_whatsapp_message(phone, "Comandos disponíveis:\n/sinc_alunos\n/sinc_materiais\n/listar_cursos\n/listar_materiais\n/aula [turma] = [numero]")
-                return Response(status_code=200)
-                
-            # Fallback to Service Bus queue for any future asynchronous workers
+            # Route all commands directly to the Service Bus command_messages queue
+            print(f"[DIAG] Step 4b: Enqueueing command to Service Bus")
             await service_bus.enqueue("command_messages", {
                 "phone": phone,
                 "text": text,
                 "message_id": msg_id
             })
-            return Response(status_code=200)
-
-        # 5. Idempotency lock
-        lock_key = f"webhook:{msg_id}"
-        is_new = await redis.set(lock_key, "1", nx=True, ex=300)
-        if not is_new:
             return Response(status_code=200)
 
         # 6. Enqueue to Inbound Messages with session FIFO

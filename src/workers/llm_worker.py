@@ -447,7 +447,7 @@ async def process_inbound(receiver, message):
         finally:
             lock_task.cancel()
 
-async def main_worker():
+async def llm_loop():
     """Main loop for the LLM worker consuming inbound_messages queue."""
     from src.shared.service_bus import service_bus
     from azure.servicebus import NEXT_AVAILABLE_SESSION
@@ -516,6 +516,16 @@ async def main_worker():
                     import traceback
                     traceback.print_exc()
                     await asyncio.sleep(5)
+
+async def main_worker():
+    from src.workers.command_worker import command_loop
+    import asyncio
+    
+    logger.info("starting_unified_workers")
+    await asyncio.gather(
+        llm_loop(),
+        command_loop()
+    )
 
 if __name__ == "__main__":
     import structlog

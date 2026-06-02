@@ -148,7 +148,9 @@ async def get_redis():
         client = redis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
-            decode_responses=True
+            decode_responses=True,
+            socket_timeout=1.0,
+            socket_connect_timeout=1.0
         )
         await client.ping()
         _redis_client = client

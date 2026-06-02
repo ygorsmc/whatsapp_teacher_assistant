@@ -9,6 +9,7 @@ class ServiceBusWrapper:
     def __init__(self):
         self.client = None
         self.credential = None
+        self.senders = {}
 
     async def get_client(self) -> ServiceBusClient:
         if not self.client:
@@ -45,15 +46,17 @@ class ServiceBusWrapper:
         is_dev = os.getenv("ENVIRONMENT", "development") in ("dev", "development")
         
         client = await self.get_client()
-        sender = client.get_queue_sender(queue_name=queue)
+        
+        if queue not in self.senders:
+            self.senders[queue] = client.get_queue_sender(queue_name=queue)
+        sender = self.senders[queue]
         
         message_body = json.dumps(payload)
         # Emulator doesn't support sessions — strip session_id in dev
         effective_session_id = session_id if not is_dev else None
         message = ServiceBusMessage(message_body, session_id=effective_session_id)
         
-        async with sender:
-            await sender.send_messages(message)
+        await sender.send_messages(message)
             
         track_event("message_enqueued", {
             "queue": queue,
@@ -62,6 +65,9 @@ class ServiceBusWrapper:
         })
 
     async def close(self):
+        for sender in self.senders.values():
+            await sender.close()
+        self.senders.clear()
         if self.client:
             await self.client.close()
         if self.credential:
