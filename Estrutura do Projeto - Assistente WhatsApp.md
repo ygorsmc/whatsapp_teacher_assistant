@@ -461,7 +461,8 @@ def next\_3am\_utc() \-\> datetime:
     return target
 
 O Service Bus entrega a mensagem apenas no horário configurado. Um Service Bus Trigger padrão acorda o Worker de Exclusão quando a mensagem fica disponível. Para garantir que o Container App do Worker de Exclusão acorde nesse momento (fora do pico), é obrigatório configurar um KEDA Scaler baseado na fila delete\_vectors.  
-**Manifesto do KEDA (Evitando Connection Strings):**  
+**Manifesto do KEDA (Exceção à regra de Connection Strings):**  
+Devido ao atraso crônico de agregação (3 a 5 minutos) do Azure Monitor ao usar Managed Identity, o KEDA Scaler utiliza a *Connection String* do Service Bus armazenada nos Secrets do Container App. O código da aplicação continua usando Managed Identity.
 scale:  
   minReplicas: 0  
   maxReplicas: 1  
@@ -471,7 +472,7 @@ scale:
         queueName: delete\_vectors  
         messageCount: "1"  
       authenticationRef:  
-        name: keda-mi-auth \# OBRIGATÓRIO: Uso de Managed Identity do Container App
+        name: keda-auth # OBRIGATÓRIO: Uso de Connection String no secret do Container App para evitar delay do Azure Monitor
 
 **Por que não Timer Trigger consumindo fila?** Timer Trigger é projetado para rotinas de relógio, não para consumir filas. Pull manual de Service Bus via Timer requer gerenciamento explícito de message lock e é propenso a travamentos. O ScheduledEnqueueTimeUtc nativo do Service Bus é o mecanismo correto para mensagens com entrega futura, mas exige o KEDA Scaler para acionar a réplica.
 
@@ -523,7 +524,7 @@ scale:
         queueName: index\_documents  
         messageCount: "1"  
       authenticationRef:  
-        name: keda-mi-auth
+        name: keda-auth
 
 Com max\_concurrent\_calls=2 e maxReplicas=2, teremos no máximo 4 chamadas simultâneas ao Document Intelligence. **Mitigação adicional:** se o projeto escalar massivamente, avaliar o uso do Azure API Management (APIM) na frente do Document Intelligence para aplicar políticas globais de *rate-limit*.  
 **3\. Retry com exponential backoff via Tenacity nas chamadas às APIs externas:**  
@@ -1966,7 +1967,7 @@ Referência rápida dos pontos críticos documentados ao longo das seções ante
 ### Infraestrutura e Mensageria
 - [ ] Service Bus tier **Standard** obrigatório para sessions FIFO — seção 2
 - [ ] `requiresSession=true` + `LockDuration=PT5M` na fila `inbound_messages` — seção 2
-- [ ] KEDA com Managed Identity (`keda-mi-auth`), nunca connection strings — seção 7
+- [ ] KEDA com Connection String armazenada no Container App para evitar o atraso de escalonamento do Azure Monitor — seção 7
 - [ ] `DefaultAzureCredential` em todo código Python — seção 7
 - [ ] Webhook: `minReplicas=1` (cold start proibido) — seção 2
 - [ ] Workers: escalam a zero via KEDA — seção 2
@@ -2084,7 +2085,7 @@ Referência rápida dos pontos críticos documentados ao longo das seções ante
 | **Camada** | **Tecnologia** |  
 | Linguagem | Python (async em todo o projeto) |  
 | Framework API | FastAPI (ASGI) |  
-| Infraestrutura | Azure (Container Apps \+ KEDA via **Managed Identity**, Functions, Service Bus \+ DLQ, SQL DTU Basic, Redis, Blob, Key Vault) |  
+| Infraestrutura | Azure (Container Apps \+ KEDA via **Connection String (exceção)**, Functions, Service Bus \+ DLQ, SQL DTU Basic, Redis, Blob, Key Vault) |  
 | Autenticação | Microsoft Entra ID via Azure Static Web Apps |  
 | Parse de documentos | Azure Document Intelligence |  
 | Orquestração RAG \+ Memória | LangChain (ConversationalRetrievalChain \+ ConversationBufferMemory com OptimizedRedisChatMessageHistory) |  

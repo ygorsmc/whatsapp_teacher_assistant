@@ -70,7 +70,7 @@ These are easily missed and cause production bugs if violated:
 
 ### Auth / Infra
 - **Managed Identity (`DefaultAzureCredential`) everywhere — zero connection strings in code.**
-- KEDA scalers authenticate via `keda-mi-auth` (Managed Identity), not connection strings.
+- **EXCEÇÃO KEDA**: O escalonador KEDA utiliza a *Connection String* do Service Bus diretamente nos secrets do Container App. O uso de *Managed Identity* causava um delay de agregação de 3 a 5 minutos na leitura das filas via Azure Monitor. O código Python (Worker) continua usando Managed Identity.
 - Secrets via Azure Key Vault only.
 
 ### Ingestion Worker
