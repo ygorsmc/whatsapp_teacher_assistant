@@ -365,6 +365,9 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
         return Response(status_code=200)
 
     except Exception as e:
+        import traceback
+        print(f"\n[WEBHOOK EXCEPTION] {e}")
+        traceback.print_exc()
         track_event("webhook_error", {"error": str(e)})
         # Best effort error response to user
         try:

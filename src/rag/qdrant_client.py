@@ -25,6 +25,24 @@ async def init_qdrant_collection(collection_name: str = "documents"):
                 )
             )
         )
+        
+        # Create mandatory payload indexes for Qdrant Cloud
+        from qdrant_client.models import PayloadSchemaType
+        await qdrant_client.create_payload_index(
+            collection_name=collection_name,
+            field_name="teacher_id",
+            field_schema=PayloadSchemaType.KEYWORD
+        )
+        await qdrant_client.create_payload_index(
+            collection_name=collection_name,
+            field_name="course_id",
+            field_schema=PayloadSchemaType.KEYWORD
+        )
+        await qdrant_client.create_payload_index(
+            collection_name=collection_name,
+            field_name="lesson_number",
+            field_schema=PayloadSchemaType.INTEGER
+        )
 
 async def get_qdrant():
     """Provides the configured async Qdrant client."""

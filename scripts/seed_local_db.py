@@ -32,7 +32,7 @@ async def seed():
         teacher_id = "00000000-0000-0000-0000-000000000001"
         await session.execute(
             text("""
-                INSERT OR IGNORE INTO Teachers (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
+                INSERT INTO Teachers (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
                 VALUES (:id, 'Professor Teste', 'Matemática', '5511000000000', 'Seja educado e prestativo', 'Isso está fora do escopo.', 1)
             """),
             {"id": teacher_id}
@@ -42,7 +42,7 @@ async def seed():
         course_id = "00000000-0000-0000-0000-000000000002"
         await session.execute(
             text("""
-                INSERT OR IGNORE INTO Courses (id, teacher_id, name, is_active)
+                INSERT INTO Courses (id, teacher_id, name, is_active)
                 VALUES (:id, :teacher_id, 'Matemática Básica', 1)
             """),
             {"id": course_id, "teacher_id": teacher_id}
@@ -53,7 +53,7 @@ async def seed():
         phone = "5513991719595"
         await session.execute(
             text("""
-                INSERT OR IGNORE INTO Students (id, name, phone, is_active)
+                INSERT INTO Students (id, name, phone, is_active)
                 VALUES (:id, 'Ygor (Aluno)', :phone, 1)
             """),
             {"id": student_id, "phone": phone}
@@ -63,7 +63,7 @@ async def seed():
         class_id = "00000000-0000-0000-0000-000000000004"
         await session.execute(
             text("""
-                INSERT OR IGNORE INTO Classes (id, course_id, name, current_lesson_number)
+                INSERT INTO Classes (id, course_id, name, current_lesson_number)
                 VALUES (:id, :course_id, 'Turma Teste', 1)
             """),
             {"id": class_id, "course_id": course_id}
@@ -73,7 +73,7 @@ async def seed():
         enrollment_id = str(uuid.uuid4())
         await session.execute(
             text("""
-                INSERT OR IGNORE INTO StudentEnrollment (enrollment_id, student_id, class_id)
+                INSERT INTO StudentEnrollment (enrollment_id, student_id, class_id)
                 VALUES (:id, :student_id, :class_id)
             """),
             {"id": enrollment_id, "student_id": student_id, "class_id": class_id}
@@ -82,7 +82,7 @@ async def seed():
         # ── Message Template for daily review ──
         await session.execute(
             text("""
-                INSERT OR IGNORE INTO MessageTemplates (template_name, language, category, status)
+                INSERT INTO MessageTemplates (template_name, language, category, status)
                 VALUES ('daily_review', 'pt_BR', 'UTILITY', 'approved')
             """)
         )
@@ -93,7 +93,7 @@ async def seed():
             next_trigger = compute_next_trigger_utc(slot)
             await session.execute(
                 text("""
-                    INSERT OR IGNORE INTO StudentSchedule
+                    INSERT INTO StudentSchedule
                         (schedule_id, student_id, course_id, template_name,
                          preferred_hour, content_type, next_trigger_date,
                          is_active, status)
