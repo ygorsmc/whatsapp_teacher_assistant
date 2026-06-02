@@ -22,7 +22,8 @@ class ServiceBusWrapper:
                     conn_str=settings.SERVICEBUS_CONNECTION_STRING,
                     retry_total=10,
                     retry_backoff_factor=1,
-                    retry_backoff_max=30
+                    retry_backoff_max=30,
+                    keep_alive_interval=30
                 )
             else:
                 # Production Managed Identity
@@ -32,7 +33,8 @@ class ServiceBusWrapper:
                 self.credential = DefaultAzureCredential()
                 self.client = ServiceBusClient(
                     fully_qualified_namespace=settings.SERVICEBUS_FQDN,
-                    credential=self.credential
+                    credential=self.credential,
+                    keep_alive_interval=30
                 )
         return self.client
 

@@ -1,52 +1,44 @@
-# Plano de Orquestração - Cloud Deployment (24/7)
+# Plano de Atualização da Documentação Arquitetural
 
-**Objetivo:** Preparar o projeto WhatsApp Teacher Assistant para implantação em produção na nuvem (Azure), garantindo alta disponibilidade (24/7), escalabilidade via KEDA e segurança com Managed Identities.
+**Objetivo:** Refletir na documentação oficial (`Estrutura do Projeto` e `Resumo Arquitetural`) as estabilizações e mudanças reais implementadas na arquitetura do WhatsApp Teacher Assistant após os testes em produção.
 
 ## 🔴 User Review Required
 
 > [!IMPORTANT]
 > **Aprovação Necessária**
-> Por favor, revise este plano. Ao aprovar, iniciaremos a **Fase 2 (Implementação)** disparando agentes em paralelo para codificar infraestrutura, banco de dados e DevOps.
+> Por favor, revise este plano de documentação. Ao aprovar, iniciaremos a **Fase 2 (Implementação)** disparando os agentes especializados em documentação e backend para consolidar essas informações nos arquivos Markdown oficiais.
 
-## 🔒 Decisões Arquiteturais Fechadas (Aprovadas)
+## 🔒 Mudanças Arquiteturais Consolidadas (A Serem Documentadas)
 
-1. **Banco de Dados:** **Azure SQL (DTU Basic).**
-   * *Justificativa de Custo:* O Azure SQL DTU Basic custa em torno de ~$5 USD/mês, sendo a opção gerenciada mais barata do Azure. O PostgreSQL Flexible Server mais barato (Burstable B1ms) custa cerca de ~$13 USD/mês. Como as nossas relações de dados são simples (Alunos, Turmas, Progresso), o Azure SQL entrega o melhor custo-benefício. Usaremos `mssql+aioodbc` no SQLAlchemy.
-2. **Infra as Code (IaC):** **Arquivos Bicep.**
-   * *Justificativa:* O Bicep é nativo da Microsoft, perfeito para Azure Container Apps e Managed Identities, e não exige gerenciamento de "arquivos de estado" complexos como o Terraform.
-3. **Qdrant:** **Qdrant Cloud (Free Tier).**
-   * *Justificativa:* O Qdrant Cloud oferece 1GB de RAM e 0.5 vCPU grátis para sempre. Como implementamos a compressão *Scalar Quantization INT8* (que reduz a memória em 75%), esse 1GB é suficiente para suportar cerca de ~1 milhão de vetores. No painel do Qdrant Cloud (Dashboard), você conseguirá acompanhar um gráfico em tempo real de uso de RAM e Disco. Quando bater 80%, você saberá que é hora de considerar o upgrade (que custa a partir de ~$20/mês), mas isso vai demorar MUITO para acontecer no escopo atual.
+1. **Unificação dos Workers (`worker-llm` e `worker-command`)**
+   * *O que mudou:* O container `worker-command` foi desativado e integrado ao `worker-llm` para otimização de recursos computacionais e simplificação da infraestrutura no Azure Container Apps. O `worker-llm` agora executa tanto o loop de mensagens padrão (via fila `inbound_messages`) quanto o loop de comandos administrativos (via fila `command_messages`) através de concorrência com `asyncio.gather`.
+2. **Otimização Extrema do Webhook (< 50ms)**
+   * *O que mudou:* O webhook agora utiliza um Cache em memória (`self.senders`) para a conexão TCP/AMQP do Service Bus e um hard-timeout configurado em 1.0 segundo para o Redis. Isso garante que o Webhook nunca sofra o timeout implacável da Meta (que causava um efeito dominó de 5 retries com `msg_id`s diferentes burlando o lock de idempotência).
+3. **Conversão de Datas para Azure SQL Server (`DATETIME`)**
+   * *O que mudou:* Ajuste na camada de ingestão (`spreadsheet_sync.py`) abandonando o formato longo ISO-8601 (com timezone `+00:00`) e padronizando o formato `%Y-%m-%dT%H:%M:%S` para compatibilidade com colunas `DATETIME` do SQL Server. Isso evitou a quebra silenciosa da inicialização dos alunos via comando `/sinc_alunos`.
+4. **Substituição do Azure Cache for Redis por um Container App (Redis)**
+   * *O que mudou:* Em vez de utilizar o serviço gerenciado (e mais caro) "Azure Cache for Redis", implantamos a imagem oficial `redis:7-alpine` como um Container App interno no mesmo ambiente (VNet). Isso reduz custos massivamente enquanto mantém o ecossistema Serverless (Container Apps).
 
 ---
 
 ## 🛠️ Proposed Changes (Fase 2)
 
-### 1. Database & State Management (`database-architect`)
-*   **[MODIFY]** `src/db/config.py` e repositórios para suportar dialect do SQL Server (`mssql+aioodbc`) ou PostgreSQL.
-*   **[NEW]** Migrações Alembic configuradas para o banco de produção.
-*   **[MODIFY]** Verificação da persistência do Redis para garantir que a imagem no Azure suporte os scripts Lua atômicos de debounce.
+### 1. Atualização do Resumo Arquitetural (`documentation-writer`)
+*   **[MODIFY]** `Resumo Arquitetural - Assistente WhatsApp.md`
+    *   Remover a menção ao `[Command Handler]` como um worker isolado no diagrama visual, indicando que ele é um loop interno do `[Worker LLM]`.
+    *   Adicionar ênfase na configuração de Timeout do Redis (1.0s) como decisão crítica de engenharia para sobrevivência do Webhook perante a agressividade da Meta.
+    *   Especificar a compatibilidade nativa de datas do banco Azure SQL Server.
+    *   Atualizar a tabela de Stack Tecnológica: alterar "Azure Cache for Redis" para "Redis (Container App Interno)".
 
-### 2. Infra & Docker (`devops-engineer`)
-*   **[NEW]** `Dockerfile.webhook` - Otimizado para FastAPI (Uvicorn) rodando na porta 80.
-*   **[NEW]** `Dockerfile.worker` - Imagem headless para rodar o Service Bus consumer.
-*   **[NEW]** Manifestos KEDA (`keda-scaler.yaml`) para o Azure Container Apps escalar baseado no tamanho da fila `inbound_messages`.
-*   **[NEW]** Configuração do GitHub Actions (`.github/workflows/deploy.yml`) para CI/CD automatizado.
-
-### 3. Security & Cloud Native Auth (`security-auditor`)
-*   **[MODIFY]** Substituir leitura estática de chaves no `.env` pelo pacote `azure-identity` (`DefaultAzureCredential`).
-*   **[NEW]** Integração com o Azure Key Vault para buscar tokens de API (OpenAI, Gemini, Meta) em runtime, abolindo chaves chumbadas no ambiente.
-*   **[MODIFY]** `src/shared/config.py` para suportar fallback (Key Vault em prod, `.env` em local).
-
-### 4. Telemetry & Observability (`backend-specialist`)
-*   **[NEW]** Integração do `structlog` com o Azure Application Insights (Azure Monitor) via `azure-monitor-opentelemetry`.
-*   **[MODIFY]** `src/shared/telemetry.py` para injetar automaticamente o contexto de tracing.
+### 2. Atualização da Estrutura do Projeto (`backend-specialist`)
+*   **[MODIFY]** `Estrutura do Projeto - Assistente WhatsApp.md`
+    *   Atualizar o mapa hierárquico removendo o serviço de comandos em um container separado.
+    *   Detalhar a mecânica de cache do `ServiceBusSender` acoplado no Singleton `ServiceBusWrapper` como parte integrante da estrutura de rede interna (`infra`).
 
 ---
 
 ## ✅ Verification Plan
 
-### Testes Automatizados e Manuais
-- Execução do checklist de segurança: `python .agent/scripts/checklist.py .`
-- Subir os containers localmente usando `docker-compose.yml` simulando o ambiente Azure.
-- Teste de Carga E2E (via Locust) enviando 100 mensagens simultâneas para o Webhook para garantir o Auto-Scale do KEDA.
-- Validar logs no console para confirmar ausência de chaves de API expostas (Security Audit).
+### Validação
+- Leitura final dos arquivos Markdown renderizados para garantir formatação limpa e diagramas legíveis.
+- Verificação cruzada com o estado real do código em `src/workers` e `src/webhook`.

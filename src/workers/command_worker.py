@@ -202,7 +202,7 @@ async def command_loop():
         return
 
     # Standard queue receiver (not session-enabled for commands)
-    async with ServiceBusClient.from_connection_string(settings.SERVICEBUS_CONNECTION_STRING) as client:
+    async with ServiceBusClient.from_connection_string(settings.SERVICEBUS_CONNECTION_STRING, keep_alive_interval=30) as client:
         receiver = client.get_queue_receiver(queue_name="command_messages", prefetch_count=10)
         async with receiver:
             logger.info("command_worker_listening", queue="command_messages")

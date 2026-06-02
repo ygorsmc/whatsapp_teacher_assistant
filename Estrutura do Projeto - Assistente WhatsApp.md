@@ -15,10 +15,10 @@ WhatsApp API
 └── 7\. Retorna HTTP 200 em \< 200ms — NUNCA executa lógica de negócio  
      ↓  
 \[Service Bus\]  
-├── inbound\_messages     → \[Worker LLM\]         ← pipeline RAG \+ debouncing \+ memória persistida em Redis (com LTRIM)  
-├── command\_messages     → \[Command Handler\]    ← processa comandos /aula etc. (nomes com espaços)  
-├── index\_documents      → \[Worker Ingestão\]    ← parse \+ embedding \+ Qdrant (maxReplicas=2, Tenacity)  
-└── delete\_vectors (\*)   → \[Worker Exclusão\]    ← hard delete agendado para madrugada (KEDA garante acionamento)  
+├── inbound_messages     ┐  
+└── command_messages     ┴→ \[Worker LLM\]         ← pipeline RAG \+ comandos \+ memória Redis (com LTRIM)  
+├── index_documents      → \[Worker Ingestão\]    ← parse \+ embedding \+ Qdrant (maxReplicas=2, Tenacity)  
+└── delete_vectors (*)   → \[Worker Exclusão\]    ← hard delete agendado para madrugada (KEDA garante acionamento)  
      (\*) mensagem enfileirada com ScheduledEnqueueTimeUtc \= 03:00 BRT
 
 \[DLQ — Dead Letter Queue\]  
@@ -32,12 +32,12 @@ WhatsApp API
 ## **2\. Serviços Azure**
 
 | **Função** | **Serviço** | **Observação** |  
-| Webhook Receiver | Azure Container Apps | **minReplicas=1 obrigatório** — cold start (5–30s) quebraria o SLA de 200ms do Meta. Workers escalam via KEDA e podem ir a zero. |  
-| Workers (LLM, Ingestão, Exclusão, Command) | Azure Container Apps | Escalam via KEDA a partir de zero. Worker de Exclusão noturna obrigatoriamente com KEDA azure-servicebus-queue para acordar. |  
+| Webhook Receiver | Azure Container Apps | **minReplicas=1 obrigatório** — Cache local do `ServiceBusSender` e Redis timeout de 1.0s garantem latência \< 50ms para blindar contra flood da Meta. |  
+| Workers (LLM, Ingestão, Exclusão) | Azure Container Apps | Escalam via KEDA a partir de zero. (Worker LLM consome simultaneamente `inbound_messages` e `command_messages`). |  
 | Triggers agendados | Azure Functions (Timer Trigger) | Scheduler de aulas, DLQ Janitor, health check do Qdrant e verificação de acesso à Service Account. |  
-| Filas \+ DLQ | Azure Service Bus (Standard) | Tier Standard obrigatório para sessions FIFO. Filas: inbound\_messages, command\_messages, index\_documents, delete\_vectors (agendada). Autenticação via Managed Identity — nunca usar connection strings no código. |  
-| Banco de dados relacional | Azure SQL Database (DTU Basic) | \~US$ 5/mês, sem cold start, sem auto-pause. |  
-| Cache de sessão \+ whitelist \+ locks \+ histórico | Azure Cache for Redis | Idempotência, debouncing, sessão ativa, whitelist (Cache-Aside) e histórico de conversa via RedisChatMessageHistory. |  
+| Filas \+ DLQ | Azure Service Bus (Standard) | Tier Standard obrigatório para sessions FIFO. Filas: inbound\_messages, command\_messages, index\_documents, delete\_vectors. Autenticação via Managed Identity. |  
+| Banco de dados relacional | Azure SQL Database (DTU Basic) | \~US$ 5/mês, sem cold start. (Inserções `DATETIME` via formatação adaptada `%Y-%m-%dT%H:%M:%S`). |  
+| Cache de sessão \+ whitelist \+ locks | Container App Interno (`redis:7-alpine`) | Imagem oficial rodando internamente no ambiente Serverless. Usado para idempotência, debouncing, whitelist e sessão. Substitui o managed "Azure Cache for Redis" para economia. |  
 | Banco vetorial | Qdrant Cloud (free tier) | Mesma região que os Container Apps — verificar antes de provisionar. |  
 | Parse de documentos | Azure Document Intelligence | OCR avançado para PDFs pedagógicos. |  
 | Orquestração RAG \+ Memória | LangChain \+ FastAPI | ConversationBufferMemory com backend Redis. |  
@@ -71,8 +71,8 @@ O webhook deve usar URL versionada para permitir evolução futura sem breaking 
 
 ```
 src/
-  webhook/           ← FastAPI app, handlers, middleware
-  workers/           ← LLM, Ingestão, Exclusão, Command, Scheduler
+  webhook/           ← FastAPI app, handlers, middleware, cache do servicebus
+  workers/           ← LLM (inclui Command loop), Ingestão, Exclusão, Scheduler
   rag/               ← pipeline, prompt_builder, retriever, review_generator, quiz_generator
   llm/               ← base, factory, providers (Gemini, DeepSeek)
   db/                ← models, repositories, migrations

@@ -30,6 +30,14 @@ help:
 	@echo "  make test-integration       - Run integration tests"
 	@echo "  make test-all               - Run all tests with coverage"
 	@echo ""
+	@echo "  ☁️ CLOUD DEPLOYMENT"
+	@echo "  make deploy-webhook         - Build and deploy Webhook to Azure"
+	@echo "  make deploy-worker          - Build and deploy Worker LLM to Azure"
+	@echo "  make deploy-scheduler       - Build and deploy Worker Scheduler to Azure"
+	@echo "  make deploy-all             - Deploy all components to Azure"
+	@echo "  make deploy-infra           - Provision all Azure resources via Bicep"
+	@echo "  make destroy-cloud          - Delete ALL Azure resources (CAREFUL!)"
+	@echo ""
 
 # ==========================================
 # 1. LOCAL DEVELOPMENT
@@ -78,3 +86,42 @@ test-integration:
 test-all:
 	@echo "[INFO] Running full test suite with coverage..."
 	pytest tests/ -v --cov=src --cov-report=term-missing
+
+# ==========================================
+# 3. CLOUD DEPLOYMENT (Azure)
+# ==========================================
+ACR_NAME ?= $(shell az acr list -g rg-whatsapp-assistant-prod --query "[0].name" -o tsv 2>/dev/null)
+
+deploy-webhook:
+	@echo "[INFO] Building Webhook image in Azure Container Registry: $(ACR_NAME)..."
+	az acr build --registry $(ACR_NAME) --image whatsapp-webhook:latest --file Dockerfile.webhook .
+	@echo "[INFO] Restarting Webhook Container App..."
+	az containerapp update -n webhook-app -g rg-whatsapp-assistant-prod --set-env-vars FORCE_RESTART=$(shell date +%s) -o none
+	@echo "[SUCCESS] Webhook deployed!"
+
+deploy-worker:
+	@echo "[INFO] Building Worker image in Azure Container Registry: $(ACR_NAME)..."
+	az acr build --registry $(ACR_NAME) --image whatsapp-worker:latest --file Dockerfile.worker .
+	@echo "[INFO] Restarting Worker Container App..."
+	az containerapp update -n worker-llm -g rg-whatsapp-assistant-prod --set-env-vars FORCE_RESTART=$(shell date +%s) -o none
+	@echo "[SUCCESS] Worker deployed!"
+
+deploy-scheduler:
+	@echo "[INFO] Building Worker image in Azure Container Registry: $(ACR_NAME)..."
+	az acr build --registry $(ACR_NAME) --image whatsapp-worker:latest --file Dockerfile.worker .
+	@echo "[INFO] Restarting Scheduler Container App..."
+	az containerapp update -n worker-scheduler -g rg-whatsapp-assistant-prod --set-env-vars FORCE_RESTART=$(shell date +%s) -o none
+	@echo "[SUCCESS] Scheduler deployed!"
+
+deploy-all: deploy-webhook deploy-worker deploy-scheduler
+	@echo "[SUCCESS] All cloud components deployed successfully!"
+
+deploy-infra:
+	@echo "[INFO] Provisioning infrastructure using Bicep..."
+	bash infra/deploy_infra.sh
+
+destroy-cloud:
+	@echo "[WARNING] Initiating total destruction of cloud resources..."
+	@echo "This will delete the entire Resource Group rg-whatsapp-assistant-prod."
+	@echo "If you are sure, run this command manually to confirm:"
+	@echo "az group delete --name rg-whatsapp-assistant-prod --yes --no-wait"

@@ -48,6 +48,17 @@ az containerapp create \
   --min-replicas 0 \
   --max-replicas 10
 
+echo "🚢 6. Fazendo Deploy do Worker (Scheduler)..."
+az containerapp create \
+  --name worker-scheduler \
+  --resource-group $RESOURCE_GROUP \
+  --environment env-whatsapp-bot \
+  --image ${ACR_NAME}.azurecr.io/whatsapp-worker:latest \
+  --registry-server ${ACR_NAME}.azurecr.io \
+  --env-vars WORKER_TYPE=scheduler \
+  --min-replicas 1 \
+  --max-replicas 1
+
 echo "✅ Deploy Completo! Seu bot está rodando na nuvem."
 echo "Para pegar a URL pública do seu Webhook (para colar na Meta), rode:"
 echo "az containerapp show -n webhook-app -g $RESOURCE_GROUP --query properties.configuration.ingress.fqdn -o tsv"

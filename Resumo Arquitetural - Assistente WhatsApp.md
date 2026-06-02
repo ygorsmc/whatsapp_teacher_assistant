@@ -32,8 +32,8 @@ WhatsApp (Meta Cloud API)
         │
         ▼
 [Service Bus]
-├── inbound_messages  → [Worker LLM]       ← RAG + debounce + memória Redis
-├── command_messages  → [Command Handler]  ← processa /aula e outros comandos
+├── inbound_messages  ┐
+└── command_messages  ┴→ [Worker LLM]       ← RAG + comandos + memória Redis
 ├── index_documents   → [Worker Ingestão]  ← Gotenberg + 2-Up FinOps + Azure DI + Qdrant
 └── delete_vectors    → [Worker Exclusão]  ← hard delete agendado para 03:00 BRT
         │
@@ -47,15 +47,18 @@ WhatsApp (Meta Cloud API)
 
 ## Decisões de Engenharia
 
-### Webhook retorna 200 OK imediatamente
+### Webhook retorna 200 OK imediatamente (< 50ms)
 
-A Meta requer resposta em menos de 200ms. Qualquer lógica de negócio executada no webhook — incluindo consultas ao banco ou chamadas ao LLM — quebraria esse prazo e causaria reenvios automáticos da mensagem, resultando em respostas duplicadas.
+A Meta requer resposta em menos de 200ms. Qualquer lógica de negócio executada no webhook — incluindo consultas ao banco ou chamadas ao LLM — quebraria esse prazo e causaria reenvios automáticos da mensagem (flood de retries), resultando em comandos executados 5 vezes.
 
-**Regra:** o webhook apenas valida, roteia e enfileira. Todo processamento acontece no Worker.
+**Regras de Sobrevivência do Webhook:** 
+1. **Cache de Conexão:** A conexão TCP/AMQP do ServiceBus é mantida em cache de memória via Singleton (`ServiceBusWrapper`).
+2. **Timeouts Estritos:** O cliente Redis (usado para idempotência e rate limit) possui um `socket_timeout=1.0`. Se a rede interna oscilar, o webhook abandona a tentativa, usa um fallback em memória e retorna 200 OK, garantindo que o webhook **nunca passe de 200ms**.
+3. **Idempotência (Lock):** O `msg_id` da Meta é persistido por 5 minutos via NX Lock.
 
-### Debouncing no Worker, não no webhook
+### Debouncing e Concorrência no Worker
 
-O design anterior usava `asyncio.sleep()` no webhook para aguardar mensagens rápidas consecutivas do mesmo aluno. Isso bloqueava o retorno HTTP 200 e quebrava o SLA. O debouncing foi movido para o Worker LLM, que opera sem restrição de tempo de resposta.
+O design anterior usava `asyncio.sleep()` no webhook para aguardar mensagens rápidas. Isso foi movido para o Worker LLM. Além disso, o worker de comandos (`command_messages`) foi integrado ao `Worker LLM` (usando `asyncio.gather`), permitindo consumir as duas filas simultaneamente e reduzindo a pegada de containers no Azure.
 
 ### Janela de serviço de 24h — estratégia de custo
 
@@ -176,8 +179,8 @@ Toda query SQL e toda busca vetorial inclui filtro por `teacher_id` e `course_id
 | Parse de documentos | Azure Document Intelligence |
 | Conversão Office→PDF | Gotenberg (LibreOffice headless em Docker) |
 | Fila de mensagens | Azure Service Bus (Standard — obrigatório para sessões FIFO) |
-| Cache + memória | Azure Cache for Redis |
-| Banco relacional | Azure SQL Database |
+| Cache + memória | Container App Interno (`redis:7-alpine` Serverless) |
+| Banco relacional | Azure SQL Database (tipo `DATETIME` via string ISO adaptada `%Y-%m-%dT%H:%M:%S`) |
 | Armazenamento de arquivos | Google Drive (gerenciado pelo professor, estrutura hierárquica) |
 | Triggers agendados | Azure Functions (Timer Trigger) |
 | Segredos | Azure Key Vault |
