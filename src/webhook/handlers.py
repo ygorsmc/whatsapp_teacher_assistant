@@ -3,7 +3,7 @@ from typing import Optional
 from uuid import uuid4
 import json
 import asyncio
-from sqlalchemy import text
+from sqlalchemy import text as sql_text
 from src.shared.config import settings
 
 from src.webhook.security import verify_meta_signature, check_rate_limit
@@ -40,7 +40,7 @@ async def get_user_role(phone: str) -> Optional[str]:
     async with AsyncSessionLocal() as session:
         # Check student
         result = await session.execute(
-            text("SELECT 1 FROM Students WHERE phone = :phone AND is_active = 1"),
+            sql_text("SELECT 1 FROM Students WHERE phone = :phone AND is_active = 1"),
             {"phone": phone}
         )
         if result.scalar_one_or_none():
@@ -49,7 +49,7 @@ async def get_user_role(phone: str) -> Optional[str]:
             
         # Check teacher
         result = await session.execute(
-            text("SELECT 1 FROM Teachers WHERE phone = :phone AND is_active = 1"),
+            sql_text("SELECT 1 FROM Teachers WHERE phone = :phone AND is_active = 1"),
             {"phone": phone}
         )
         if result.scalar_one_or_none():
@@ -160,14 +160,14 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
 
         # 3.1. Log interaction in DB (Serves as 24h window for inbound messages)
         async with AsyncSessionLocal() as session:
-            res = await session.execute(text("SELECT id FROM Students WHERE phone = :p"), {"p": phone})
+            res = await session.execute(sql_text("SELECT id FROM Students WHERE phone = :p"), {"p": phone})
             student_row = res.fetchone()
             if student_row:
                 student_id = student_row[0]
                 interaction_type = "quiz_answered" if message_type == "interactive" and interactive_payload and interactive_payload.get("id", "").startswith("quiz_") else "message_received"
                 
                 await session.execute(
-                    text("""
+                    sql_text("""
                         INSERT INTO StudentInteractions (id, student_id, interaction_type, message_content) 
                         VALUES (:id, :sid, :itype, :msg)
                     """),
