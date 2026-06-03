@@ -158,10 +158,27 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
             await send_whatsapp_message(phone, UNSUPPORTED_MESSAGE_TYPE)
             return Response(status_code=200)
 
-        # 3.1. Open service window (24h)
-        redis = await get_redis()
-        await redis.set(f"service_window:{phone}", "1", ex=86400)
-
+        # 3.1. Log interaction in DB (Serves as 24h window for inbound messages)
+        async with AsyncSessionLocal() as session:
+            res = await session.execute(text("SELECT id FROM Students WHERE phone = :p"), {"p": phone})
+            student_row = res.fetchone()
+            if student_row:
+                student_id = student_row[0]
+                interaction_type = "quiz_answered" if message_type == "interactive" and interactive_payload and interactive_payload.get("id", "").startswith("quiz_") else "message_received"
+                
+                await session.execute(
+                    text("""
+                        INSERT INTO StudentInteractions (id, student_id, interaction_type, message_content) 
+                        VALUES (:id, :sid, :itype, :msg)
+                    """),
+                    {
+                        "id": str(uuid4()),
+                        "sid": student_id,
+                        "itype": interaction_type,
+                        "msg": text
+                    }
+                )
+                await session.commit()
         # 4. Command routing (only for text messages)
         print(f"[DIAG] Step 4: command routing. message_type={message_type}, text={text[:50]}")
         if message_type == "text" and text.startswith("/"):

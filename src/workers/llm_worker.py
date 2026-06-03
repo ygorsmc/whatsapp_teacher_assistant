@@ -284,6 +284,27 @@ async def handle_review_request(phone: str, student_context: dict) -> None:
         "quiz_id": quiz_id,
     })
 
+    from src.db.database import AsyncSessionLocal
+    from sqlalchemy import text
+    from uuid import uuid4
+    
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text("""
+                INSERT INTO StudentInteractions (id, student_id, course_id, interaction_type, message_content) 
+                VALUES (:id, :sid, :cid, :itype, :msg)
+            """),
+            {
+                "id": str(uuid4()),
+                "sid": student.id,
+                "cid": course.id,
+                "itype": "review_sent",
+                "msg": None
+            }
+        )
+        await session.commit()
+
+
 async def process_inbound(receiver, message):
     try:
         body_bytes = b"".join(message.body)

@@ -124,9 +124,31 @@ async def process_pending_schedules():
             schedule_id = row.schedule_id
 
             try:
-                # Check if service window is already open (avoid redundant template)
-                window_key = f"service_window:{phone}"
-                window_active = await redis.exists(window_key)
+                # Check if service window is already open (SQL Telemetry 24h fallback)
+                twenty_four_hours_ago = now_utc - timedelta(hours=24)
+                
+                res = await session.execute(
+                    text("""
+                        SELECT MAX(timestamp) 
+                        FROM StudentInteractions 
+                        WHERE student_id = :sid 
+                          AND interaction_type IN ('message_received', 'quiz_answered')
+                    """),
+                    {"sid": row.student_id}
+                )
+                last_interaction = res.scalar()
+                
+                window_active = False
+                if last_interaction:
+                    # Parse safely in case DB driver returns string
+                    if isinstance(last_interaction, str):
+                        last_interaction = datetime.fromisoformat(last_interaction)
+                    if last_interaction.tzinfo is None:
+                        last_interaction = last_interaction.replace(tzinfo=timezone.utc)
+                        
+                    if last_interaction > twenty_four_hours_ago:
+                        window_active = True
+
 
                 # Torna o título único (encurta o nome do curso se necessário)
                 course_short = row.course_name[:10]
