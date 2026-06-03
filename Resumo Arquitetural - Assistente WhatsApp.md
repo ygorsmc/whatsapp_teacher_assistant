@@ -161,9 +161,20 @@ Isso permite alterar o tom de voz do assistente, ajustar prompts ou adicionar no
 
 O LLM gera a pergunta, as alternativas e a explicação em uma única chamada. O resultado é salvo no banco. Quando o aluno responde, a validação é uma comparação direta (`if/else`) — sem nova chamada ao LLM. Latência: < 50ms.
 
+### Pipeline Two-Step de Geração de Quizzes (Variância)
+
+Para evitar quizzes repetitivos e garantir a retenção do aluno (FinOps/LLMOps), a geração da revisão opera em dois passos:
+1. **Extração de Tópicos (Agnóstica):** O sistema varre os chunks da aula usando uma chave genérica no Redis `{course_id}:{lesson_number}` (sem amarrar ao `teacher_id`, permitindo cache-hit cruzado entre turmas). A validade do cache é de 30 dias.
+2. **Sorteio de Tópico e Lente Pedagógica:** Após extrair tópicos (sem limite rígido de quantidade), um deles é sorteado junto com uma "lente" (ex: caso prático, detalhe técnico, exceção à regra ou conceito central). O prompt final é injetado com essas diretrizes para forçar a IA a criar um quiz inédito a cada interação, maximizando o engajamento diário.
+
 ### Isolamento de dados por professor
 
 Toda query SQL e toda busca vetorial inclui filtro por `teacher_id` e `course_id`. Ausência desses filtros é tratada como bug de segurança — não como comportamento aceitável.
+
+### Estratégia de Atualização no Azure Container Apps (Deploy)
+
+Nas instâncias Azure, a simples substituição da imagem por uma tag genérica (como `latest`) não forçará uma recriação da revisão pela plataforma. Para evitar falsos-positivos em publicações de código:
+- Sempre injetar um "salt" de deploy nas env vars. No CI/CD, utiliza-se `--set-env-vars FORCE_UPDATE=$(date +%s)` no ACR update. Isso destrói o container anterior e reinicia com o novo digest físico da imagem `latest`.
 
 ---
 

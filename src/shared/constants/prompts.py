@@ -31,11 +31,10 @@ REVIEW_PROMPT_TEMPLATE = """Você é um assistente pedagógico do professor {tea
 O aluno {student_name} está na aula "{lesson_label}" do curso "{course_name}".
 
 Com base no conteúdo abaixo, sua missão é realizar um MICRO-LEARNING FOCADO. Em vez de tentar resumir tudo de forma rasa, você deve:
-1. Escolher APENAS UM conceito ou tópico extremamente importante e central presente no material.
-2. Criar um RESUMO PEDAGÓGICO profundo, detalhado e didático EXCLUSIVAMENTE sobre esse único conceito (máximo 800 caracteres, formatado para WhatsApp com emojis).
+1. Focar EXCLUSIVAMENTE no seguinte tópico: **{topic}**
+2. {perspective} (máximo 800 caracteres, formatado para WhatsApp com emojis).
 3. Gerar uma lista de 3 PONTOS-CHAVE de fixação relacionados apenas a esse conceito.
 4. Criar um QUIZ de múltipla escolha com EXATAMENTE 3 alternativas (A, B, C) focado em testar a compreensão desse conceito específico. A resposta correta deve exigir que o aluno tenha lido o resumo.
-IMPORTANTE: A posição da resposta correta (A, B ou C) DEVE ser escolhida de forma totalmente aleatória. Certifique-se de variar a posição correta entre A, B e C de forma equilibrada em diferentes gerações.
 
 CONTEÚDO DA AULA:
 {lesson_content}
@@ -44,13 +43,22 @@ CONTEÚDO DA AULA:
 
 Responda em português brasileiro. O quiz deve ser desafiador mas justo — o aluno deve conseguir responder corretamente SE leu o resumo com atenção."""
 
-QUIZ_GENERATION_PROMPT = """Com base no conteúdo da aula abaixo, gere uma questão de múltipla escolha
-para testar o entendimento do aluno.
+TOPIC_EXTRACTION_PROMPT = """Analise o texto abaixo e extraia TODOS os conceitos/tópicos importantes abordados nele.
+Responda APENAS com a lista dos tópicos, separados por vírgula. Não escreva nenhuma palavra a mais.
+
+Texto da aula:
+{context}"""
+
+QUIZ_GENERATION_PROMPT = """Com base no conteúdo da aula abaixo, gere uma questão de múltipla escolha para testar o entendimento do aluno.
+
+IMPORTANTE: 
+1. A questão DEVE focar EXCLUSIVAMENTE no seguinte tópico: **{topic}**
+2. A questão DEVE adotar a seguinte abordagem pedagógica: **{perspective}**
+3. A questão DEVE ter EXATAMENTE 3 alternativas (A, B, C). Não crie 4 ou 5 opções.
 
 Conteúdo da aula:
 {context}
 
 {format_instructions}
 
-Gere a questão em português, com alternativas claras e uma explicação pedagógica
-detalhada para a resposta correta."""
+Gere a questão em português, com alternativas claras e uma explicação pedagógica detalhada para a resposta correta."""

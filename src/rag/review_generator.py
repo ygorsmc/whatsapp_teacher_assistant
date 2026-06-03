@@ -24,7 +24,7 @@ class ReviewQuiz(BaseModel):
     )
     correct_answer: str = Field(description="ID da alternativa correta (A, B ou C)")
     explanation: str = Field(
-        description="Explicação pedagógica de por que a resposta está correta"
+        description="Explicação pedagógica de por que a resposta está correta. NUNCA cite a letra da alternativa (A, B, C) neste texto."
     )
 
 
@@ -42,8 +42,16 @@ class ReviewOutput(BaseModel):
 
 parser = PydanticOutputParser(pydantic_object=ReviewOutput)
 
-from src.shared.constants.prompts import REVIEW_PROMPT_TEMPLATE
+from src.shared.constants.prompts import REVIEW_PROMPT_TEMPLATE, TOPIC_EXTRACTION_PROMPT
+import random
 
+# Lentes Pedagógicas customizadas para o Resumo Agendado
+REVIEW_PERSPECTIVES = [
+    "Faça um resumo informativo que prepare o aluno para uma sessão de perguntas focado em um detalhe técnico minucioso",
+    "Faça um resumo informativo que prepare o aluno para uma sessão de perguntas sobre uma situação hipotética do mundo real",
+    "Faça um resumo informativo que prepare o aluno para uma sessão de perguntas sobre uma exceção à regra ou limitação",
+    "Faça um resumo informativo que prepare o aluno para uma sessão de perguntas explorando a definição do conceito central"
+]
 
 async def generate_review(
     teacher_id: str,
@@ -63,7 +71,6 @@ async def generate_review(
     Returns None if no content is found for the lesson in Qdrant.
     """
     # 1. Retrieve lesson content from Qdrant
-    # Use a broad query to get representative chunks from the entire lesson
     lesson_content = await retrieve_context(
         teacher_id=teacher_id,
         course_id=course_id,
@@ -82,24 +89,59 @@ async def generate_review(
         )
         return None
 
-    # 2. Build the prompt using str.format()
+    llm = get_provider(settings.DEFAULT_LLM_PROVIDER)
+    
+    from src.cache.topic_cache import get_cached_topics, set_cached_topics
+
+    # 2. Etapa 1: Extração de tópicos com Cache (Two-Step Variance)
+    topics = await get_cached_topics(course_id, current_lesson_number)
+    
+    if not topics:
+        topic_prompt = TOPIC_EXTRACTION_PROMPT.format(context=lesson_content)
+        topics_response = await llm.agenerate(prompt=topic_prompt)
+        
+        topics = [t.strip() for t in topics_response.split(",") if t.strip()]
+        if not topics:
+            topics = ["Conceito Geral da Aula"]
+            
+        await set_cached_topics(course_id, current_lesson_number, topics)
+        
+    chosen_topic = random.choice(topics)
+    chosen_perspective = random.choice(REVIEW_PERSPECTIVES)
+
+    # 3. Etapa 2: Build the focused prompt
     prompt = REVIEW_PROMPT_TEMPLATE.format(
         teacher_name=teacher_name,
         teacher_subject=teacher_subject,
         student_name=student_name,
         course_name=course_name,
         lesson_label=lesson_label,
+        topic=chosen_topic,
+        perspective=chosen_perspective,
         lesson_content=lesson_content,
         format_instructions=parser.get_format_instructions(),
     )
 
-    # 3. Single LLM call — generates summary + key_points + quiz together
-    llm = get_provider(settings.DEFAULT_LLM_PROVIDER)
+    # Single LLM call — generates summary + key_points + quiz together
     response = await llm.agenerate(prompt=prompt)
 
     # 4. Parse structured output
     try:
         review = parser.parse(response)
+        
+        # Algorithmic randomization to prevent LLM bias (always picking B)
+        if review.quiz and review.quiz.alternatives:
+            correct_id = review.quiz.correct_answer
+            correct_text = next((a.text for a in review.quiz.alternatives if a.id == correct_id), None)
+            
+            if correct_text:
+                random.shuffle(review.quiz.alternatives)
+                new_ids = ["A", "B", "C"]
+                for i, alt in enumerate(review.quiz.alternatives):
+                    alt.id = new_ids[i]
+                    if alt.text == correct_text:
+                        review.quiz.correct_answer = alt.id
+
         logger.info(
             "Review generated successfully",
             teacher_id=teacher_id,

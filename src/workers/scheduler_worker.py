@@ -128,26 +128,49 @@ async def process_pending_schedules():
                 window_key = f"service_window:{phone}"
                 window_active = await redis.exists(window_key)
 
-                if window_active:
-                    logger.info("scheduler_window_active", phone=phone, schedule_id=schedule_id)
-                    # Window is open, but we still send the interactive message to deliver the scheduled review.
-
                 # Torna o título único (encurta o nome do curso se necessário)
                 course_short = row.course_name[:10]
                 accept_title = f"{REVIEW_ACCEPT_TITLE} {course_short}"
                 later_title = f"{REVIEW_LATER_TITLE} {course_short}"
 
-                # Send the review invitation via interactive buttons
-                # This opens the 24h service window when the student responds
-                await send_reply_buttons(
-                    phone=phone,
-                    body_text=REVIEW_INVITE_BODY.format(course_name=row.course_name, student_name=row.student_name),
-                    buttons=[
-                        {"id": f"review_accept_{row.course_id}", "title": accept_title[:20]},
-                        {"id": f"review_later_{row.course_id}", "title": later_title[:20]},
-                    ],
-                    footer=REVIEW_INVITE_FOOTER,
-                )
+                if window_active:
+                    logger.info("scheduler_window_active_direct_send", phone=phone, schedule_id=schedule_id)
+                    # Window is already open! Skip the Meta Template and simulate the user clicking "Sim, vamos lá!"
+                    # This triggers the fast-path directly and sends the review + quiz for free.
+                    from src.shared.service_bus import service_bus
+                    import uuid
+                    
+                    interactive_payload = {
+                        "type": "button_reply",
+                        "id": f"review_accept_{row.course_id}",
+                        "title": accept_title[:20]
+                    }
+                    
+                    await service_bus.enqueue(
+                        queue="inbound_messages",
+                        payload={
+                            "phone": phone,
+                            "text": interactive_payload["title"],
+                            "message_type": "interactive",
+                            "interactive_payload": interactive_payload,
+                            "correlation_id": str(uuid.uuid4()),
+                            "message_id": f"auto_{schedule_id}_{int(now_utc.timestamp())}"
+                        },
+                        session_id=phone
+                    )
+                else:
+                    logger.info("scheduler_window_closed_sending_invite", phone=phone, schedule_id=schedule_id)
+                    # Window is closed. Send the review invitation via interactive buttons (Template)
+                    # This opens the 24h service window when the student responds
+                    await send_reply_buttons(
+                        phone=phone,
+                        body_text=REVIEW_INVITE_BODY.format(course_name=row.course_name, student_name=row.student_name),
+                        buttons=[
+                            {"id": f"review_accept_{row.course_id}", "title": accept_title[:20]},
+                            {"id": f"review_later_{row.course_id}", "title": later_title[:20]},
+                        ],
+                        footer=REVIEW_INVITE_FOOTER,
+                    )
 
                 # Mark as sent and compute next trigger
                 next_trigger = compute_next_trigger(row.preferred_hour)
@@ -167,7 +190,7 @@ async def process_pending_schedules():
                 )
                 await session.commit()
 
-                track_event("scheduler_template_sent", {
+                track_event("scheduler_template_sent" if not window_active else "scheduler_direct_sent", {
                     "phone": phone,
                     "course_id": row.course_id,
                     "preferred_hour": row.preferred_hour,
@@ -179,6 +202,7 @@ async def process_pending_schedules():
                     phone=phone,
                     course_id=row.course_id,
                     next_trigger=next_trigger.isoformat(),
+                    mode="direct" if window_active else "invite"
                 )
 
             except Exception as e:

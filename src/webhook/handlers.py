@@ -195,6 +195,16 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
             session_id=phone
         )
 
+        # 7. WAKE UP HACK FOR KEDA
+        # Session Queues (inbound_messages) take 3 minutes to trigger KEDA scale up due to Azure Monitor.
+        # command_messages is a normal queue and triggers in 15 seconds via Connection String.
+        # By dropping an empty wakeup ping, we instantly turn on the worker!
+        await service_bus.enqueue("command_messages", {
+            "phone": phone,
+            "text": "/wakeup",
+            "message_id": f"wakeup_{msg_id}"
+        })
+
         return Response(status_code=200)
 
     except Exception as e:

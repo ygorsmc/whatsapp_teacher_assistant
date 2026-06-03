@@ -145,3 +145,17 @@ class StudentSchedule(Base):
         Index('idx_schedule_trigger', 'next_trigger_date', 'status'),
     )
 
+class StudentInteractions(Base):
+    __tablename__ = "StudentInteractions"
+    
+    id = Column(String(255), primary_key=True)
+    student_id = Column(String(255), ForeignKey("Students.id"), nullable=False)
+    course_id = Column(String(255), ForeignKey("Courses.id"), nullable=True)
+    interaction_type = Column(String(255), nullable=False) # 'message_received', 'quiz_answered', 'review_sent'
+    is_correct = Column(Boolean, nullable=True)
+    message_content = Column(Text, nullable=True)
+    timestamp = Column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        Index('idx_interaction_student_type_time', 'student_id', 'interaction_type', 'timestamp'),
+    )

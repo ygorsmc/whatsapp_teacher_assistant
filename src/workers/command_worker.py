@@ -172,6 +172,112 @@ async def run_update_lesson_command(phone: str, args: str):
     except Exception as e:
         await send_whatsapp_message(phone, f"❌ Erro ao atualizar aula: {str(e)[:100]}")
 
+async def run_broadcast_quiz_command(phone: str, class_name: str):
+    try:
+        # Removendo '_' caso o professor digite /quiz_1
+        if class_name.startswith("_"):
+            class_name = class_name[1:]
+            
+        if not class_name:
+            await send_whatsapp_message(phone, "❌ Informe a turma. Exemplo: `/quiz 1` ou `/quiz_1`")
+            return
+            
+        async with AsyncSessionLocal() as session:
+            # 1. Fetch Teacher
+            result = await session.execute(text("SELECT id FROM Teachers WHERE phone = :phone"), {"phone": phone})
+            teacher = result.fetchone()
+            if not teacher:
+                await send_whatsapp_message(phone, "❌ Professor não encontrado no sistema.")
+                return
+                
+            # 2. Fetch Class & Course
+            stmt = text("""
+                SELECT c.id, c.current_lesson_number, crs.id as course_id, c.name
+                FROM Classes c
+                JOIN Courses crs ON c.course_id = crs.id
+                WHERE c.name = :cname AND crs.teacher_id = :tid
+            """)
+            result = await session.execute(stmt, {"cname": class_name, "tid": teacher[0]})
+            class_row = result.fetchone()
+            
+            if not class_row:
+                await send_whatsapp_message(phone, f"❌ Turma '{class_name}' não encontrada.")
+                return
+                
+            class_id = class_row[0]
+            current_lesson = class_row[1]
+            course_id = class_row[2]
+            c_name = class_row[3]
+            
+            # 3. Fetch Enrolled Active Students
+            stmt_students = text("""
+                SELECT s.id, s.phone, s.name 
+                FROM Students s
+                JOIN StudentEnrollment se ON s.id = se.student_id
+                WHERE se.class_id = :cid AND s.is_active = 1
+            """)
+            result = await session.execute(stmt_students, {"cid": class_id})
+            students = result.fetchall()
+            
+            if not students:
+                await send_whatsapp_message(phone, f"❌ Nenhum aluno ativo encontrado na turma '{c_name}'.")
+                return
+                
+        # Send a loading message to teacher
+        await send_whatsapp_message(phone, f"⏳ Gerando quiz para a aula {current_lesson} da turma {c_name}...\nIsso pode levar alguns segundos.")
+        
+        # 4. Generate Quiz
+        from src.rag.retriever import retrieve_context
+        from src.rag.quiz_generator import generate_quiz
+        
+        lesson_content = await retrieve_context(
+            teacher_id=teacher[0],
+            course_id=course_id,
+            current_lesson_number=current_lesson,
+            query=f"resumo principal da aula {current_lesson}",
+            top_k=5,
+            score_threshold=0.3
+        )
+        
+        if not lesson_content:
+            await send_whatsapp_message(phone, f"❌ Nenhum material encontrado no banco de dados para a aula {current_lesson}.")
+            return
+            
+        quiz = await generate_quiz(
+            course_id=course_id,
+            lesson_number=current_lesson,
+            lesson_content=lesson_content,
+            num_alternatives=3
+        )
+        
+        if not quiz:
+            await send_whatsapp_message(phone, "❌ Falha ao gerar o quiz com a IA.")
+            return
+            
+        # 5. Broadcast quiz to all students
+        from src.workers.micro_learning import send_quiz_to_student
+        success_count = 0
+        
+        for st in students:
+            try:
+                await send_quiz_to_student(
+                    student={
+                        "id": st[0],
+                        "phone": st[1],
+                        "course_id": course_id,
+                        "lesson_pointer": str(current_lesson)
+                    },
+                    quiz=quiz
+                )
+                success_count += 1
+            except Exception as e:
+                logger.error("failed_to_send_quiz_to_student", student_id=st[0], error=str(e))
+                
+        await send_whatsapp_message(phone, f"✅ Quiz enviado com sucesso para {success_count} aluno(s) da turma '{c_name}'!")
+        
+    except Exception as e:
+        await send_whatsapp_message(phone, f"❌ Erro ao enviar quiz: {str(e)[:100]}")
+
 async def process_command_message(message_body: dict):
     phone = message_body.get("phone")
     text_content = message_body.get("text", "")
@@ -189,8 +295,13 @@ async def process_command_message(message_body: dict):
         await run_list_materiais_command(phone, args)
     elif command == CommandType.UPDATE_LESSON:
         await run_update_lesson_command(phone, args)
+    elif command == CommandType.SEND_QUIZ:
+        await run_broadcast_quiz_command(phone, args)
     elif command == CommandType.HELP:
-        await send_whatsapp_message(phone, "Comandos disponíveis:\n/sinc_alunos\n/sinc_materiais\n/listar_cursos\n/listar_materiais\n/aula [turma] = [numero]")
+        await send_whatsapp_message(phone, "Comandos disponíveis:\n/sinc_alunos\n/sinc_materiais\n/listar_cursos\n/listar_materiais\n/aula [turma] = [numero]\n/quiz_[turma]")
+    elif command == CommandType.WAKEUP:
+        logger.info("waking_up_worker_via_hack")
+        return
     else:
         await send_whatsapp_message(phone, "❌ Comando desconhecido.")
 

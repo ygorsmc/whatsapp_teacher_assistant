@@ -10,6 +10,8 @@ class CommandType:
     LIST_COURSES = "list_courses"
     LIST_MATERIALS = "list_materials"
     UPDATE_LESSON = "update_lesson"
+    WAKEUP = "wakeup"
+    SEND_QUIZ = "send_quiz"
     UNKNOWN = "unknown"
 
 # Maps human-readable inputs (with aliases and typos) to CommandTypes
@@ -32,6 +34,12 @@ COMMAND_ALIASES = {
     ],
     CommandType.UPDATE_LESSON: [
         "/aula"
+    ],
+    CommandType.WAKEUP: [
+        "/wakeup"
+    ],
+    CommandType.SEND_QUIZ: [
+        "/quiz"
     ]
 }
 

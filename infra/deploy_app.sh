@@ -26,39 +26,26 @@ az containerapp env create \
   --location brazilsouth || true
 
 echo "🚢 4. Fazendo Deploy do Webhook..."
-az containerapp create \
+az containerapp update \
   --name webhook-app \
   --resource-group $RESOURCE_GROUP \
-  --environment env-whatsapp-bot \
   --image ${ACR_NAME}.azurecr.io/whatsapp-webhook:latest \
-  --target-port 80 \
-  --ingress external \
-  --registry-server ${ACR_NAME}.azurecr.io \
-  --min-replicas 1 \
-  --max-replicas 3
+  --set-env-vars FORCE_UPDATE=$(date +%s)
 
 echo "🚢 5. Fazendo Deploy do Worker (LLM)..."
-az containerapp create \
+az containerapp update \
   --name worker-llm \
   --resource-group $RESOURCE_GROUP \
-  --environment env-whatsapp-bot \
   --image ${ACR_NAME}.azurecr.io/whatsapp-worker:latest \
-  --registry-server ${ACR_NAME}.azurecr.io \
-  --env-vars WORKER_TYPE=llm \
-  --min-replicas 0 \
-  --max-replicas 10
+  --set-env-vars FORCE_UPDATE=$(date +%s)
 
 echo "🚢 6. Fazendo Deploy do Worker (Scheduler)..."
-az containerapp create \
+az containerapp update \
   --name worker-scheduler \
   --resource-group $RESOURCE_GROUP \
-  --environment env-whatsapp-bot \
   --image ${ACR_NAME}.azurecr.io/whatsapp-worker:latest \
-  --registry-server ${ACR_NAME}.azurecr.io \
-  --env-vars WORKER_TYPE=scheduler \
-  --min-replicas 1 \
-  --max-replicas 1
+  --set-env-vars FORCE_UPDATE=$(date +%s)
 
-echo "✅ Deploy Completo! Seu bot está rodando na nuvem."
+echo "✅ Deploy Completo! O seu bot foi atualizado de forma segura, mantendo todas as regras do KEDA e Variáveis de Ambiente."
 echo "Para pegar a URL pública do seu Webhook (para colar na Meta), rode:"
 echo "az containerapp show -n webhook-app -g $RESOURCE_GROUP --query properties.configuration.ingress.fqdn -o tsv"

@@ -6,7 +6,7 @@ These constants decouple user-facing text from business logic.
 # ==========================================
 # REVIEW & SCHEDULER UX
 # ==========================================
-REVIEW_INVITE_BODY = "📚 *Revisão Diária — {course_name}*\n\nOlá {student_name}! Preparei uma revisão dos pontos-chave da sua última aula. Vamos revisar?"
+REVIEW_INVITE_BODY = "📚 *Revisão Diária — {course_name}*\n\nOlá {student_name}! Preparei uma revisão dos pontos-chave da sua última aula. Vamos revisar?\n\n🔓 *Importante:* Sua janela de estudos de hoje está fechada! Clique em qualquer botão abaixo para abri-la. Deixar para depois não tem problema: pula apenas esta revisão, mas garante que as próximas cheguem direto para você!"
 REVIEW_INVITE_FOOTER = "Revisão rápida + quiz de fixação"
 
 REVIEW_ACCEPT_TITLE = "✅ Sim, vamos lá!"

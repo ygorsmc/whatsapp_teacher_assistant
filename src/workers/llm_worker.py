@@ -331,22 +331,29 @@ async def process_inbound(receiver, message):
 
             # Fast-path: aluno aceita a revisão diária
             if reply_id.startswith("review_accept_"):
-                # Extract course_id from the button payload (review_accept_{course_id})
-                review_course_id = reply_id.replace("review_accept_", "", 1)
-                
-                logger.info(f"DEBUG_ROUTING: Extracted review_course_id: {review_course_id}")
-                
-                # Re-fetch context for the SPECIFIC course from the button
-                review_context = await get_student_context_by_phone(phone, course_id=review_course_id)
-                
-                if not review_context:
-                    logger.info("DEBUG_ROUTING: review_context was None! Falling back to default.")
-                    review_context = student_context  # fallback to default
-                else:
-                    logger.info(f"DEBUG_ROUTING: review_context found! Course: {review_context['course'].name}")
+                try:
+                    # Extract course_id from the button payload (review_accept_{course_id})
+                    review_course_id = reply_id.replace("review_accept_", "", 1)
                     
-                await handle_review_request(phone, review_context)
-                await receiver.complete_message(message)
+                    logger.info(f"DEBUG_ROUTING: Extracted review_course_id: {review_course_id}")
+                    
+                    # Re-fetch context for the SPECIFIC course from the button
+                    review_context = await get_student_context_by_phone(phone, course_id=review_course_id)
+                    
+                    if not review_context:
+                        logger.info("DEBUG_ROUTING: review_context was None! Falling back to default.")
+                        review_context = student_context  # fallback to default
+                    else:
+                        logger.info(f"DEBUG_ROUTING: review_context found! Course: {review_context['course'].name}")
+                        
+                    await handle_review_request(phone, review_context)
+                except Exception as e:
+                    import traceback
+                    logger.error("Fast-path review_accept error", error=str(e), exc_info=True)
+                    traceback.print_exc()
+                    await send_whatsapp_message(phone, ERROR_TECHNICAL)
+                finally:
+                    await receiver.complete_message(message)
                 return
 
             # Fast-path: aluno adia a revisão

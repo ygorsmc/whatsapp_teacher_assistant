@@ -1,302 +1,302 @@
-{"TimeStamp": "2026-06-02T13:39:38.17395", "Log": "Connecting to the container 'webhook-app'..."}
-{"TimeStamp": "2026-06-02T13:39:38.2036", "Log": "Successfully Connected to container: 'webhook-app' [Revision: 'webhook-app--0000027', Replica: 'webhook-app--0000027-6b9b8db9bf-frppm']"}
-{"TimeStamp": "2026-06-02T13:34:51.7171729+00:00", "Log": "F                 \"user_id\": \"BR.998608489802380\""}
-{"TimeStamp": "2026-06-02T13:34:51.7171742+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:34:51.7171754+00:00", "Log": "F             ],"}
-{"TimeStamp": "2026-06-02T13:34:51.7171766+00:00", "Log": "F             \"statuses\": ["}
-{"TimeStamp": "2026-06-02T13:34:51.7171777+00:00", "Log": "F               {"}
-{"TimeStamp": "2026-06-02T13:34:51.7171789+00:00", "Log": "F                 \"id\": \"wamid.HBgNNTUxMzk3NDAzMzM0ORUCABEYEjM4MkYyNUE5MUI1NUQ2Nzk1RgA=\","}
-{"TimeStamp": "2026-06-02T13:34:51.7171802+00:00", "Log": "F                 \"status\": \"read\","}
-{"TimeStamp": "2026-06-02T13:34:51.7171815+00:00", "Log": "F                 \"timestamp\": \"1780407290\","}
-{"TimeStamp": "2026-06-02T13:34:51.7171827+00:00", "Log": "F                 \"recipient_id\": \"5513974033349\","}
-{"TimeStamp": "2026-06-02T13:34:51.7171839+00:00", "Log": "F                 \"recipient_user_id\": \"BR.998608489802380\","}
-{"TimeStamp": "2026-06-02T13:34:51.7171851+00:00", "Log": "F                 \"pricing\": {"}
-{"TimeStamp": "2026-06-02T13:34:51.7171863+00:00", "Log": "F                   \"billable\": false,"}
-{"TimeStamp": "2026-06-02T13:34:51.7171875+00:00", "Log": "F                   \"pricing_model\": \"PMP\","}
-{"TimeStamp": "2026-06-02T13:34:51.7171886+00:00", "Log": "F                   \"category\": \"service\","}
-{"TimeStamp": "2026-06-02T13:34:51.717234+00:00", "Log": "F                   \"type\": \"free_customer_service\""}
-{"TimeStamp": "2026-06-02T13:34:51.717238+00:00", "Log": "F                 }"}
-{"TimeStamp": "2026-06-02T13:34:51.7172397+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:34:51.717241+00:00", "Log": "F             ]"}
-{"TimeStamp": "2026-06-02T13:34:51.7172422+00:00", "Log": "F           },"}
-{"TimeStamp": "2026-06-02T13:34:51.7172434+00:00", "Log": "F           \"field\": \"messages\""}
-{"TimeStamp": "2026-06-02T13:34:51.7172445+00:00", "Log": "F         }"}
-{"TimeStamp": "2026-06-02T13:34:51.7172457+00:00", "Log": "F       ]"}
-{"TimeStamp": "2026-06-02T13:34:51.7172468+00:00", "Log": "F     }"}
-{"TimeStamp": "2026-06-02T13:34:51.717248+00:00", "Log": "F   ]"}
-{"TimeStamp": "2026-06-02T13:34:51.7172491+00:00", "Log": "F }"}
-{"TimeStamp": "2026-06-02T13:34:51.7172504+00:00", "Log": "F"}
-{"TimeStamp": "2026-06-02T13:34:51.7172517+00:00", "Log": "F [DEBUG] No 'messages' found in payload. Returning 200."}
-{"TimeStamp": "2026-06-02T13:34:51.717253+00:00", "Log": "F INFO:     100.100.0.27:34518 - \"POST /v1/webhook HTTP/1.1\" 200 OK"}
-{"TimeStamp": "2026-06-02T13:34:51.7482935+00:00", "Log": "F"}
-{"TimeStamp": "2026-06-02T13:34:51.7483358+00:00", "Log": "F [DEBUG] WEBHOOK PAYLOAD: {"}
-{"TimeStamp": "2026-06-02T13:34:51.7483535+00:00", "Log": "F   \"object\": \"whatsapp_business_account\","}
-{"TimeStamp": "2026-06-02T13:34:51.7483605+00:00", "Log": "F   \"entry\": ["}
-{"TimeStamp": "2026-06-02T13:34:51.748363+00:00", "Log": "F     {"}
-{"TimeStamp": "2026-06-02T13:34:51.7483653+00:00", "Log": "F       \"id\": \"2314131926057943\","}
-{"TimeStamp": "2026-06-02T13:34:51.7483674+00:00", "Log": "F       \"changes\": ["}
-{"TimeStamp": "2026-06-02T13:34:51.7483696+00:00", "Log": "F         {"}
-{"TimeStamp": "2026-06-02T13:34:51.748372+00:00", "Log": "F           \"value\": {"}
-{"TimeStamp": "2026-06-02T13:34:51.7483742+00:00", "Log": "F             \"messaging_product\": \"whatsapp\","}
-{"TimeStamp": "2026-06-02T13:34:51.7483764+00:00", "Log": "F             \"metadata\": {"}
-{"TimeStamp": "2026-06-02T13:34:51.7483784+00:00", "Log": "F               \"display_phone_number\": \"5513978075057\","}
-{"TimeStamp": "2026-06-02T13:34:51.7483829+00:00", "Log": "F               \"phone_number_id\": \"1143914788804185\""}
-{"TimeStamp": "2026-06-02T13:34:51.7483859+00:00", "Log": "F             },"}
-{"TimeStamp": "2026-06-02T13:34:51.7483872+00:00", "Log": "F             \"contacts\": ["}
-{"TimeStamp": "2026-06-02T13:34:51.7483884+00:00", "Log": "F               {"}
-{"TimeStamp": "2026-06-02T13:34:51.7483896+00:00", "Log": "F                 \"wa_id\": \"5513974033349\","}
-{"TimeStamp": "2026-06-02T13:34:51.7483909+00:00", "Log": "F                 \"user_id\": \"BR.998608489802380\""}
-{"TimeStamp": "2026-06-02T13:34:51.7483938+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:34:51.7483951+00:00", "Log": "F             ],"}
-{"TimeStamp": "2026-06-02T13:34:51.7483964+00:00", "Log": "F             \"statuses\": ["}
-{"TimeStamp": "2026-06-02T13:34:51.7483976+00:00", "Log": "F               {"}
-{"TimeStamp": "2026-06-02T13:34:51.7483988+00:00", "Log": "F                 \"id\": \"wamid.HBgNNTUxMzk3NDAzMzM0ORUCABEYEkZGRDYxNkJDREJCOUQ2NjcwOQA=\","}
-{"TimeStamp": "2026-06-02T13:34:51.7484001+00:00", "Log": "F                 \"status\": \"read\","}
-{"TimeStamp": "2026-06-02T13:34:51.7484956+00:00", "Log": "F                 \"timestamp\": \"1780407290\","}
-{"TimeStamp": "2026-06-02T13:34:51.7484997+00:00", "Log": "F                 \"recipient_id\": \"5513974033349\","}
-{"TimeStamp": "2026-06-02T13:34:51.7485019+00:00", "Log": "F                 \"recipient_user_id\": \"BR.998608489802380\","}
-{"TimeStamp": "2026-06-02T13:34:51.748504+00:00", "Log": "F                 \"pricing\": {"}
-{"TimeStamp": "2026-06-02T13:34:51.7485061+00:00", "Log": "F                   \"billable\": false,"}
-{"TimeStamp": "2026-06-02T13:34:51.7485081+00:00", "Log": "F                   \"pricing_model\": \"PMP\","}
-{"TimeStamp": "2026-06-02T13:34:51.7485102+00:00", "Log": "F                   \"category\": \"service\","}
-{"TimeStamp": "2026-06-02T13:34:51.7485453+00:00", "Log": "F                   \"type\": \"free_customer_service\""}
-{"TimeStamp": "2026-06-02T13:34:51.7485535+00:00", "Log": "F                 }"}
-{"TimeStamp": "2026-06-02T13:34:51.748558+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:34:51.7485602+00:00", "Log": "F             ]"}
-{"TimeStamp": "2026-06-02T13:34:51.7485622+00:00", "Log": "F           },"}
-{"TimeStamp": "2026-06-02T13:34:51.7485642+00:00", "Log": "F           \"field\": \"messages\""}
-{"TimeStamp": "2026-06-02T13:34:51.7485664+00:00", "Log": "F         }"}
-{"TimeStamp": "2026-06-02T13:34:51.7485794+00:00", "Log": "F       ]"}
-{"TimeStamp": "2026-06-02T13:34:51.7485816+00:00", "Log": "F     }"}
-{"TimeStamp": "2026-06-02T13:34:51.7485836+00:00", "Log": "F   ]"}
-{"TimeStamp": "2026-06-02T13:34:51.7485856+00:00", "Log": "F }"}
-{"TimeStamp": "2026-06-02T13:34:51.7485877+00:00", "Log": "F"}
-{"TimeStamp": "2026-06-02T13:34:51.7485898+00:00", "Log": "F [DEBUG] No 'messages' found in payload. Returning 200."}
-{"TimeStamp": "2026-06-02T13:34:51.7485919+00:00", "Log": "F INFO:     100.100.0.27:34518 - \"POST /v1/webhook HTTP/1.1\" 200 OK"}
-{"TimeStamp": "2026-06-02T13:34:51.8615163+00:00", "Log": "F"}
-{"TimeStamp": "2026-06-02T13:34:51.8615645+00:00", "Log": "F [DEBUG] WEBHOOK PAYLOAD: {"}
-{"TimeStamp": "2026-06-02T13:34:51.8615804+00:00", "Log": "F   \"object\": \"whatsapp_business_account\","}
-{"TimeStamp": "2026-06-02T13:34:51.861582+00:00", "Log": "F   \"entry\": ["}
-{"TimeStamp": "2026-06-02T13:34:51.8615835+00:00", "Log": "F     {"}
-{"TimeStamp": "2026-06-02T13:34:51.8615848+00:00", "Log": "F       \"id\": \"2314131926057943\","}
-{"TimeStamp": "2026-06-02T13:34:51.8615865+00:00", "Log": "F       \"changes\": ["}
-{"TimeStamp": "2026-06-02T13:34:51.8615879+00:00", "Log": "F         {"}
-{"TimeStamp": "2026-06-02T13:34:51.8615891+00:00", "Log": "F           \"value\": {"}
-{"TimeStamp": "2026-06-02T13:34:51.8615904+00:00", "Log": "F             \"messaging_product\": \"whatsapp\","}
-{"TimeStamp": "2026-06-02T13:34:51.8615917+00:00", "Log": "F             \"metadata\": {"}
-{"TimeStamp": "2026-06-02T13:34:51.861593+00:00", "Log": "F               \"display_phone_number\": \"5513978075057\","}
-{"TimeStamp": "2026-06-02T13:34:51.8615942+00:00", "Log": "F               \"phone_number_id\": \"1143914788804185\""}
-{"TimeStamp": "2026-06-02T13:34:51.8615958+00:00", "Log": "F             },"}
-{"TimeStamp": "2026-06-02T13:34:51.861597+00:00", "Log": "F             \"contacts\": ["}
-{"TimeStamp": "2026-06-02T13:34:51.8616021+00:00", "Log": "F               {"}
-{"TimeStamp": "2026-06-02T13:34:51.8616034+00:00", "Log": "F                 \"wa_id\": \"5513974033349\","}
-{"TimeStamp": "2026-06-02T13:34:51.8616046+00:00", "Log": "F                 \"user_id\": \"BR.998608489802380\""}
-{"TimeStamp": "2026-06-02T13:34:51.8616057+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:34:51.8616069+00:00", "Log": "F             ],"}
-{"TimeStamp": "2026-06-02T13:34:51.861608+00:00", "Log": "F             \"statuses\": ["}
-{"TimeStamp": "2026-06-02T13:34:51.8616092+00:00", "Log": "F               {"}
-{"TimeStamp": "2026-06-02T13:34:51.8616104+00:00", "Log": "F                 \"id\": \"wamid.HBgNNTUxMzk3NDAzMzM0ORUCABEYEjFCNTlEMjIwMzM4Q0JFNDQ0QgA=\","}
-{"TimeStamp": "2026-06-02T13:34:51.8616116+00:00", "Log": "F                 \"status\": \"read\","}
-{"TimeStamp": "2026-06-02T13:34:51.8616128+00:00", "Log": "F                 \"timestamp\": \"1780407290\","}
-{"TimeStamp": "2026-06-02T13:34:51.861614+00:00", "Log": "F                 \"recipient_id\": \"5513974033349\","}
-{"TimeStamp": "2026-06-02T13:34:51.8616152+00:00", "Log": "F                 \"recipient_user_id\": \"BR.998608489802380\","}
-{"TimeStamp": "2026-06-02T13:34:51.8616164+00:00", "Log": "F                 \"pricing\": {"}
-{"TimeStamp": "2026-06-02T13:34:51.8616176+00:00", "Log": "F                   \"billable\": false,"}
-{"TimeStamp": "2026-06-02T13:34:51.8616201+00:00", "Log": "F                   \"pricing_model\": \"PMP\","}
-{"TimeStamp": "2026-06-02T13:34:51.8616213+00:00", "Log": "F                   \"category\": \"service\","}
-{"TimeStamp": "2026-06-02T13:34:51.8617107+00:00", "Log": "F                   \"type\": \"free_customer_service\""}
-{"TimeStamp": "2026-06-02T13:34:51.8617197+00:00", "Log": "F                 }"}
-{"TimeStamp": "2026-06-02T13:34:51.8617242+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:34:51.8617265+00:00", "Log": "F             ]"}
-{"TimeStamp": "2026-06-02T13:34:51.8617284+00:00", "Log": "F           },"}
-{"TimeStamp": "2026-06-02T13:34:51.8617305+00:00", "Log": "F           \"field\": \"messages\""}
-{"TimeStamp": "2026-06-02T13:34:51.8617325+00:00", "Log": "F         }"}
-{"TimeStamp": "2026-06-02T13:34:51.8618141+00:00", "Log": "F       ]"}
-{"TimeStamp": "2026-06-02T13:34:51.8618196+00:00", "Log": "F     }"}
-{"TimeStamp": "2026-06-02T13:34:51.8618218+00:00", "Log": "F   ]"}
-{"TimeStamp": "2026-06-02T13:34:51.861824+00:00", "Log": "F }"}
-{"TimeStamp": "2026-06-02T13:34:51.861826+00:00", "Log": "F"}
-{"TimeStamp": "2026-06-02T13:34:51.8618295+00:00", "Log": "F [DEBUG] No 'messages' found in payload. Returning 200."}
-{"TimeStamp": "2026-06-02T13:34:51.8618309+00:00", "Log": "F INFO:     100.100.0.27:34514 - \"POST /v1/webhook HTTP/1.1\" 200 OK"}
-{"TimeStamp": "2026-06-02T13:34:52.0055159+00:00", "Log": "F"}
-{"TimeStamp": "2026-06-02T13:34:52.0055602+00:00", "Log": "F [DEBUG] WEBHOOK PAYLOAD: {"}
-{"TimeStamp": "2026-06-02T13:34:52.0055779+00:00", "Log": "F   \"object\": \"whatsapp_business_account\","}
-{"TimeStamp": "2026-06-02T13:34:52.0055813+00:00", "Log": "F   \"entry\": ["}
-{"TimeStamp": "2026-06-02T13:34:52.0055897+00:00", "Log": "F     {"}
-{"TimeStamp": "2026-06-02T13:34:52.0055924+00:00", "Log": "F       \"id\": \"2314131926057943\","}
-{"TimeStamp": "2026-06-02T13:34:52.0055945+00:00", "Log": "F       \"changes\": ["}
-{"TimeStamp": "2026-06-02T13:34:52.0055966+00:00", "Log": "F         {"}
-{"TimeStamp": "2026-06-02T13:34:52.0055987+00:00", "Log": "F           \"value\": {"}
-{"TimeStamp": "2026-06-02T13:34:52.0056007+00:00", "Log": "F             \"messaging_product\": \"whatsapp\","}
-{"TimeStamp": "2026-06-02T13:34:52.0056035+00:00", "Log": "F             \"metadata\": {"}
-{"TimeStamp": "2026-06-02T13:34:52.0056049+00:00", "Log": "F               \"display_phone_number\": \"5513978075057\","}
-{"TimeStamp": "2026-06-02T13:34:52.0056062+00:00", "Log": "F               \"phone_number_id\": \"1143914788804185\""}
-{"TimeStamp": "2026-06-02T13:34:52.0056074+00:00", "Log": "F             },"}
-{"TimeStamp": "2026-06-02T13:34:52.0056087+00:00", "Log": "F             \"contacts\": ["}
-{"TimeStamp": "2026-06-02T13:34:52.0056099+00:00", "Log": "F               {"}
-{"TimeStamp": "2026-06-02T13:34:52.0056112+00:00", "Log": "F                 \"wa_id\": \"5513974033349\","}
-{"TimeStamp": "2026-06-02T13:34:52.0056125+00:00", "Log": "F                 \"user_id\": \"BR.998608489802380\""}
-{"TimeStamp": "2026-06-02T13:34:52.0056148+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:34:52.0056162+00:00", "Log": "F             ],"}
-{"TimeStamp": "2026-06-02T13:34:52.0056176+00:00", "Log": "F             \"statuses\": ["}
-{"TimeStamp": "2026-06-02T13:34:52.0056189+00:00", "Log": "F               {"}
-{"TimeStamp": "2026-06-02T13:34:52.0056201+00:00", "Log": "F                 \"id\": \"wamid.HBgNNTUxMzk3NDAzMzM0ORUCABEYEjIzNzU3Q0ZEQzlGMkIwQjIwOQA=\","}
-{"TimeStamp": "2026-06-02T13:34:52.0056215+00:00", "Log": "F                 \"status\": \"read\","}
-{"TimeStamp": "2026-06-02T13:34:52.0056229+00:00", "Log": "F                 \"timestamp\": \"1780407290\","}
-{"TimeStamp": "2026-06-02T13:34:52.0056242+00:00", "Log": "F                 \"recipient_id\": \"5513974033349\","}
-{"TimeStamp": "2026-06-02T13:34:52.0056256+00:00", "Log": "F                 \"recipient_user_id\": \"BR.998608489802380\","}
-{"TimeStamp": "2026-06-02T13:34:52.0056269+00:00", "Log": "F                 \"pricing\": {"}
-{"TimeStamp": "2026-06-02T13:34:52.0056281+00:00", "Log": "F                   \"billable\": false,"}
-{"TimeStamp": "2026-06-02T13:34:52.0056301+00:00", "Log": "F                   \"pricing_model\": \"PMP\","}
-{"TimeStamp": "2026-06-02T13:34:52.0056336+00:00", "Log": "F                   \"category\": \"service\","}
-{"TimeStamp": "2026-06-02T13:34:52.0059124+00:00", "Log": "F                   \"type\": \"free_customer_service\""}
-{"TimeStamp": "2026-06-02T13:34:52.0059256+00:00", "Log": "F                 }"}
-{"TimeStamp": "2026-06-02T13:34:52.0059308+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:34:52.0059336+00:00", "Log": "F             ]"}
-{"TimeStamp": "2026-06-02T13:34:52.0059357+00:00", "Log": "F           },"}
-{"TimeStamp": "2026-06-02T13:34:52.0059377+00:00", "Log": "F           \"field\": \"messages\""}
-{"TimeStamp": "2026-06-02T13:34:52.0059416+00:00", "Log": "F         }"}
-{"TimeStamp": "2026-06-02T13:34:52.0059436+00:00", "Log": "F       ]"}
-{"TimeStamp": "2026-06-02T13:34:52.0059457+00:00", "Log": "F     }"}
-{"TimeStamp": "2026-06-02T13:34:52.0059477+00:00", "Log": "F   ]"}
-{"TimeStamp": "2026-06-02T13:34:52.0059497+00:00", "Log": "F }"}
-{"TimeStamp": "2026-06-02T13:34:52.0059518+00:00", "Log": "F"}
-{"TimeStamp": "2026-06-02T13:34:52.0059539+00:00", "Log": "F [DEBUG] No 'messages' found in payload. Returning 200."}
-{"TimeStamp": "2026-06-02T13:34:52.005956+00:00", "Log": "F INFO:     100.100.0.27:34486 - \"POST /v1/webhook HTTP/1.1\" 200 OK"}
-{"TimeStamp": "2026-06-02T13:34:52.0368866+00:00", "Log": "F"}
-{"TimeStamp": "2026-06-02T13:34:52.036926+00:00", "Log": "F [DEBUG] WEBHOOK PAYLOAD: {"}
-{"TimeStamp": "2026-06-02T13:34:52.0369408+00:00", "Log": "F   \"object\": \"whatsapp_business_account\","}
-{"TimeStamp": "2026-06-02T13:34:52.0369426+00:00", "Log": "F   \"entry\": ["}
-{"TimeStamp": "2026-06-02T13:34:52.036944+00:00", "Log": "F     {"}
-{"TimeStamp": "2026-06-02T13:34:52.0369452+00:00", "Log": "F       \"id\": \"2314131926057943\","}
-{"TimeStamp": "2026-06-02T13:34:52.0369467+00:00", "Log": "F       \"changes\": ["}
-{"TimeStamp": "2026-06-02T13:34:52.036948+00:00", "Log": "F         {"}
-{"TimeStamp": "2026-06-02T13:34:52.0369493+00:00", "Log": "F           \"value\": {"}
-{"TimeStamp": "2026-06-02T13:34:52.0369506+00:00", "Log": "F             \"messaging_product\": \"whatsapp\","}
-{"TimeStamp": "2026-06-02T13:34:52.0369519+00:00", "Log": "F             \"metadata\": {"}
-{"TimeStamp": "2026-06-02T13:34:52.0369532+00:00", "Log": "F               \"display_phone_number\": \"5513978075057\","}
-{"TimeStamp": "2026-06-02T13:34:52.0369543+00:00", "Log": "F               \"phone_number_id\": \"1143914788804185\""}
-{"TimeStamp": "2026-06-02T13:34:52.036956+00:00", "Log": "F             },"}
-{"TimeStamp": "2026-06-02T13:34:52.0369573+00:00", "Log": "F             \"contacts\": ["}
-{"TimeStamp": "2026-06-02T13:34:52.0369619+00:00", "Log": "F               {"}
-{"TimeStamp": "2026-06-02T13:34:52.0369633+00:00", "Log": "F                 \"wa_id\": \"5513974033349\","}
-{"TimeStamp": "2026-06-02T13:34:52.0369645+00:00", "Log": "F                 \"user_id\": \"BR.998608489802380\""}
-{"TimeStamp": "2026-06-02T13:34:52.0369657+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:34:52.0371649+00:00", "Log": "F             ],"}
-{"TimeStamp": "2026-06-02T13:34:52.0371843+00:00", "Log": "F             \"statuses\": ["}
-{"TimeStamp": "2026-06-02T13:34:52.0371862+00:00", "Log": "F               {"}
-{"TimeStamp": "2026-06-02T13:34:52.0371878+00:00", "Log": "F                 \"id\": \"wamid.HBgNNTUxMzk3NDAzMzM0ORUCABEYEkVERjRBQUQyNUVDNUEwRDkwNwA=\","}
-{"TimeStamp": "2026-06-02T13:34:52.0371891+00:00", "Log": "F                 \"status\": \"read\","}
-{"TimeStamp": "2026-06-02T13:34:52.0371928+00:00", "Log": "F                 \"timestamp\": \"1780407290\","}
-{"TimeStamp": "2026-06-02T13:34:52.0371942+00:00", "Log": "F                 \"recipient_id\": \"5513974033349\","}
-{"TimeStamp": "2026-06-02T13:34:52.0371954+00:00", "Log": "F                 \"recipient_user_id\": \"BR.998608489802380\","}
-{"TimeStamp": "2026-06-02T13:34:52.0371966+00:00", "Log": "F                 \"pricing\": {"}
-{"TimeStamp": "2026-06-02T13:34:52.0371978+00:00", "Log": "F                   \"billable\": false,"}
-{"TimeStamp": "2026-06-02T13:34:52.0371991+00:00", "Log": "F                   \"pricing_model\": \"PMP\","}
-{"TimeStamp": "2026-06-02T13:34:52.0372002+00:00", "Log": "F                   \"category\": \"service\","}
-{"TimeStamp": "2026-06-02T13:34:52.0372528+00:00", "Log": "F                   \"type\": \"free_customer_service\""}
-{"TimeStamp": "2026-06-02T13:34:52.0372597+00:00", "Log": "F                 }"}
-{"TimeStamp": "2026-06-02T13:34:52.0372634+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:34:52.0372658+00:00", "Log": "F             ]"}
-{"TimeStamp": "2026-06-02T13:34:52.0372676+00:00", "Log": "F           },"}
-{"TimeStamp": "2026-06-02T13:34:52.03727+00:00", "Log": "F           \"field\": \"messages\""}
-{"TimeStamp": "2026-06-02T13:34:52.0372719+00:00", "Log": "F         }"}
-{"TimeStamp": "2026-06-02T13:34:52.0372761+00:00", "Log": "F       ]"}
-{"TimeStamp": "2026-06-02T13:34:52.0372779+00:00", "Log": "F     }"}
-{"TimeStamp": "2026-06-02T13:34:52.0372798+00:00", "Log": "F   ]"}
-{"TimeStamp": "2026-06-02T13:34:52.0372817+00:00", "Log": "F }"}
-{"TimeStamp": "2026-06-02T13:34:52.0372835+00:00", "Log": "F"}
-{"TimeStamp": "2026-06-02T13:34:52.0372856+00:00", "Log": "F [DEBUG] No 'messages' found in payload. Returning 200."}
-{"TimeStamp": "2026-06-02T13:34:52.0372877+00:00", "Log": "F INFO:     100.100.0.27:34486 - \"POST /v1/webhook HTTP/1.1\" 200 OK"}
-{"TimeStamp": "2026-06-02T13:34:52.0392986+00:00", "Log": "F"}
-{"TimeStamp": "2026-06-02T13:34:52.039326+00:00", "Log": "F [DEBUG] WEBHOOK PAYLOAD: {"}
-{"TimeStamp": "2026-06-02T13:34:52.0393371+00:00", "Log": "F   \"object\": \"whatsapp_business_account\","}
-{"TimeStamp": "2026-06-02T13:34:52.0393405+00:00", "Log": "F   \"entry\": ["}
-{"TimeStamp": "2026-06-02T13:34:52.0393434+00:00", "Log": "F     {"}
-{"TimeStamp": "2026-06-02T13:34:52.0393456+00:00", "Log": "F       \"id\": \"2314131926057943\","}
-{"TimeStamp": "2026-06-02T13:34:52.0393476+00:00", "Log": "F       \"changes\": ["}
-{"TimeStamp": "2026-06-02T13:34:52.0393498+00:00", "Log": "F         {"}
-{"TimeStamp": "2026-06-02T13:34:52.0393552+00:00", "Log": "F           \"value\": {"}
-{"TimeStamp": "2026-06-02T13:34:52.0393574+00:00", "Log": "F             \"messaging_product\": \"whatsapp\","}
-{"TimeStamp": "2026-06-02T13:34:52.0393596+00:00", "Log": "F             \"metadata\": {"}
-{"TimeStamp": "2026-06-02T13:34:52.0393618+00:00", "Log": "F               \"display_phone_number\": \"5513978075057\","}
-{"TimeStamp": "2026-06-02T13:34:52.0393639+00:00", "Log": "F               \"phone_number_id\": \"1143914788804185\""}
-{"TimeStamp": "2026-06-02T13:34:52.0393659+00:00", "Log": "F             },"}
-{"TimeStamp": "2026-06-02T13:34:52.0393679+00:00", "Log": "F             \"contacts\": ["}
-{"TimeStamp": "2026-06-02T13:34:52.0393697+00:00", "Log": "F               {"}
-{"TimeStamp": "2026-06-02T13:34:52.0393715+00:00", "Log": "F                 \"wa_id\": \"5513974033349\","}
-{"TimeStamp": "2026-06-02T13:34:52.0393734+00:00", "Log": "F                 \"user_id\": \"BR.998608489802380\""}
-{"TimeStamp": "2026-06-02T13:34:52.0393753+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:34:52.0393771+00:00", "Log": "F             ],"}
-{"TimeStamp": "2026-06-02T13:34:52.0393789+00:00", "Log": "F             \"statuses\": ["}
-{"TimeStamp": "2026-06-02T13:34:52.0393808+00:00", "Log": "F               {"}
-{"TimeStamp": "2026-06-02T13:34:52.0393839+00:00", "Log": "F                 \"id\": \"wamid.HBgNNTUxMzk3NDAzMzM0ORUCABEYEkY2NDZCQUVDRkU5RUFGNjczOQA=\","}
-{"TimeStamp": "2026-06-02T13:34:52.039386+00:00", "Log": "F                 \"status\": \"read\","}
-{"TimeStamp": "2026-06-02T13:34:52.0393879+00:00", "Log": "F                 \"timestamp\": \"1780407290\","}
-{"TimeStamp": "2026-06-02T13:34:52.0393898+00:00", "Log": "F                 \"recipient_id\": \"5513974033349\","}
-{"TimeStamp": "2026-06-02T13:34:52.0393917+00:00", "Log": "F                 \"recipient_user_id\": \"BR.998608489802380\","}
-{"TimeStamp": "2026-06-02T13:34:52.0393936+00:00", "Log": "F                 \"pricing\": {"}
-{"TimeStamp": "2026-06-02T13:34:52.0393955+00:00", "Log": "F                   \"billable\": false,"}
-{"TimeStamp": "2026-06-02T13:34:52.0393973+00:00", "Log": "F                   \"pricing_model\": \"PMP\","}
-{"TimeStamp": "2026-06-02T13:34:52.0393992+00:00", "Log": "F                   \"category\": \"service\","}
-{"TimeStamp": "2026-06-02T13:34:52.0394517+00:00", "Log": "F                   \"type\": \"free_customer_service\""}
-{"TimeStamp": "2026-06-02T13:34:52.0394556+00:00", "Log": "F                 }"}
-{"TimeStamp": "2026-06-02T13:34:52.0394924+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:34:52.0394953+00:00", "Log": "F             ]"}
-{"TimeStamp": "2026-06-02T13:34:52.0394988+00:00", "Log": "F           },"}
-{"TimeStamp": "2026-06-02T13:34:52.0395011+00:00", "Log": "F           \"field\": \"messages\""}
-{"TimeStamp": "2026-06-02T13:34:52.0395032+00:00", "Log": "F         }"}
-{"TimeStamp": "2026-06-02T13:34:52.0395052+00:00", "Log": "F       ]"}
-{"TimeStamp": "2026-06-02T13:34:52.0395073+00:00", "Log": "F     }"}
-{"TimeStamp": "2026-06-02T13:34:52.0395094+00:00", "Log": "F   ]"}
-{"TimeStamp": "2026-06-02T13:34:52.0395114+00:00", "Log": "F }"}
-{"TimeStamp": "2026-06-02T13:34:52.0395133+00:00", "Log": "F"}
-{"TimeStamp": "2026-06-02T13:34:52.0395152+00:00", "Log": "F [DEBUG] No 'messages' found in payload. Returning 200."}
-{"TimeStamp": "2026-06-02T13:34:52.0395172+00:00", "Log": "F INFO:     100.100.0.134:59226 - \"POST /v1/webhook HTTP/1.1\" 200 OK"}
-{"TimeStamp": "2026-06-02T13:35:45.1179183+00:00", "Log": "F INFO:     100.100.0.27:59126 - \"GET / HTTP/1.1\" 404 Not Found"}
-{"TimeStamp": "2026-06-02T13:36:56.5230623+00:00", "Log": "F"}
-{"TimeStamp": "2026-06-02T13:36:56.5231138+00:00", "Log": "F [DEBUG] WEBHOOK PAYLOAD: {"}
-{"TimeStamp": "2026-06-02T13:36:56.5231317+00:00", "Log": "F   \"object\": \"whatsapp_business_account\","}
-{"TimeStamp": "2026-06-02T13:36:56.5231347+00:00", "Log": "F   \"entry\": ["}
-{"TimeStamp": "2026-06-02T13:36:56.5231369+00:00", "Log": "F     {"}
-{"TimeStamp": "2026-06-02T13:36:56.5231391+00:00", "Log": "F       \"id\": \"2314131926057943\","}
-{"TimeStamp": "2026-06-02T13:36:56.5231413+00:00", "Log": "F       \"changes\": ["}
-{"TimeStamp": "2026-06-02T13:36:56.5231434+00:00", "Log": "F         {"}
-{"TimeStamp": "2026-06-02T13:36:56.5231454+00:00", "Log": "F           \"value\": {"}
-{"TimeStamp": "2026-06-02T13:36:56.5231493+00:00", "Log": "F             \"messaging_product\": \"whatsapp\","}
-{"TimeStamp": "2026-06-02T13:36:56.5231512+00:00", "Log": "F             \"metadata\": {"}
-{"TimeStamp": "2026-06-02T13:36:56.5231526+00:00", "Log": "F               \"display_phone_number\": \"5513978075057\","}
-{"TimeStamp": "2026-06-02T13:36:56.5231539+00:00", "Log": "F               \"phone_number_id\": \"1143914788804185\""}
-{"TimeStamp": "2026-06-02T13:36:56.5231551+00:00", "Log": "F             },"}
-{"TimeStamp": "2026-06-02T13:36:56.5231565+00:00", "Log": "F             \"contacts\": ["}
-{"TimeStamp": "2026-06-02T13:36:56.5231577+00:00", "Log": "F               {"}
-{"TimeStamp": "2026-06-02T13:36:56.5231607+00:00", "Log": "F                 \"profile\": {"}
-{"TimeStamp": "2026-06-02T13:36:56.523162+00:00", "Log": "F                   \"name\": \"Ygor Carvalho\""}
-{"TimeStamp": "2026-06-02T13:36:56.5231633+00:00", "Log": "F                 },"}
-{"TimeStamp": "2026-06-02T13:36:56.5231645+00:00", "Log": "F                 \"wa_id\": \"5513974033349\","}
-{"TimeStamp": "2026-06-02T13:36:56.5231658+00:00", "Log": "F                 \"user_id\": \"BR.998608489802380\""}
-{"TimeStamp": "2026-06-02T13:36:56.523167+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:36:56.5231683+00:00", "Log": "F             ],"}
-{"TimeStamp": "2026-06-02T13:36:56.5231694+00:00", "Log": "F             \"messages\": ["}
-{"TimeStamp": "2026-06-02T13:36:56.5231707+00:00", "Log": "F               {"}
-{"TimeStamp": "2026-06-02T13:36:56.5231719+00:00", "Log": "F                 \"from\": \"5513974033349\","}
-{"TimeStamp": "2026-06-02T13:36:56.5231732+00:00", "Log": "F                 \"from_user_id\": \"BR.998608489802380\","}
-{"TimeStamp": "2026-06-02T13:36:56.5231745+00:00", "Log": "F                 \"id\": \"wamid.HBgNNTUxMzk3NDAzMzM0ORUCABIYFjNFQjA2QUE1N0QyRTI3QUMyODlENjAA\","}
-{"TimeStamp": "2026-06-02T13:36:56.5231759+00:00", "Log": "F                 \"timestamp\": \"1780407006\","}
-{"TimeStamp": "2026-06-02T13:36:56.5231771+00:00", "Log": "F                 \"text\": {"}
-{"TimeStamp": "2026-06-02T13:36:56.5231793+00:00", "Log": "F                   \"body\": \"/sinc_alunos\""}
-{"TimeStamp": "2026-06-02T13:36:56.5231805+00:00", "Log": "F                 },"}
-{"TimeStamp": "2026-06-02T13:36:56.5231817+00:00", "Log": "F                 \"type\": \"text\""}
-{"TimeStamp": "2026-06-02T13:36:56.5231828+00:00", "Log": "F               }"}
-{"TimeStamp": "2026-06-02T13:36:56.5233113+00:00", "Log": "F             ]"}
-{"TimeStamp": "2026-06-02T13:36:56.5233352+00:00", "Log": "F           },"}
-{"TimeStamp": "2026-06-02T13:36:56.5233455+00:00", "Log": "F           \"field\": \"messages\""}
-{"TimeStamp": "2026-06-02T13:36:56.5233476+00:00", "Log": "F         }"}
-{"TimeStamp": "2026-06-02T13:36:56.523349+00:00", "Log": "F       ]"}
-{"TimeStamp": "2026-06-02T13:36:56.5233503+00:00", "Log": "F     }"}
-{"TimeStamp": "2026-06-02T13:36:56.5233515+00:00", "Log": "F   ]"}
-{"TimeStamp": "2026-06-02T13:36:56.5233527+00:00", "Log": "F }"}
-{"TimeStamp": "2026-06-02T13:36:56.5233542+00:00", "Log": "F"}
-{"TimeStamp": "2026-06-02T13:36:56.5233555+00:00", "Log": "F [DIAG] Duplicate webhook dropped: wamid.HBgNNTUxMzk3NDAzMzM0ORUCABIYFjNFQjA2QUE1N0QyRTI3QUMyODlENjAA"}
-{"TimeStamp": "2026-06-02T13:36:56.523357+00:00", "Log": "F INFO:     100.100.0.134:51308 - \"POST /v1/webhook HTTP/1.1\" 200 OK"}
-{"TimeStamp": "2026-06-02T13:39:36.0627438+00:00", "Log": "F INFO:     100.100.0.27:52566 - \"GET / HTTP/1.1\" 404 Not Found"}
+{"TimeStamp": "2026-06-03T01:22:11.0144", "Log": "Connecting to the container 'worker-llm'..."}
+{"TimeStamp": "2026-06-03T01:22:11.04688", "Log": "Successfully Connected to container: 'worker-llm' [Revision: 'worker-llm--0000036', Replica: 'worker-llm--0000036-7d856c7b74-7b27w']"}
+{"TimeStamp": "2026-06-03T00:45:23.2955155+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 232, in handle_review_request"}
+{"TimeStamp": "2026-06-03T00:45:23.2955865+00:00", "Log": "F     review = await generate_review("}
+{"TimeStamp": "2026-06-03T00:45:23.2955928+00:00", "Log": "F              ^^^^^^^^^^^^^^^^^^^^^^"}
+{"TimeStamp": "2026-06-03T00:45:23.295595+00:00", "Log": "F   File \"/app/src/rag/review_generator.py\", line 109, in generate_review"}
+{"TimeStamp": "2026-06-03T00:45:23.2955971+00:00", "Log": "F     chosen_topic = random.choice(topics)"}
+{"TimeStamp": "2026-06-03T00:45:23.2955991+00:00", "Log": "F                    ^^^^^^"}
+{"TimeStamp": "2026-06-03T00:45:23.2956271+00:00", "Log": "F UnboundLocalError: cannot access local variable 'random' where it is not associated with a value"}
+{"TimeStamp": "2026-06-03T00:45:28.7787163+00:00", "Log": "F 2026-06-03 00:45:28 [info     ] session_acquired"}
+{"TimeStamp": "2026-06-03T00:45:28.9814244+00:00", "Log": "F 2026-06-03 00:45:28 [info     ] messages_received              count=1"}
+{"TimeStamp": "2026-06-03T00:45:28.9893359+00:00", "Log": "F 2026-06-03 00:45:28 [info     ] DEBUG_ROUTING: Extracted review_course_id: crs_ee570174 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:28.9959313+00:00", "Log": "F 2026-06-03 00:45:28 [info     ] DEBUG_ROUTING: review_context found! Course: Intelig\u00eancia Artificial correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:29.4409114+00:00", "Log": "F 2026-06-03 00:45:29 [info     ] Retriever target lesson strategy correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec current_lesson=3 lesson_hint=3 phone=5513991719595 target_lesson=3"}
+{"TimeStamp": "2026-06-03T00:45:29.4549894+00:00", "Log": "F 2026-06-03 00:45:29 [info     ] Pinpointed search returned 8 results for lesson 3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:29.4550282+00:00", "Log": "F 2026-06-03 00:45:29 [info     ] RAG hit                        chunk=35/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 A equipe inteira comparece \u00e0s reuni\u00f5es di\u00e1rias curtas nas quais todos os membr score=0.407"}
+{"TimeStamp": "2026-06-03T00:45:29.4551813+00:00", "Log": "F 2026-06-03 00:45:29 [info     ] RAG hit                        chunk=31/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=3. Ajuda a apoiar a refatora\u00e7\u00e3o, que \u00e9 um processo de melhoria do software.  Em  score=0.405"}
+{"TimeStamp": "2026-06-03T00:45:29.455211+00:00", "Log": "F 2026-06-03 00:45:29 [info     ] RAG hit                        chunk=14/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Pr\u00e1ticas do Extreme score=0.404"}
+{"TimeStamp": "2026-06-03T00:45:29.4552168+00:00", "Log": "F 2026-06-03 00:45:29 [info     ] RAG hit                        chunk=22/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 Reorganiza\u00e7\u00e3o de uma hierarquia de classes para remover c\u00f3digo duplicado.  \u00b7 O score=0.394"}
+{"TimeStamp": "2026-06-03T00:45:29.4552291+00:00", "Log": "F 2026-06-03 00:45:29 [info     ] RAG hit                        chunk=42/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  \u00b7 Um ponto particul score=0.393"}
+{"TimeStamp": "2026-06-03T00:45:29.4553554+00:00", "Log": "F 2026-06-03 00:45:29 [info     ] RAG hit                        chunk=0/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=Desenvolvimento \u00c1gil de Software  @ 2011 Pearson Prentice Hall. Todos os direito score=0.379"}
+{"TimeStamp": "2026-06-03T00:45:29.4553684+00:00", "Log": "F 2026-06-03 00:45:29 [info     ] RAG hit                        chunk=2/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 O objetivo dos m\u00e9todos \u00e1geis \u00e9 reduzir o overhead nos processos de software (e score=0.376"}
+{"TimeStamp": "2026-06-03T00:45:29.4554317+00:00", "Log": "F 2026-06-03 00:45:29 [info     ] RAG hit                        chunk=13/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Princ\u00edpios os m\u00e9tod score=0.368"}
+{"TimeStamp": "2026-06-03T00:45:29.472837+00:00", "Log": "F 2026-06-03 00:45:29 [info     ] Cache hit para t\u00f3picos da aula cache_key=topics:crs_ee570174:3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:30.3201625+00:00", "Log": "F 2026-06-03 00:45:30 [error    ] main_worker_error              error=cannot access local variable 'random' where it is not associated with a value error_type=UnboundLocalError"}
+{"TimeStamp": "2026-06-03T00:45:30.3204203+00:00", "Log": "F Traceback (most recent call last):"}
+{"TimeStamp": "2026-06-03T00:45:30.3205696+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 501, in llm_loop"}
+{"TimeStamp": "2026-06-03T00:45:30.3205761+00:00", "Log": "F     await process_inbound(receiver, msg)"}
+{"TimeStamp": "2026-06-03T00:45:30.3205801+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 348, in process_inbound"}
+{"TimeStamp": "2026-06-03T00:45:30.3205858+00:00", "Log": "F     await handle_review_request(phone, review_context)"}
+{"TimeStamp": "2026-06-03T00:45:30.3205874+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 232, in handle_review_request"}
+{"TimeStamp": "2026-06-03T00:45:30.3205887+00:00", "Log": "F     review = await generate_review("}
+{"TimeStamp": "2026-06-03T00:45:30.3206378+00:00", "Log": "F              ^^^^^^^^^^^^^^^^^^^^^^"}
+{"TimeStamp": "2026-06-03T00:45:30.3206428+00:00", "Log": "F   File \"/app/src/rag/review_generator.py\", line 109, in generate_review"}
+{"TimeStamp": "2026-06-03T00:45:30.3206451+00:00", "Log": "F     chosen_topic = random.choice(topics)"}
+{"TimeStamp": "2026-06-03T00:45:30.320647+00:00", "Log": "F                    ^^^^^^"}
+{"TimeStamp": "2026-06-03T00:45:30.320794+00:00", "Log": "F UnboundLocalError: cannot access local variable 'random' where it is not associated with a value"}
+{"TimeStamp": "2026-06-03T00:45:35.8289603+00:00", "Log": "F 2026-06-03 00:45:35 [info     ] session_acquired"}
+{"TimeStamp": "2026-06-03T00:45:36.0330509+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] messages_received              count=1"}
+{"TimeStamp": "2026-06-03T00:45:36.0522523+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] DEBUG_ROUTING: Extracted review_course_id: crs_ee570174 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:36.0584462+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] DEBUG_ROUTING: review_context found! Course: Intelig\u00eancia Artificial correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:36.4891151+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] Retriever target lesson strategy correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec current_lesson=3 lesson_hint=3 phone=5513991719595 target_lesson=3"}
+{"TimeStamp": "2026-06-03T00:45:36.502027+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] Pinpointed search returned 8 results for lesson 3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:36.5020651+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] RAG hit                        chunk=35/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 A equipe inteira comparece \u00e0s reuni\u00f5es di\u00e1rias curtas nas quais todos os membr score=0.407"}
+{"TimeStamp": "2026-06-03T00:45:36.5021458+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] RAG hit                        chunk=31/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=3. Ajuda a apoiar a refatora\u00e7\u00e3o, que \u00e9 um processo de melhoria do software.  Em  score=0.405"}
+{"TimeStamp": "2026-06-03T00:45:36.5021529+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] RAG hit                        chunk=14/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Pr\u00e1ticas do Extreme score=0.404"}
+{"TimeStamp": "2026-06-03T00:45:36.5021997+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] RAG hit                        chunk=22/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 Reorganiza\u00e7\u00e3o de uma hierarquia de classes para remover c\u00f3digo duplicado.  \u00b7 O score=0.394"}
+{"TimeStamp": "2026-06-03T00:45:36.5022712+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] RAG hit                        chunk=42/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  \u00b7 Um ponto particul score=0.393"}
+{"TimeStamp": "2026-06-03T00:45:36.5023373+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] RAG hit                        chunk=0/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=Desenvolvimento \u00c1gil de Software  @ 2011 Pearson Prentice Hall. Todos os direito score=0.379"}
+{"TimeStamp": "2026-06-03T00:45:36.5047265+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] RAG hit                        chunk=2/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 O objetivo dos m\u00e9todos \u00e1geis \u00e9 reduzir o overhead nos processos de software (e score=0.376"}
+{"TimeStamp": "2026-06-03T00:45:36.504743+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] RAG hit                        chunk=13/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Princ\u00edpios os m\u00e9tod score=0.368"}
+{"TimeStamp": "2026-06-03T00:45:36.5207127+00:00", "Log": "F 2026-06-03 00:45:36 [info     ] Cache hit para t\u00f3picos da aula cache_key=topics:crs_ee570174:3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:37.3694835+00:00", "Log": "F 2026-06-03 00:45:37 [error    ] main_worker_error              error=cannot access local variable 'random' where it is not associated with a value error_type=UnboundLocalError"}
+{"TimeStamp": "2026-06-03T00:45:37.3696933+00:00", "Log": "F Traceback (most recent call last):"}
+{"TimeStamp": "2026-06-03T00:45:37.3698842+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 501, in llm_loop"}
+{"TimeStamp": "2026-06-03T00:45:37.3699045+00:00", "Log": "F     await process_inbound(receiver, msg)"}
+{"TimeStamp": "2026-06-03T00:45:37.3699108+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 348, in process_inbound"}
+{"TimeStamp": "2026-06-03T00:45:37.3699137+00:00", "Log": "F     await handle_review_request(phone, review_context)"}
+{"TimeStamp": "2026-06-03T00:45:37.3699159+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 232, in handle_review_request"}
+{"TimeStamp": "2026-06-03T00:45:37.3699179+00:00", "Log": "F     review = await generate_review("}
+{"TimeStamp": "2026-06-03T00:45:37.36992+00:00", "Log": "F              ^^^^^^^^^^^^^^^^^^^^^^"}
+{"TimeStamp": "2026-06-03T00:45:37.369922+00:00", "Log": "F   File \"/app/src/rag/review_generator.py\", line 109, in generate_review"}
+{"TimeStamp": "2026-06-03T00:45:37.3699241+00:00", "Log": "F     chosen_topic = random.choice(topics)"}
+{"TimeStamp": "2026-06-03T00:45:37.3699261+00:00", "Log": "F                    ^^^^^^"}
+{"TimeStamp": "2026-06-03T00:45:37.3699391+00:00", "Log": "F UnboundLocalError: cannot access local variable 'random' where it is not associated with a value"}
+{"TimeStamp": "2026-06-03T00:45:42.8603496+00:00", "Log": "F 2026-06-03 00:45:42 [info     ] session_acquired"}
+{"TimeStamp": "2026-06-03T00:45:43.0644226+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] messages_received              count=1"}
+{"TimeStamp": "2026-06-03T00:45:43.072739+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] DEBUG_ROUTING: Extracted review_course_id: crs_ee570174 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:43.0812103+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] DEBUG_ROUTING: review_context found! Course: Intelig\u00eancia Artificial correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:43.3459542+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] Retriever target lesson strategy correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec current_lesson=3 lesson_hint=3 phone=5513991719595 target_lesson=3"}
+{"TimeStamp": "2026-06-03T00:45:43.3580429+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] Pinpointed search returned 8 results for lesson 3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:43.3580807+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] RAG hit                        chunk=35/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 A equipe inteira comparece \u00e0s reuni\u00f5es di\u00e1rias curtas nas quais todos os membr score=0.407"}
+{"TimeStamp": "2026-06-03T00:45:43.3581643+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] RAG hit                        chunk=31/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=3. Ajuda a apoiar a refatora\u00e7\u00e3o, que \u00e9 um processo de melhoria do software.  Em  score=0.405"}
+{"TimeStamp": "2026-06-03T00:45:43.3581708+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] RAG hit                        chunk=14/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Pr\u00e1ticas do Extreme score=0.404"}
+{"TimeStamp": "2026-06-03T00:45:43.3582623+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] RAG hit                        chunk=22/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 Reorganiza\u00e7\u00e3o de uma hierarquia de classes para remover c\u00f3digo duplicado.  \u00b7 O score=0.394"}
+{"TimeStamp": "2026-06-03T00:45:43.3584298+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] RAG hit                        chunk=42/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  \u00b7 Um ponto particul score=0.393"}
+{"TimeStamp": "2026-06-03T00:45:43.3584397+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] RAG hit                        chunk=0/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=Desenvolvimento \u00c1gil de Software  @ 2011 Pearson Prentice Hall. Todos os direito score=0.379"}
+{"TimeStamp": "2026-06-03T00:45:43.3584547+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] RAG hit                        chunk=2/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 O objetivo dos m\u00e9todos \u00e1geis \u00e9 reduzir o overhead nos processos de software (e score=0.376"}
+{"TimeStamp": "2026-06-03T00:45:43.3584897+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] RAG hit                        chunk=13/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Princ\u00edpios os m\u00e9tod score=0.368"}
+{"TimeStamp": "2026-06-03T00:45:43.3779333+00:00", "Log": "F 2026-06-03 00:45:43 [info     ] Cache hit para t\u00f3picos da aula cache_key=topics:crs_ee570174:3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:43.3989005+00:00", "Log": "F 2026-06-03 00:45:43 [error    ] main_worker_error              error=cannot access local variable 'random' where it is not associated with a value error_type=UnboundLocalError"}
+{"TimeStamp": "2026-06-03T00:45:43.3991744+00:00", "Log": "F Traceback (most recent call last):"}
+{"TimeStamp": "2026-06-03T00:45:43.3993747+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 501, in llm_loop"}
+{"TimeStamp": "2026-06-03T00:45:43.3993849+00:00", "Log": "F     await process_inbound(receiver, msg)"}
+{"TimeStamp": "2026-06-03T00:45:43.39939+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 348, in process_inbound"}
+{"TimeStamp": "2026-06-03T00:45:43.3993916+00:00", "Log": "F     await handle_review_request(phone, review_context)"}
+{"TimeStamp": "2026-06-03T00:45:43.399393+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 232, in handle_review_request"}
+{"TimeStamp": "2026-06-03T00:45:43.3993943+00:00", "Log": "F     review = await generate_review("}
+{"TimeStamp": "2026-06-03T00:45:43.3993956+00:00", "Log": "F              ^^^^^^^^^^^^^^^^^^^^^^"}
+{"TimeStamp": "2026-06-03T00:45:43.3993985+00:00", "Log": "F   File \"/app/src/rag/review_generator.py\", line 109, in generate_review"}
+{"TimeStamp": "2026-06-03T00:45:43.3993997+00:00", "Log": "F     chosen_topic = random.choice(topics)"}
+{"TimeStamp": "2026-06-03T00:45:43.3994009+00:00", "Log": "F                    ^^^^^^"}
+{"TimeStamp": "2026-06-03T00:45:43.3994022+00:00", "Log": "F UnboundLocalError: cannot access local variable 'random' where it is not associated with a value"}
+{"TimeStamp": "2026-06-03T00:45:48.8970072+00:00", "Log": "F 2026-06-03 00:45:48 [info     ] session_acquired"}
+{"TimeStamp": "2026-06-03T00:45:49.0996986+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] messages_received              count=1"}
+{"TimeStamp": "2026-06-03T00:45:49.1072256+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] DEBUG_ROUTING: Extracted review_course_id: crs_ee570174 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:49.1134468+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] DEBUG_ROUTING: review_context found! Course: Intelig\u00eancia Artificial correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:49.6212306+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] Retriever target lesson strategy correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec current_lesson=3 lesson_hint=3 phone=5513991719595 target_lesson=3"}
+{"TimeStamp": "2026-06-03T00:45:49.6324182+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] Pinpointed search returned 8 results for lesson 3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:49.6324566+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] RAG hit                        chunk=35/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 A equipe inteira comparece \u00e0s reuni\u00f5es di\u00e1rias curtas nas quais todos os membr score=0.407"}
+{"TimeStamp": "2026-06-03T00:45:49.6325448+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] RAG hit                        chunk=31/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=3. Ajuda a apoiar a refatora\u00e7\u00e3o, que \u00e9 um processo de melhoria do software.  Em  score=0.405"}
+{"TimeStamp": "2026-06-03T00:45:49.6325542+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] RAG hit                        chunk=14/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Pr\u00e1ticas do Extreme score=0.404"}
+{"TimeStamp": "2026-06-03T00:45:49.6325674+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] RAG hit                        chunk=22/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 Reorganiza\u00e7\u00e3o de uma hierarquia de classes para remover c\u00f3digo duplicado.  \u00b7 O score=0.394"}
+{"TimeStamp": "2026-06-03T00:45:49.6367664+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] RAG hit                        chunk=42/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  \u00b7 Um ponto particul score=0.393"}
+{"TimeStamp": "2026-06-03T00:45:49.6368003+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] RAG hit                        chunk=0/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=Desenvolvimento \u00c1gil de Software  @ 2011 Pearson Prentice Hall. Todos os direito score=0.379"}
+{"TimeStamp": "2026-06-03T00:45:49.636815+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] RAG hit                        chunk=2/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 O objetivo dos m\u00e9todos \u00e1geis \u00e9 reduzir o overhead nos processos de software (e score=0.376"}
+{"TimeStamp": "2026-06-03T00:45:49.6369328+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] RAG hit                        chunk=13/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Princ\u00edpios os m\u00e9tod score=0.368"}
+{"TimeStamp": "2026-06-03T00:45:49.6531946+00:00", "Log": "F 2026-06-03 00:45:49 [info     ] Cache hit para t\u00f3picos da aula cache_key=topics:crs_ee570174:3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:50.4362034+00:00", "Log": "F 2026-06-03 00:45:50 [error    ] main_worker_error              error=cannot access local variable 'random' where it is not associated with a value error_type=UnboundLocalError"}
+{"TimeStamp": "2026-06-03T00:45:50.4364894+00:00", "Log": "F Traceback (most recent call last):"}
+{"TimeStamp": "2026-06-03T00:45:50.4367915+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 501, in llm_loop"}
+{"TimeStamp": "2026-06-03T00:45:50.4368153+00:00", "Log": "F     await process_inbound(receiver, msg)"}
+{"TimeStamp": "2026-06-03T00:45:50.4368241+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 348, in process_inbound"}
+{"TimeStamp": "2026-06-03T00:45:50.4368258+00:00", "Log": "F     await handle_review_request(phone, review_context)"}
+{"TimeStamp": "2026-06-03T00:45:50.4368272+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 232, in handle_review_request"}
+{"TimeStamp": "2026-06-03T00:45:50.436831+00:00", "Log": "F     review = await generate_review("}
+{"TimeStamp": "2026-06-03T00:45:50.4368324+00:00", "Log": "F              ^^^^^^^^^^^^^^^^^^^^^^"}
+{"TimeStamp": "2026-06-03T00:45:50.4368336+00:00", "Log": "F   File \"/app/src/rag/review_generator.py\", line 109, in generate_review"}
+{"TimeStamp": "2026-06-03T00:45:50.4368348+00:00", "Log": "F     chosen_topic = random.choice(topics)"}
+{"TimeStamp": "2026-06-03T00:45:50.436836+00:00", "Log": "F                    ^^^^^^"}
+{"TimeStamp": "2026-06-03T00:45:50.4368372+00:00", "Log": "F UnboundLocalError: cannot access local variable 'random' where it is not associated with a value"}
+{"TimeStamp": "2026-06-03T00:45:55.9205823+00:00", "Log": "F 2026-06-03 00:45:55 [info     ] session_acquired"}
+{"TimeStamp": "2026-06-03T00:45:56.1242177+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] messages_received              count=2"}
+{"TimeStamp": "2026-06-03T00:45:56.1317511+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] DEBUG_ROUTING: Extracted review_course_id: crs_ee570174 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:56.1382013+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] DEBUG_ROUTING: review_context found! Course: Intelig\u00eancia Artificial correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:56.3774944+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] Retriever target lesson strategy correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec current_lesson=3 lesson_hint=3 phone=5513991719595 target_lesson=3"}
+{"TimeStamp": "2026-06-03T00:45:56.389388+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] Pinpointed search returned 8 results for lesson 3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:56.3894313+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] RAG hit                        chunk=35/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 A equipe inteira comparece \u00e0s reuni\u00f5es di\u00e1rias curtas nas quais todos os membr score=0.407"}
+{"TimeStamp": "2026-06-03T00:45:56.3895767+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] RAG hit                        chunk=31/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=3. Ajuda a apoiar a refatora\u00e7\u00e3o, que \u00e9 um processo de melhoria do software.  Em  score=0.405"}
+{"TimeStamp": "2026-06-03T00:45:56.3896083+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] RAG hit                        chunk=14/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Pr\u00e1ticas do Extreme score=0.404"}
+{"TimeStamp": "2026-06-03T00:45:56.38962+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] RAG hit                        chunk=22/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 Reorganiza\u00e7\u00e3o de uma hierarquia de classes para remover c\u00f3digo duplicado.  \u00b7 O score=0.394"}
+{"TimeStamp": "2026-06-03T00:45:56.3896491+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] RAG hit                        chunk=42/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  \u00b7 Um ponto particul score=0.393"}
+{"TimeStamp": "2026-06-03T00:45:56.3896639+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] RAG hit                        chunk=0/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=Desenvolvimento \u00c1gil de Software  @ 2011 Pearson Prentice Hall. Todos os direito score=0.379"}
+{"TimeStamp": "2026-06-03T00:45:56.3897679+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] RAG hit                        chunk=2/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 O objetivo dos m\u00e9todos \u00e1geis \u00e9 reduzir o overhead nos processos de software (e score=0.376"}
+{"TimeStamp": "2026-06-03T00:45:56.3897779+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] RAG hit                        chunk=13/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Princ\u00edpios os m\u00e9tod score=0.368"}
+{"TimeStamp": "2026-06-03T00:45:56.4077368+00:00", "Log": "F 2026-06-03 00:45:56 [info     ] Cache hit para t\u00f3picos da aula cache_key=topics:crs_ee570174:3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:45:56.4619281+00:00", "Log": "F 2026-06-03 00:45:56 [error    ] main_worker_error              error=cannot access local variable 'random' where it is not associated with a value error_type=UnboundLocalError"}
+{"TimeStamp": "2026-06-03T00:45:56.462146+00:00", "Log": "F Traceback (most recent call last):"}
+{"TimeStamp": "2026-06-03T00:45:56.4623948+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 501, in llm_loop"}
+{"TimeStamp": "2026-06-03T00:45:56.4624151+00:00", "Log": "F     await process_inbound(receiver, msg)"}
+{"TimeStamp": "2026-06-03T00:45:56.4624222+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 348, in process_inbound"}
+{"TimeStamp": "2026-06-03T00:45:56.4624279+00:00", "Log": "F     await handle_review_request(phone, review_context)"}
+{"TimeStamp": "2026-06-03T00:45:56.4624294+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 232, in handle_review_request"}
+{"TimeStamp": "2026-06-03T00:45:56.4624307+00:00", "Log": "F     review = await generate_review("}
+{"TimeStamp": "2026-06-03T00:45:56.462456+00:00", "Log": "F              ^^^^^^^^^^^^^^^^^^^^^^"}
+{"TimeStamp": "2026-06-03T00:45:56.4624575+00:00", "Log": "F   File \"/app/src/rag/review_generator.py\", line 109, in generate_review"}
+{"TimeStamp": "2026-06-03T00:45:56.4624588+00:00", "Log": "F     chosen_topic = random.choice(topics)"}
+{"TimeStamp": "2026-06-03T00:45:56.4624601+00:00", "Log": "F                    ^^^^^^"}
+{"TimeStamp": "2026-06-03T00:45:56.4625301+00:00", "Log": "F UnboundLocalError: cannot access local variable 'random' where it is not associated with a value"}
+{"TimeStamp": "2026-06-03T00:46:01.951997+00:00", "Log": "F 2026-06-03 00:46:01 [info     ] session_acquired"}
+{"TimeStamp": "2026-06-03T00:46:02.1561286+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] messages_received              count=2"}
+{"TimeStamp": "2026-06-03T00:46:02.1743687+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] DEBUG_ROUTING: Extracted review_course_id: crs_ee570174 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:02.1860158+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] DEBUG_ROUTING: review_context found! Course: Intelig\u00eancia Artificial correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:02.7974102+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] Retriever target lesson strategy correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec current_lesson=3 lesson_hint=3 phone=5513991719595 target_lesson=3"}
+{"TimeStamp": "2026-06-03T00:46:02.8101434+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] Pinpointed search returned 8 results for lesson 3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:02.8101812+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] RAG hit                        chunk=35/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 A equipe inteira comparece \u00e0s reuni\u00f5es di\u00e1rias curtas nas quais todos os membr score=0.407"}
+{"TimeStamp": "2026-06-03T00:46:02.8103253+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] RAG hit                        chunk=31/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=3. Ajuda a apoiar a refatora\u00e7\u00e3o, que \u00e9 um processo de melhoria do software.  Em  score=0.405"}
+{"TimeStamp": "2026-06-03T00:46:02.8103474+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] RAG hit                        chunk=14/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Pr\u00e1ticas do Extreme score=0.404"}
+{"TimeStamp": "2026-06-03T00:46:02.8103577+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] RAG hit                        chunk=22/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 Reorganiza\u00e7\u00e3o de uma hierarquia de classes para remover c\u00f3digo duplicado.  \u00b7 O score=0.394"}
+{"TimeStamp": "2026-06-03T00:46:02.8103605+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] RAG hit                        chunk=42/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  \u00b7 Um ponto particul score=0.393"}
+{"TimeStamp": "2026-06-03T00:46:02.8103702+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] RAG hit                        chunk=0/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=Desenvolvimento \u00c1gil de Software  @ 2011 Pearson Prentice Hall. Todos os direito score=0.379"}
+{"TimeStamp": "2026-06-03T00:46:02.8104343+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] RAG hit                        chunk=2/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 O objetivo dos m\u00e9todos \u00e1geis \u00e9 reduzir o overhead nos processos de software (e score=0.376"}
+{"TimeStamp": "2026-06-03T00:46:02.8105006+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] RAG hit                        chunk=13/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Princ\u00edpios os m\u00e9tod score=0.368"}
+{"TimeStamp": "2026-06-03T00:46:02.8279833+00:00", "Log": "F 2026-06-03 00:46:02 [info     ] Cache hit para t\u00f3picos da aula cache_key=topics:crs_ee570174:3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:03.4929293+00:00", "Log": "F 2026-06-03 00:46:03 [error    ] main_worker_error              error=cannot access local variable 'random' where it is not associated with a value error_type=UnboundLocalError"}
+{"TimeStamp": "2026-06-03T00:46:03.4932235+00:00", "Log": "F Traceback (most recent call last):"}
+{"TimeStamp": "2026-06-03T00:46:03.4934483+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 501, in llm_loop"}
+{"TimeStamp": "2026-06-03T00:46:03.4934697+00:00", "Log": "F     await process_inbound(receiver, msg)"}
+{"TimeStamp": "2026-06-03T00:46:03.4934806+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 348, in process_inbound"}
+{"TimeStamp": "2026-06-03T00:46:03.4934832+00:00", "Log": "F     await handle_review_request(phone, review_context)"}
+{"TimeStamp": "2026-06-03T00:46:03.4934854+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 232, in handle_review_request"}
+{"TimeStamp": "2026-06-03T00:46:03.4934876+00:00", "Log": "F     review = await generate_review("}
+{"TimeStamp": "2026-06-03T00:46:03.4934896+00:00", "Log": "F              ^^^^^^^^^^^^^^^^^^^^^^"}
+{"TimeStamp": "2026-06-03T00:46:03.4934916+00:00", "Log": "F   File \"/app/src/rag/review_generator.py\", line 109, in generate_review"}
+{"TimeStamp": "2026-06-03T00:46:03.4934937+00:00", "Log": "F     chosen_topic = random.choice(topics)"}
+{"TimeStamp": "2026-06-03T00:46:03.4934957+00:00", "Log": "F                    ^^^^^^"}
+{"TimeStamp": "2026-06-03T00:46:03.4934978+00:00", "Log": "F UnboundLocalError: cannot access local variable 'random' where it is not associated with a value"}
+{"TimeStamp": "2026-06-03T00:46:09.0062998+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] session_acquired"}
+{"TimeStamp": "2026-06-03T00:46:09.2108763+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] messages_received              count=2"}
+{"TimeStamp": "2026-06-03T00:46:09.2192445+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] DEBUG_ROUTING: Extracted review_course_id: crs_ee570174 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:09.2253573+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] DEBUG_ROUTING: review_context found! Course: Intelig\u00eancia Artificial correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:09.6921946+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] Retriever target lesson strategy correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec current_lesson=3 lesson_hint=3 phone=5513991719595 target_lesson=3"}
+{"TimeStamp": "2026-06-03T00:46:09.7055225+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] Pinpointed search returned 8 results for lesson 3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:09.7055587+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] RAG hit                        chunk=35/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 A equipe inteira comparece \u00e0s reuni\u00f5es di\u00e1rias curtas nas quais todos os membr score=0.407"}
+{"TimeStamp": "2026-06-03T00:46:09.7056685+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] RAG hit                        chunk=31/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=3. Ajuda a apoiar a refatora\u00e7\u00e3o, que \u00e9 um processo de melhoria do software.  Em  score=0.405"}
+{"TimeStamp": "2026-06-03T00:46:09.7056817+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] RAG hit                        chunk=14/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Pr\u00e1ticas do Extreme score=0.404"}
+{"TimeStamp": "2026-06-03T00:46:09.7087355+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] RAG hit                        chunk=22/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 Reorganiza\u00e7\u00e3o de uma hierarquia de classes para remover c\u00f3digo duplicado.  \u00b7 O score=0.394"}
+{"TimeStamp": "2026-06-03T00:46:09.7087556+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] RAG hit                        chunk=42/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  \u00b7 Um ponto particul score=0.393"}
+{"TimeStamp": "2026-06-03T00:46:09.7087651+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] RAG hit                        chunk=0/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=Desenvolvimento \u00c1gil de Software  @ 2011 Pearson Prentice Hall. Todos os direito score=0.379"}
+{"TimeStamp": "2026-06-03T00:46:09.7088279+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] RAG hit                        chunk=2/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 O objetivo dos m\u00e9todos \u00e1geis \u00e9 reduzir o overhead nos processos de software (e score=0.376"}
+{"TimeStamp": "2026-06-03T00:46:09.7088361+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] RAG hit                        chunk=13/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Princ\u00edpios os m\u00e9tod score=0.368"}
+{"TimeStamp": "2026-06-03T00:46:09.7248273+00:00", "Log": "F 2026-06-03 00:46:09 [info     ] Cache hit para t\u00f3picos da aula cache_key=topics:crs_ee570174:3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:10.5464043+00:00", "Log": "F 2026-06-03 00:46:10 [error    ] main_worker_error              error=cannot access local variable 'random' where it is not associated with a value error_type=UnboundLocalError"}
+{"TimeStamp": "2026-06-03T00:46:10.5467+00:00", "Log": "F Traceback (most recent call last):"}
+{"TimeStamp": "2026-06-03T00:46:10.5469028+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 501, in llm_loop"}
+{"TimeStamp": "2026-06-03T00:46:10.5469283+00:00", "Log": "F     await process_inbound(receiver, msg)"}
+{"TimeStamp": "2026-06-03T00:46:10.5469395+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 348, in process_inbound"}
+{"TimeStamp": "2026-06-03T00:46:10.5469411+00:00", "Log": "F     await handle_review_request(phone, review_context)"}
+{"TimeStamp": "2026-06-03T00:46:10.5469425+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 232, in handle_review_request"}
+{"TimeStamp": "2026-06-03T00:46:10.5469438+00:00", "Log": "F     review = await generate_review("}
+{"TimeStamp": "2026-06-03T00:46:10.546945+00:00", "Log": "F              ^^^^^^^^^^^^^^^^^^^^^^"}
+{"TimeStamp": "2026-06-03T00:46:10.5469463+00:00", "Log": "F   File \"/app/src/rag/review_generator.py\", line 109, in generate_review"}
+{"TimeStamp": "2026-06-03T00:46:10.5469474+00:00", "Log": "F     chosen_topic = random.choice(topics)"}
+{"TimeStamp": "2026-06-03T00:46:10.5469486+00:00", "Log": "F                    ^^^^^^"}
+{"TimeStamp": "2026-06-03T00:46:10.5469535+00:00", "Log": "F UnboundLocalError: cannot access local variable 'random' where it is not associated with a value"}
+{"TimeStamp": "2026-06-03T00:46:16.0317126+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] session_acquired"}
+{"TimeStamp": "2026-06-03T00:46:16.2360087+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] messages_received              count=2"}
+{"TimeStamp": "2026-06-03T00:46:16.2513395+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] DEBUG_ROUTING: Extracted review_course_id: crs_ee570174 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:16.2568843+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] DEBUG_ROUTING: review_context found! Course: Intelig\u00eancia Artificial correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:16.6596136+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] Retriever target lesson strategy correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec current_lesson=3 lesson_hint=3 phone=5513991719595 target_lesson=3"}
+{"TimeStamp": "2026-06-03T00:46:16.6725041+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] Pinpointed search returned 8 results for lesson 3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:16.6725407+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] RAG hit                        chunk=35/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 A equipe inteira comparece \u00e0s reuni\u00f5es di\u00e1rias curtas nas quais todos os membr score=0.407"}
+{"TimeStamp": "2026-06-03T00:46:16.6726682+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] RAG hit                        chunk=31/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=3. Ajuda a apoiar a refatora\u00e7\u00e3o, que \u00e9 um processo de melhoria do software.  Em  score=0.405"}
+{"TimeStamp": "2026-06-03T00:46:16.6726748+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] RAG hit                        chunk=14/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Pr\u00e1ticas do Extreme score=0.404"}
+{"TimeStamp": "2026-06-03T00:46:16.672767+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] RAG hit                        chunk=22/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 Reorganiza\u00e7\u00e3o de uma hierarquia de classes para remover c\u00f3digo duplicado.  \u00b7 O score=0.394"}
+{"TimeStamp": "2026-06-03T00:46:16.6768124+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] RAG hit                        chunk=42/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  \u00b7 Um ponto particul score=0.393"}
+{"TimeStamp": "2026-06-03T00:46:16.6768409+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] RAG hit                        chunk=0/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=Desenvolvimento \u00c1gil de Software  @ 2011 Pearson Prentice Hall. Todos os direito score=0.379"}
+{"TimeStamp": "2026-06-03T00:46:16.6768551+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] RAG hit                        chunk=2/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 O objetivo dos m\u00e9todos \u00e1geis \u00e9 reduzir o overhead nos processos de software (e score=0.376"}
+{"TimeStamp": "2026-06-03T00:46:16.6771391+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] RAG hit                        chunk=13/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Princ\u00edpios os m\u00e9tod score=0.368"}
+{"TimeStamp": "2026-06-03T00:46:16.6912686+00:00", "Log": "F 2026-06-03 00:46:16 [info     ] Cache hit para t\u00f3picos da aula cache_key=topics:crs_ee570174:3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:17.5728066+00:00", "Log": "F 2026-06-03 00:46:17 [error    ] main_worker_error              error=cannot access local variable 'random' where it is not associated with a value error_type=UnboundLocalError"}
+{"TimeStamp": "2026-06-03T00:46:17.5729648+00:00", "Log": "F Traceback (most recent call last):"}
+{"TimeStamp": "2026-06-03T00:46:17.5731237+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 501, in llm_loop"}
+{"TimeStamp": "2026-06-03T00:46:17.5731365+00:00", "Log": "F     await process_inbound(receiver, msg)"}
+{"TimeStamp": "2026-06-03T00:46:17.5731433+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 348, in process_inbound"}
+{"TimeStamp": "2026-06-03T00:46:17.5731458+00:00", "Log": "F     await handle_review_request(phone, review_context)"}
+{"TimeStamp": "2026-06-03T00:46:17.5731479+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 232, in handle_review_request"}
+{"TimeStamp": "2026-06-03T00:46:17.5731499+00:00", "Log": "F     review = await generate_review("}
+{"TimeStamp": "2026-06-03T00:46:17.573152+00:00", "Log": "F              ^^^^^^^^^^^^^^^^^^^^^^"}
+{"TimeStamp": "2026-06-03T00:46:17.5731542+00:00", "Log": "F   File \"/app/src/rag/review_generator.py\", line 109, in generate_review"}
+{"TimeStamp": "2026-06-03T00:46:17.5731604+00:00", "Log": "F     chosen_topic = random.choice(topics)"}
+{"TimeStamp": "2026-06-03T00:46:17.5731625+00:00", "Log": "F                    ^^^^^^"}
+{"TimeStamp": "2026-06-03T00:46:17.5731646+00:00", "Log": "F UnboundLocalError: cannot access local variable 'random' where it is not associated with a value"}
+{"TimeStamp": "2026-06-03T00:46:26.8960423+00:00", "Log": "F 2026-06-03 00:46:26 [info     ] session_acquired"}
+{"TimeStamp": "2026-06-03T00:46:27.1002961+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] messages_received              count=2"}
+{"TimeStamp": "2026-06-03T00:46:27.1100782+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] DEBUG_ROUTING: Extracted review_course_id: crs_ee570174 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:27.1170113+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] DEBUG_ROUTING: review_context found! Course: Intelig\u00eancia Artificial correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:27.5610253+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] Retriever target lesson strategy correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec current_lesson=3 lesson_hint=3 phone=5513991719595 target_lesson=3"}
+{"TimeStamp": "2026-06-03T00:46:27.5732601+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] Pinpointed search returned 8 results for lesson 3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:27.5733787+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] RAG hit                        chunk=35/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 A equipe inteira comparece \u00e0s reuni\u00f5es di\u00e1rias curtas nas quais todos os membr score=0.407"}
+{"TimeStamp": "2026-06-03T00:46:27.5733857+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] RAG hit                        chunk=31/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=3. Ajuda a apoiar a refatora\u00e7\u00e3o, que \u00e9 um processo de melhoria do software.  Em  score=0.405"}
+{"TimeStamp": "2026-06-03T00:46:27.5767674+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] RAG hit                        chunk=14/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Pr\u00e1ticas do Extreme score=0.404"}
+{"TimeStamp": "2026-06-03T00:46:27.5767967+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] RAG hit                        chunk=22/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 Reorganiza\u00e7\u00e3o de uma hierarquia de classes para remover c\u00f3digo duplicado.  \u00b7 O score=0.394"}
+{"TimeStamp": "2026-06-03T00:46:27.5768089+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] RAG hit                        chunk=42/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  \u00b7 Um ponto particul score=0.393"}
+{"TimeStamp": "2026-06-03T00:46:27.576867+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] RAG hit                        chunk=0/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=Desenvolvimento \u00c1gil de Software  @ 2011 Pearson Prentice Hall. Todos os direito score=0.379"}
+{"TimeStamp": "2026-06-03T00:46:27.5768709+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] RAG hit                        chunk=2/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 O objetivo dos m\u00e9todos \u00e1geis \u00e9 reduzir o overhead nos processos de software (e score=0.376"}
+{"TimeStamp": "2026-06-03T00:46:27.5768749+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] RAG hit                        chunk=13/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Princ\u00edpios os m\u00e9tod score=0.368"}
+{"TimeStamp": "2026-06-03T00:46:27.591203+00:00", "Log": "F 2026-06-03 00:46:27 [info     ] Cache hit para t\u00f3picos da aula cache_key=topics:crs_ee570174:3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:27.615185+00:00", "Log": "F 2026-06-03 00:46:27 [error    ] main_worker_error              error=cannot access local variable 'random' where it is not associated with a value error_type=UnboundLocalError"}
+{"TimeStamp": "2026-06-03T00:46:27.6154416+00:00", "Log": "F Traceback (most recent call last):"}
+{"TimeStamp": "2026-06-03T00:46:27.6157485+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 501, in llm_loop"}
+{"TimeStamp": "2026-06-03T00:46:27.6157601+00:00", "Log": "F     await process_inbound(receiver, msg)"}
+{"TimeStamp": "2026-06-03T00:46:27.6157658+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 348, in process_inbound"}
+{"TimeStamp": "2026-06-03T00:46:27.6157681+00:00", "Log": "F     await handle_review_request(phone, review_context)"}
+{"TimeStamp": "2026-06-03T00:46:27.6157702+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 232, in handle_review_request"}
+{"TimeStamp": "2026-06-03T00:46:27.6157722+00:00", "Log": "F     review = await generate_review("}
+{"TimeStamp": "2026-06-03T00:46:27.6157788+00:00", "Log": "F              ^^^^^^^^^^^^^^^^^^^^^^"}
+{"TimeStamp": "2026-06-03T00:46:27.6157809+00:00", "Log": "F   File \"/app/src/rag/review_generator.py\", line 109, in generate_review"}
+{"TimeStamp": "2026-06-03T00:46:27.6157829+00:00", "Log": "F     chosen_topic = random.choice(topics)"}
+{"TimeStamp": "2026-06-03T00:46:27.6157849+00:00", "Log": "F                    ^^^^^^"}
+{"TimeStamp": "2026-06-03T00:46:27.6158597+00:00", "Log": "F UnboundLocalError: cannot access local variable 'random' where it is not associated with a value"}
+{"TimeStamp": "2026-06-03T00:46:33.1003214+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] session_acquired"}
+{"TimeStamp": "2026-06-03T00:46:33.3030231+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] messages_received              count=2"}
+{"TimeStamp": "2026-06-03T00:46:33.3097778+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] DEBUG_ROUTING: Extracted review_course_id: crs_ee570174 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:33.3159166+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] DEBUG_ROUTING: review_context found! Course: Intelig\u00eancia Artificial correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:33.6150182+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] Retriever target lesson strategy correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec current_lesson=3 lesson_hint=3 phone=5513991719595 target_lesson=3"}
+{"TimeStamp": "2026-06-03T00:46:33.6278945+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] Pinpointed search returned 8 results for lesson 3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:33.6281015+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] RAG hit                        chunk=35/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 A equipe inteira comparece \u00e0s reuni\u00f5es di\u00e1rias curtas nas quais todos os membr score=0.407"}
+{"TimeStamp": "2026-06-03T00:46:33.6281293+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] RAG hit                        chunk=31/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=3. Ajuda a apoiar a refatora\u00e7\u00e3o, que \u00e9 um processo de melhoria do software.  Em  score=0.405"}
+{"TimeStamp": "2026-06-03T00:46:33.6281427+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] RAG hit                        chunk=14/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Pr\u00e1ticas do Extreme score=0.404"}
+{"TimeStamp": "2026-06-03T00:46:33.6281824+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] RAG hit                        chunk=22/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 Reorganiza\u00e7\u00e3o de uma hierarquia de classes para remover c\u00f3digo duplicado.  \u00b7 O score=0.394"}
+{"TimeStamp": "2026-06-03T00:46:33.6281994+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] RAG hit                        chunk=42/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  \u00b7 Um ponto particul score=0.393"}
+{"TimeStamp": "2026-06-03T00:46:33.6282035+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] RAG hit                        chunk=0/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=Desenvolvimento \u00c1gil de Software  @ 2011 Pearson Prentice Hall. Todos os direito score=0.379"}
+{"TimeStamp": "2026-06-03T00:46:33.6282059+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] RAG hit                        chunk=2/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=\u00b7 O objetivo dos m\u00e9todos \u00e1geis \u00e9 reduzir o overhead nos processos de software (e score=0.376"}
+{"TimeStamp": "2026-06-03T00:46:33.6282194+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] RAG hit                        chunk=13/43 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec lesson=3 phone=5513991719595 preview=@ 2011 Pearson Prentice Hall. Todos os direitos reservados.  Princ\u00edpios os m\u00e9tod score=0.368"}
+{"TimeStamp": "2026-06-03T00:46:33.6460834+00:00", "Log": "F 2026-06-03 00:46:33 [info     ] Cache hit para t\u00f3picos da aula cache_key=topics:crs_ee570174:3 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:33.6468651+00:00", "Log": "F 2026-06-03 00:46:33 [error    ] main_worker_error              error=cannot access local variable 'random' where it is not associated with a value error_type=UnboundLocalError"}
+{"TimeStamp": "2026-06-03T00:46:33.6471753+00:00", "Log": "F Traceback (most recent call last):"}
+{"TimeStamp": "2026-06-03T00:46:33.6471944+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 501, in llm_loop"}
+{"TimeStamp": "2026-06-03T00:46:33.6472046+00:00", "Log": "F     await process_inbound(receiver, msg)"}
+{"TimeStamp": "2026-06-03T00:46:33.6472076+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 348, in process_inbound"}
+{"TimeStamp": "2026-06-03T00:46:33.6472097+00:00", "Log": "F     await handle_review_request(phone, review_context)"}
+{"TimeStamp": "2026-06-03T00:46:33.647212+00:00", "Log": "F   File \"/app/src/workers/llm_worker.py\", line 232, in handle_review_request"}
+{"TimeStamp": "2026-06-03T00:46:33.6472176+00:00", "Log": "F     review = await generate_review("}
+{"TimeStamp": "2026-06-03T00:46:33.6472202+00:00", "Log": "F              ^^^^^^^^^^^^^^^^^^^^^^"}
+{"TimeStamp": "2026-06-03T00:46:33.6472222+00:00", "Log": "F   File \"/app/src/rag/review_generator.py\", line 109, in generate_review"}
+{"TimeStamp": "2026-06-03T00:46:33.6472243+00:00", "Log": "F     chosen_topic = random.choice(topics)"}
+{"TimeStamp": "2026-06-03T00:46:33.6472265+00:00", "Log": "F                    ^^^^^^"}
+{"TimeStamp": "2026-06-03T00:46:33.6473317+00:00", "Log": "F UnboundLocalError: cannot access local variable 'random' where it is not associated with a value"}
+{"TimeStamp": "2026-06-03T00:46:39.1515984+00:00", "Log": "F 2026-06-03 00:46:39 [info     ] session_acquired"}
+{"TimeStamp": "2026-06-03T00:46:39.3557921+00:00", "Log": "F 2026-06-03 00:46:39 [info     ] messages_received              count=2"}
+{"TimeStamp": "2026-06-03T00:46:39.3658766+00:00", "Log": "F 2026-06-03 00:46:39 [info     ] DEBUG_ROUTING: Extracted review_course_id: crs_ee570174 correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:46:39.3720815+00:00", "Log": "F 2026-06-03 00:46:39 [info     ] DEBUG_ROUTING: review_context found! Course: Intelig\u00eancia Artificial correlation_id=d31b7a85-51f2-480a-9369-9b0132fd7bec phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:47:34.142021+00:00", "Log": "F 2026-06-03 00:47:34 [info     ] process_command_message        args= command=wakeup phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:47:34.1420617+00:00", "Log": "F 2026-06-03 00:47:34 [info     ] waking_up_worker_via_hack"}
+{"TimeStamp": "2026-06-03T00:50:49.1899635+00:00", "Log": "F 2026-06-03 00:50:49 [info     ] process_command_message        args= command=wakeup phone=5513991719595"}
+{"TimeStamp": "2026-06-03T00:50:49.1900064+00:00", "Log": "F 2026-06-03 00:50:49 [info     ] waking_up_worker_via_hack"}
+{"TimeStamp": "2026-06-03T01:03:02.0702227+00:00", "Log": "F 2026-06-03 01:03:02 [info     ] process_command_message        args= command=sync_students phone=5513974033349"}
+{"TimeStamp": "2026-06-03T01:03:02.3197613+00:00", "Log": "F 2026-06-03 01:03:02 [info     ] Google Drive & Sheets API initialized via Service Account"}
+{"TimeStamp": "2026-06-03T01:03:05.050959+00:00", "Log": "F 2026-06-03 01:03:05 [info     ] Spreadsheet sync completed     stats={'teachers_upserted': 1, 'students_upserted': 2, 'courses_upserted': 2, 'schedules_upserted': 6, 'teachers_before': 2, 'teachers_after': 2, 'students_before': 2, 'students_after': 2, 'courses_before': 3, 'courses_after': 3, 'schedules_before': 6, 'schedules_after': 6}"}
+{"TimeStamp": "2026-06-03T01:22:01.8826073+00:00", "Log": "F 2026-06-03 01:22:01 [info     ] process_command_message        args= command=wakeup phone=5513991719595"}
+{"TimeStamp": "2026-06-03T01:22:01.8826433+00:00", "Log": "F 2026-06-03 01:22:01 [info     ] waking_up_worker_via_hack"}

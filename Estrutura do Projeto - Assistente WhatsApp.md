@@ -1148,6 +1148,7 @@ class CommandType:
     LIST_COURSES = "list_courses"
     LIST_MATERIALS = "list_materials"
     UPDATE_LESSON = "update_lesson"
+    SEND_QUIZ = "send_quiz"
     UNKNOWN = "unknown"
 
 # Aliases suportados (aceita variantes e erros de digitação comuns)
@@ -1170,6 +1171,9 @@ COMMAND_ALIASES = {
     ],
     CommandType.UPDATE_LESSON: [
         "/aula"
+    ],
+    CommandType.SEND_QUIZ: [
+        "/quiz"
     ]
 }
 
@@ -1605,14 +1609,15 @@ class QuizAlternative(BaseModel):
 
 class QuizOutput(BaseModel):
     question: str = Field(description="Pergunta clara e direta sobre o conteúdo da aula")
-    alternatives: list[QuizAlternative] = Field(description="Lista de alternativas (2 a 5)")
+    alternatives: list[QuizAlternative] = Field(description="Lista com EXATAMENTE 3 alternativas (A, B, C)")
     correct_answer: str = Field(description="ID da alternativa correta")
-    explanation: str = Field(description="Explicação pedagógica de por que a resposta está correta")
+    explanation: str = Field(description="Explicação pedagógica de por que a resposta está correta. NUNCA cite a letra da alternativa (A, B, C) neste texto.")
 
 parser = PydanticOutputParser(pydantic_object=QuizOutput)
 
 QUIZ_GENERATION_PROMPT = """Com base no conteúdo da aula abaixo, gere uma questão de múltipla escolha
 para testar o entendimento do aluno.
+IMPORTANTE: A questão DEVE ter EXATAMENTE 3 alternativas (A, B, C). Não crie 4 ou 5 opções.
 
 Conteúdo da aula:
 {context}
@@ -1623,9 +1628,8 @@ Gere a questão em português, com alternativas claras e uma explicação pedag�
 detalhada para a resposta correta."""
 
 async def generate_quiz(
-    student: Student,
     lesson_content: str,
-    num_alternatives: int = 4,
+    num_alternatives: int = 3,
 ) -> QuizOutput:
     """Gera um quiz em JSON estruturado via LLM.
     
@@ -1633,14 +1637,32 @@ async def generate_quiz(
     e explicação são gerados em uma única chamada. A validação posterior
     é determinística (zero tokens).
     """
-    llm = get_provider().llm_instance()
+    llm = get_provider()
     prompt = QUIZ_GENERATION_PROMPT.format(
         context=lesson_content,
         format_instructions=parser.get_format_instructions(),
     )
-    response = await llm.ainvoke(prompt)
-    return parser.parse(response.content)
+    response_text = await llm.agenerate(prompt)
+    quiz = parser.parse(response_text)
+    
+    # Randomização Algorítmica (Anti-Viés)
+    import random
+    if quiz.alternatives:
+        correct_id = quiz.correct_answer
+        correct_text = next((a.text for a in quiz.alternatives if a.id == correct_id), None)
+        
+        if correct_text:
+            random.shuffle(quiz.alternatives)
+            new_ids = ["A", "B", "C", "D", "E"]
+            for i, alt in enumerate(quiz.alternatives):
+                alt.id = new_ids[i]
+                if alt.text == correct_text:
+                    quiz.correct_answer = alt.id
+                    
+    return quiz
 ```
+
+**Anti-Viés (Randomização Determinística):** O LLM possui um viés natural para posicionar a resposta correta quase sempre na alternativa "B". Para evitar que o sistema induza os alunos ao erro ou crie padrões fáceis de adivinhar, a etapa de randomização foi retirada do *prompt* e trazida para o *código Python*. O `quiz_generator` e `review_generator` leem a resposta gerada pelo LLM, embaralham as alternativas de forma cega (`random.shuffle()`) e re-atribuem as letras (A, B, C), neutralizando 100% qualquer viés estatístico do LLM.
 
 #### **Fase 2: Persistência e Envio Interativo**
 
@@ -1741,6 +1763,24 @@ Quando o aluno clica em uma opção, o webhook recebe um payload `interactive` c
         ↓
 [Próxima pergunta enviada após intervalo configurável]
 ```
+
+#### **9.6.1 Variância Pedagógica e Cache Agnóstico (Two-Step Pipeline)**
+
+Para mitigar a repetição na geração de quizzes (o LLM tende a gerar questões sobre o mesmo tópico central repetidamente), foi implementada uma pipeline em duas etapas (Two-Step Pipeline) suportada por um cache distribuído.
+
+**Passo 1: Extração Exaustiva de Tópicos (Agnóstica)**
+Uma consulta isolada ao RAG extrai *todos* os tópicos abordados na aula.
+- **FinOps via Cache Redis:** Para evitar essa extração massiva a cada interação do aluno, o resultado da extração (lista de strings) é serializado no Redis (`topic_cache.py`).
+- **Chave Agnóstica:** A chave do Redis `course_topics:{course_id}:{lesson_number}` exclui deliberadamente o `teacher_id`. Isso garante um reuso global. Se dois professores ensinam a mesma matéria usando o mesmo pacote base, a extração de tópicos ocorre apenas uma vez. O TTL do cache é de 30 dias (`2592000` segundos).
+
+**Passo 2: Sorteio e Lente Pedagógica**
+Um tópico aleatório é selecionado e combinado com uma "Lente Pedagógica" também aleatória, instruindo o LLM a abordar o tópico por diferentes perspectivas:
+- Detalhe técnico minucioso
+- Situação hipotética do mundo real
+- Exceção à regra
+- Definição do conceito central
+
+**Tratamento de Falhas (Fast-path Webhook):** No caso de erros durante o sorteio ou parsing de saídas variadas da LLM, o roteador RAG é encapsulado em um bloco `try/except`. Quando falha via "Fast-Path", em vez de morrer silenciosamente (causando loop de notificação no Scheduler), o Worker intercepta o erro, confirma o esvaziamento da fila do Service Bus e avisa o aluno com `ERROR_TECHNICAL` usando a API Meta, prevenindo deadlocks na janela de serviço de 24h.
 
 #### **Expiração de Quizzes**
 
