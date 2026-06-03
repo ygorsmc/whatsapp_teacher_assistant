@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     PHONE_NUMBER_ID: str = Field(default="YOUR_PHONE_ID")
     WHATSAPP_API_URL: str = Field(default="https://graph.facebook.com/v21.0")
     
+    # Defaults and Limits
+    DEFAULT_LANGUAGE: str = Field(default="pt_BR")
+    META_TEMPLATE_REVIEW: str = Field(default="convite_revisao_quiz")
+    TIMEZONE_OFFSET_HOURS: int = Field(default=-3)
+    MAX_WHATSAPP_MESSAGE_LENGTH: int = Field(default=4000)
+    
     # Redis
     REDIS_URL: str = Field(default="redis://localhost:6379/0")
     DEBOUNCE_TTL_SECONDS: int = Field(default=2)

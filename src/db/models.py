@@ -130,7 +130,7 @@ class StudentSchedule(Base):
     student_id = Column(String(255), ForeignKey("Students.id"), nullable=False)
     course_id = Column(String(255), ForeignKey("Courses.id"), nullable=False)
     template_name = Column(String(255), ForeignKey("MessageTemplates.template_name"), nullable=False)
-    preferred_hour = Column(String(255), nullable=False)  # Time slot in BRT: "07:00", "12:00", "18:00"
+    preferred_hour = Column(String(255), nullable=False)  # Time slot in Local TZ: "07:00", "12:00", "18:00"
     content_type = Column(String(255), nullable=False, default="review")  # 'review' | 'quiz' | 'preview'
     next_trigger_date = Column(DateTime, nullable=False)
     last_sent_at = Column(DateTime, nullable=True)

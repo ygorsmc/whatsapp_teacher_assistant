@@ -28,16 +28,16 @@ from src.db.database import AsyncSessionLocal, init_db
 
 logger = structlog.get_logger(__name__)
 
-# BRT offset (UTC-3, fixed — no DST since 2019)
-BRT_OFFSET = timedelta(hours=-3)
+# Local TZ offset (configurable, default UTC-3)
+LOCAL_TZ_OFFSET = timedelta(hours=settings.TIMEZONE_OFFSET_HOURS)
 
 # Scheduler poll interval (seconds)
 SCHEDULER_INTERVAL = 300  # 5 minutes
 
 
-def now_brt() -> datetime:
-    """Returns current datetime in BRT (UTC-3)."""
-    return datetime.now(timezone.utc) + BRT_OFFSET
+def now_local() -> datetime:
+    """Returns current datetime in Local TZ."""
+    return datetime.now(timezone.utc) + LOCAL_TZ_OFFSET
 
 LAST_USER_SYNC_DATE = None
 
@@ -45,11 +45,11 @@ async def perform_daily_user_sync():
     """Sincroniza alunos e professores da planilha do Google todos os dias de madrugada (03:00 BRT)."""
     global LAST_USER_SYNC_DATE
     
-    agora_brt = now_brt()
-    hoje = agora_brt.date()
+    agora_local = now_local()
+    hoje = agora_local.date()
     
-    # Executa entre 03:00 e 03:59 BRT
-    if agora_brt.hour == 3:
+    # Executa entre 03:00 e 03:59 Local Time
+    if agora_local.hour == 3:
         if LAST_USER_SYNC_DATE != hoje:
             from src.drive.spreadsheet_sync import sync_users_from_sheet
             try:
@@ -72,18 +72,18 @@ def compute_next_trigger(preferred_hour: str, from_date: datetime | None = None)
     Returns:
         Next trigger datetime in UTC
     """
-    base = from_date or now_brt()
+    base = from_date or now_local()
     hour, minute = map(int, preferred_hour.split(":"))
 
-    # Build target time in BRT
-    target_brt = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    # Build target time in Local TZ
+    target_local = base.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
     # If target already passed today, schedule for tomorrow
-    if target_brt <= base:
-        target_brt += timedelta(days=1)
+    if target_local <= base:
+        target_local += timedelta(days=1)
 
-    # Convert BRT to UTC for storage
-    target_utc = target_brt - BRT_OFFSET
+    # Convert Local TZ to UTC for storage
+    target_utc = target_local - LOCAL_TZ_OFFSET
     return target_utc.replace(tzinfo=timezone.utc)
 
 
@@ -186,7 +186,7 @@ async def process_pending_schedules():
                     # This opens the 24h service window when the student responds
                     await send_template_message(
                         phone=phone,
-                        template_name="convite_revisao_quiz",
+                        template_name=settings.META_TEMPLATE_REVIEW,
                         parameters=[row.student_name, row.course_name],
                         button_payloads=[f"review_accept_{row.course_id}", f"review_later_{row.course_id}"]
                     )

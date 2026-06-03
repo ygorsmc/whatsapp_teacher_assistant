@@ -89,7 +89,7 @@ async def send_list_message(
 
     return await _send_whatsapp_request(message)
 
-def _chunk_text(text: str, max_length: int = 4000) -> list[str]:
+def _chunk_text(text: str, max_length: int = settings.MAX_WHATSAPP_MESSAGE_LENGTH) -> list[str]:
     """Divide um texto longo em pedaços seguros para envio no WhatsApp."""
     if len(text) <= max_length:
         return [text]
@@ -119,7 +119,7 @@ def _chunk_text(text: str, max_length: int = 4000) -> list[str]:
 
 async def send_whatsapp_message(phone: str, text: str, reply_to_message_id: str | None = None) -> dict:
     """Envia uma mensagem de texto simples via WhatsApp Cloud API com suporte a chunking e citações."""
-    chunks = _chunk_text(text, max_length=4000)
+    chunks = _chunk_text(text, max_length=settings.MAX_WHATSAPP_MESSAGE_LENGTH)
     
     last_response = {}
     for i, chunk in enumerate(chunks):
@@ -155,7 +155,7 @@ async def send_whatsapp_typing(phone: str) -> dict:
 async def send_template_message(
     phone: str,
     template_name: str,
-    language: str = "pt_BR",
+    language: str | None = None,
     parameters: list[str] | None = None,
     button_payloads: list[str] | None = None,
 ) -> dict:
@@ -166,6 +166,8 @@ async def send_template_message(
 
     Utility Templates custam ~R$0,05 e abrem janela de 24h para interação gratuita.
     """
+    language = language or settings.DEFAULT_LANGUAGE
+    
     body = {
         "messaging_product": "whatsapp",
         "to": phone,

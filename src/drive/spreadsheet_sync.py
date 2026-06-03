@@ -377,8 +377,8 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 
                 current_lesson = 1
                 if start_date_obj:
-                    brt = timezone(timedelta(hours=-3))
-                    hoje = datetime.now(brt).date()
+                    local_tz = timezone(timedelta(hours=settings.TIMEZONE_OFFSET_HOURS))
+                    hoje = datetime.now(local_tz).date()
                     if start_date_obj > hoje:
                         current_lesson = 0
 
