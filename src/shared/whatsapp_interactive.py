@@ -157,6 +157,7 @@ async def send_template_message(
     template_name: str,
     language: str = "pt_BR",
     parameters: list[str] | None = None,
+    button_payloads: list[str] | None = None,
 ) -> dict:
     """Envia um Message Template aprovado pelo Meta via Cloud API.
 
@@ -174,14 +175,36 @@ async def send_template_message(
             "language": {"code": language},
         },
     }
+    
+    components = []
+    
     if parameters:
-        body["template"]["components"] = [
+        components.append(
             {
                 "type": "body",
                 "parameters": [
                     {"type": "text", "text": p} for p in parameters
                 ],
             }
-        ]
+        )
+        
+    if button_payloads:
+        for index, payload in enumerate(button_payloads):
+            components.append(
+                {
+                    "type": "button",
+                    "sub_type": "quick_reply",
+                    "index": str(index),
+                    "parameters": [
+                        {
+                            "type": "payload",
+                            "payload": payload
+                        }
+                    ]
+                }
+            )
+            
+    if components:
+        body["template"]["components"] = components
 
     return await _send_whatsapp_request(body)

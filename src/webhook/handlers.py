@@ -154,6 +154,17 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
             text = msg_data.get("text", {}).get("body", "").strip()
             message_type = "text"
             
+        elif msg_type == "button":
+            # Quick reply buttons from templates come as "button"
+            button_data = msg_data.get("button", {})
+            interactive_payload = {
+                "type": "button_reply",
+                "id": button_data.get("payload", ""),
+                "title": button_data.get("text", ""),
+            }
+            text = interactive_payload["title"]
+            message_type = "interactive"
+            
         else:
             await send_whatsapp_message(phone, UNSUPPORTED_MESSAGE_TYPE)
             return Response(status_code=200)

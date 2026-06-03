@@ -21,7 +21,7 @@ from sqlalchemy import text
 
 from src.shared.config import settings
 from src.shared.telemetry import track_event
-from src.shared.whatsapp_interactive import send_template_message, send_reply_buttons
+from src.shared.whatsapp_interactive import send_whatsapp_message, send_template_message
 from src.shared.constants.messages import REVIEW_INVITE_BODY, REVIEW_INVITE_FOOTER, REVIEW_ACCEPT_TITLE, REVIEW_LATER_TITLE
 from src.cache.redis_client import get_redis
 from src.db.database import AsyncSessionLocal, init_db
@@ -184,14 +184,11 @@ async def process_pending_schedules():
                     logger.info("scheduler_window_closed_sending_invite", phone=phone, schedule_id=schedule_id)
                     # Window is closed. Send the review invitation via interactive buttons (Template)
                     # This opens the 24h service window when the student responds
-                    await send_reply_buttons(
+                    await send_template_message(
                         phone=phone,
-                        body_text=REVIEW_INVITE_BODY.format(course_name=row.course_name, student_name=row.student_name),
-                        buttons=[
-                            {"id": f"review_accept_{row.course_id}", "title": accept_title[:20]},
-                            {"id": f"review_later_{row.course_id}", "title": later_title[:20]},
-                        ],
-                        footer=REVIEW_INVITE_FOOTER,
+                        template_name="convite_revisao_quiz",
+                        parameters=[row.student_name, row.course_name],
+                        button_payloads=[f"review_accept_{row.course_id}", f"review_later_{row.course_id}"]
                     )
 
                 # Mark as sent and compute next trigger
