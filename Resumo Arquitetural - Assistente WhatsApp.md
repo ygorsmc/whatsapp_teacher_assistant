@@ -39,8 +39,9 @@ WhatsApp (Meta Cloud API)
         │
         ▼
 [Scheduler — Timer Trigger a cada 5min]
-└── Envia mensagem de abertura com botão → aluno clica → janela de 24h aberta
-    └── Dentro da janela: quiz + revisão + RAG livre (sem custo adicional)
+└── Janela Fechada (> 24h): Envia Template Message (Utility) com Payload Dinâmico → aluno clica → janela abre
+└── Janela Aberta (< 24h): Envia Interactive Message (botões normais) direto com o Quiz (sem custo adicional)
+    └── Dentro da janela: RAG livre, correção de exercícios e interação pedagógica contínua
 ```
 
 ---
@@ -60,17 +61,29 @@ A Meta requer resposta em menos de 200ms. Qualquer lógica de negócio executada
 
 O design anterior usava `asyncio.sleep()` no webhook para aguardar mensagens rápidas. Isso foi movido para o Worker LLM. Além disso, o worker de comandos (`command_messages`) foi integrado ao `Worker LLM` (usando `asyncio.gather`), permitindo consumir as duas filas simultaneamente e reduzindo a pegada de containers no Azure.
 
+### Telemetria e Janela de 24h no SQL Server
+
+Para garantir resiliência e possibilitar futuros dashboards de Analytics, a verificação da Janela de 24h **não** usa mais o TTL do Redis. Toda interação (seja `message_received` ou `review_sent`) é registrada atomicamente na tabela `StudentInteractions` do Azure SQL. O agendador consulta o `MAX(timestamp)` dessa tabela para decidir com precisão absoluta se a janela está aberta ou fechada. O Redis atua exclusivamente como Fast-Cache (Debounce e Rate Limit).
+
+### A Arquitetura de Templates (Contorno do Bloqueio da Meta)
+
+A API do WhatsApp (Graph API) bloqueia (HTTP 400) mensagens interativas (free-form) fora da janela de serviço. Para contornar isso:
+1. O agendador utiliza `send_template_message` enviando um **Utility Template** oficial (pago).
+2. Os botões de Quick Reply do template são injetados com um **Payload Dinâmico** (ex: `review_accept_crs_123`).
+3. O Webhook foi expandido para reconhecer retornos do tipo `msg_type == "button"` (exclusivos de templates) e roteá-los para o Worker como se fossem cliques de mensagens interativas normais.
+
 ### Janela de serviço de 24h — estratégia de custo
 
 A Meta cobra por **conversa**, não por mensagem individual. O objetivo é abrir uma única janela por aluno por dia, concentrando toda a interação dentro dela.
 
-**A primeira mensagem do dia é sempre um botão simples de aceite** — não um quiz. Isso reduz a barreira de interação ao mínimo: o aluno toca num botão, a janela abre, e todo o conteúdo pedagógico do dia (quiz, revisão, respostas a dúvidas) é entregue gratuitamente dentro da janela.
+**A primeira mensagem do dia é sempre um botão simples de aceite** — não um quiz aberto. Isso reduz a barreira de interação ao mínimo: o aluno toca num botão (que no background aciona um payload rastreável para o backend), a janela abre, e todo o conteúdo pedagógico do dia (quiz, revisão, respostas a dúvidas) é entregue gratuitamente dentro da janela.
 
 ```
-[Scheduler]
+[Scheduler] (Tabela StudentInteractions)
     ↓
-Envia: "Pronto para sua revisão de hoje?"
-       [ Sim, vamos lá! ]  [ Agora não ]
+Janela Fechada? 
+→ Envia Utility Template (Ex: "convite_revisao_quiz")
+       [ Fazer Agora ]  [ Lembrar Mais Tarde ]
     ↓
 Aluno toca em qualquer botão
     ↓
@@ -175,6 +188,7 @@ Toda query SQL e toda busca vetorial inclui filtro por `teacher_id` e `course_id
 
 Nas instâncias Azure, a simples substituição da imagem por uma tag genérica (como `latest`) não forçará uma recriação da revisão pela plataforma. Para evitar falsos-positivos em publicações de código:
 - Sempre injetar um "salt" de deploy nas env vars. No CI/CD, utiliza-se `--set-env-vars FORCE_UPDATE=$(date +%s)` no ACR update. Isso destrói o container anterior e reinicia com o novo digest físico da imagem `latest`.
+- **Injeção de Variáveis (KEDA Bypass):** Variáveis sensíveis não encapsuladas no Key Vault (como `GOOGLE_SHEET_ID`) não devem depender de montagem local via `.env` em produção, pois falham na escalabilidade via KEDA. O script de deploy as injeta nativamente como ambiente do contêiner (`az containerapp update --set-env-vars`).
 
 ---
 

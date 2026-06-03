@@ -1,44 +1,47 @@
-# Plano de Atualização da Documentação Arquitetural
+# Plano de Limpeza do Repositório (Auditoria de Código)
 
-**Objetivo:** Refletir na documentação oficial (`Estrutura do Projeto` e `Resumo Arquitetural`) as estabilizações e mudanças reais implementadas na arquitetura do WhatsApp Teacher Assistant após os testes em produção.
+**Objetivo:** Passar um pente-fino no código-fonte, removendo arquivos obsoletos, scripts de debug temporários e patches de infraestrutura que foram criados ao longo do desenvolvimento e que não fazem mais parte do funcionamento em produção do Assistente WhatsApp. Isso manterá o projeto enxuto e profissional.
 
 ## 🔴 User Review Required
 
 > [!IMPORTANT]
 > **Aprovação Necessária**
-> Por favor, revise este plano de documentação. Ao aprovar, iniciaremos a **Fase 2 (Implementação)** disparando os agentes especializados em documentação e backend para consolidar essas informações nos arquivos Markdown oficiais.
+> Verifique a lista de arquivos identificados para exclusão abaixo. 
+> Todos esses arquivos foram identificados como scripts locais de debug, logs ou patches que já cumpriram sua função e só estão gerando ruído no repositório.
+> NENHUM arquivo fonte das pastas `src/` será apagado. O arquivo `command_worker.py` foi mantido pois suas funções são importadas e rodadas dentro do `llm_worker.py`.
+> 
+> **Você aprova a exclusão desses arquivos?**
 
-## 🔒 Mudanças Arquiteturais Consolidadas (A Serem Documentadas)
+## 🗑️ Arquivos Identificados para Exclusão (Fase 2)
 
-1. **Unificação dos Workers (`worker-llm` e `worker-command`)**
-   * *O que mudou:* O container `worker-command` foi desativado e integrado ao `worker-llm` para otimização de recursos computacionais e simplificação da infraestrutura no Azure Container Apps. O `worker-llm` agora executa tanto o loop de mensagens padrão (via fila `inbound_messages`) quanto o loop de comandos administrativos (via fila `command_messages`) através de concorrência com `asyncio.gather`.
-2. **Otimização Extrema do Webhook (< 50ms)**
-   * *O que mudou:* O webhook agora utiliza um Cache em memória (`self.senders`) para a conexão TCP/AMQP do Service Bus e um hard-timeout configurado em 1.0 segundo para o Redis. Isso garante que o Webhook nunca sofra o timeout implacável da Meta (que causava um efeito dominó de 5 retries com `msg_id`s diferentes burlando o lock de idempotência).
-3. **Conversão de Datas para Azure SQL Server (`DATETIME`)**
-   * *O que mudou:* Ajuste na camada de ingestão (`spreadsheet_sync.py`) abandonando o formato longo ISO-8601 (com timezone `+00:00`) e padronizando o formato `%Y-%m-%dT%H:%M:%S` para compatibilidade com colunas `DATETIME` do SQL Server. Isso evitou a quebra silenciosa da inicialização dos alunos via comando `/sinc_alunos`.
-4. **Substituição do Azure Cache for Redis por um Container App (Redis)**
-   * *O que mudou:* Em vez de utilizar o serviço gerenciado (e mais caro) "Azure Cache for Redis", implantamos a imagem oficial `redis:7-alpine` como um Container App interno no mesmo ambiente (VNet). Isso reduz custos massivamente enquanto mantém o ecossistema Serverless (Container Apps).
+Abaixo estão as 3 categorias de arquivos redundantes ou inúteis encontrados na raiz e na pasta `infra/`.
 
----
+### 1. Scripts de Validação/Teste Locais (Raiz)
+*Esses scripts foram usados para validar partes específicas da infraestrutura durante o desenvolvimento e não são usados em produção.*
+- `check_msgs.py`, `check_queue.py`, `check_redis.py`, `check_sb.py`, `check_teachers.py`, `check_telemetry.py`
+- `db_check.py`, `query_db.py`, `debug.py`, `patch.py`
+- `test_cache.py`, `test_db.py`, `test_dlq.py`, `test_langchain_embed.py`, `test_qdrant_filter.py`, `test_rag.py`, `test_redis.py`, `test_sync.py`, `test_trigger.py`, `test_worker.py`
+- `fix_default_teacher.py`, `fix_ids.py`, `fix_sync.py`, `move_pass.py`
+- `peek_dlq.py`
 
-## 🛠️ Proposed Changes (Fase 2)
+### 2. Arquivos de Log Temporários (Raiz)
+*Logs salvos localmente que não devem ser versionados e só ocupam espaço.*
+- `full_logs.txt`
+- `logs.txt`
+- `sync_log.txt`
 
-### 1. Atualização do Resumo Arquitetural (`documentation-writer`)
-*   **[MODIFY]** `Resumo Arquitetural - Assistente WhatsApp.md`
-    *   Remover a menção ao `[Command Handler]` como um worker isolado no diagrama visual, indicando que ele é um loop interno do `[Worker LLM]`.
-    *   Adicionar ênfase na configuração de Timeout do Redis (1.0s) como decisão crítica de engenharia para sobrevivência do Webhook perante a agressividade da Meta.
-    *   Especificar a compatibilidade nativa de datas do banco Azure SQL Server.
-    *   Atualizar a tabela de Stack Tecnológica: alterar "Azure Cache for Redis" para "Redis (Container App Interno)".
-
-### 2. Atualização da Estrutura do Projeto (`backend-specialist`)
-*   **[MODIFY]** `Estrutura do Projeto - Assistente WhatsApp.md`
-    *   Atualizar o mapa hierárquico removendo o serviço de comandos em um container separado.
-    *   Detalhar a mecânica de cache do `ServiceBusSender` acoplado no Singleton `ServiceBusWrapper` como parte integrante da estrutura de rede interna (`infra`).
-
----
+### 3. Patches e YAMLs Temporários (`infra/`)
+*Foram usados scripts Python para injetar secrets nos manifestos do KEDA temporariamente durante os testes de deploy. Agora que o `deploy_app.sh` lida com as imagens via CLI, essas sobras podem sumir.*
+- `infra/patch_keda.py`
+- `infra/patch_keda_clean.py`
+- `infra/patch_keda_fix.py`
+- `infra/patch_scheduler.py`
+- `infra/patch_yaml.py`
+- `infra/worker-llm-keda-patch.yaml`
+- `infra/worker-llm-keda-patch2.yaml`
+- `infra/worker-llm-keda-patch3.yaml`
+- `infra/worker-llm-patched.yaml`
+- `infra/worker-scheduler-patched.yaml`
 
 ## ✅ Verification Plan
-
-### Validação
-- Leitura final dos arquivos Markdown renderizados para garantir formatação limpa e diagramas legíveis.
-- Verificação cruzada com o estado real do código em `src/workers` e `src/webhook`.
+Na Fase 2, os agentes vão deletar esses arquivos. A verificação consistirá em rodar o comando `python3 doc_generator.py` novamente para confirmar que a contagem de arquivos rastreados caiu consideravelmente e apenas a arquitetura oficial sobrou.
