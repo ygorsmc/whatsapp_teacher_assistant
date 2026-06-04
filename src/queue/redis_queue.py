@@ -5,6 +5,7 @@ import uuid
 import os
 from typing import Callable, Awaitable
 import redis.asyncio as redis
+from redis.exceptions import ResponseError
 from src.shared.config import settings
 from src.shared.telemetry import track_event
 from src.queue.interfaces import IMessageQueue, MessageContext
@@ -48,7 +49,7 @@ class RedisStreamsQueue(IMessageQueue):
     async def _ensure_group(self, queue: str):
         try:
             await self.client.xgroup_create(queue, self.group_name, id="0", mkstream=True)
-        except redis.exceptions.ResponseError as e:
+        except ResponseError as e:
             if "BUSYGROUP Consumer Group name already exists" not in str(e):
                 raise
 
