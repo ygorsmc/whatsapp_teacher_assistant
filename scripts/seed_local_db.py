@@ -24,8 +24,16 @@ def compute_next_trigger_utc(preferred_hour: str) -> datetime:
 
 
 async def seed():
-    # Ensure tables are created
-    await init_db()
+    # Ensure tables are empty before seeding to prevent crash loops
+    async with AsyncSessionLocal() as session:
+        await session.execute(text('DELETE FROM "StudentSchedule"'))
+        await session.execute(text('DELETE FROM "MessageTemplates"'))
+        await session.execute(text('DELETE FROM "StudentEnrollment"'))
+        await session.execute(text('DELETE FROM "Classes"'))
+        await session.execute(text('DELETE FROM "Students"'))
+        await session.execute(text('DELETE FROM "Courses"'))
+        await session.execute(text('DELETE FROM "Teachers"'))
+        await session.commit()
     
     async with AsyncSessionLocal() as session:
         # Create a fake teacher (Deterministic UUID for local dev)
@@ -33,7 +41,7 @@ async def seed():
         await session.execute(
             text("""
                 INSERT INTO "Teachers" (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
-                VALUES (:id, 'Professor Teste', 'Matemática', '5511000000000', 'Seja educado e prestativo', 'Isso está fora do escopo.', 1)
+                VALUES (:id, 'Professor Teste', 'Matemática', '5511000000000', 'Seja educado e prestativo', 'Isso está fora do escopo.', true)
             """),
             {"id": teacher_id}
         )
@@ -43,7 +51,7 @@ async def seed():
         await session.execute(
             text("""
                 INSERT INTO "Courses" (id, teacher_id, name, is_active)
-                VALUES (:id, :teacher_id, 'Matemática Básica', 1)
+                VALUES (:id, :teacher_id, 'Matemática Básica', true)
             """),
             {"id": course_id, "teacher_id": teacher_id}
         )
@@ -54,7 +62,7 @@ async def seed():
         await session.execute(
             text("""
                 INSERT INTO "Students" (id, name, phone, is_active)
-                VALUES (:id, 'Ygor (Aluno)', :phone, 1)
+                VALUES (:id, 'Ygor (Aluno)', :phone, true)
             """),
             {"id": student_id, "phone": phone}
         )
@@ -100,14 +108,14 @@ async def seed():
                     VALUES
                         (:sid, :student_id, :course_id, 'daily_review',
                          :preferred_hour, 'review', :next_trigger,
-                         1, 'scheduled')
+                         true, 'scheduled')
                 """),
                 {
                     "sid": schedule_id,
                     "student_id": student_id,
                     "course_id": course_id,
                     "preferred_hour": slot,
-                    "next_trigger": next_trigger.isoformat(),
+                    "next_trigger": next_trigger,
                 }
             )
         
