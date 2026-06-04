@@ -239,3 +239,5 @@ Toda chamada ao LLM passa por uma interface única (`LLMProvider`). Trocar o mod
 - `ConversationBufferMemory` apenas — nunca `ConversationTokenBufferMemory`
 - Segredos exclusivamente via Azure Key Vault — zero connection strings no código
 - Hard delete de vetores no Qdrant somente às 03:00 BRT — nunca durante o horário de uso
+- **PostgreSQL Strictness:** Tabelas sempre envoltas em aspas (`"Teachers"`), booleanos como `true`/`false` e datas usando instâncias de `datetime` puro (nunca strings).
+- **Telegram Security:** O Webhook deve sempre validar o `X-Telegram-Bot-Api-Secret-Token` injetado via `/setWebhook`.

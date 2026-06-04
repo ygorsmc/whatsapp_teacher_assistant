@@ -35,6 +35,7 @@ These are easily missed and cause production bugs if violated:
 - **Debouncing is in the Worker, NOT the webhook.** Sleeping in the webhook handler violates the 200ms SLA.
 - Global `try/except` — Meta must never receive status != 2xx.
 - Endpoint versioned: `/v1/webhook`
+- **Telegram Webhook Security:** `setWebhook` API calls MUST pass `secret_token=TELEGRAM_WEBHOOK_SECRET` or the application will reject all incoming POSTs with `webhook_signature_failed`.
 - `minReplicas=1` mandatory (cold start = ~5-30s, breaks Meta's 200ms SLA).
 - Route `/` commands to `command_messages` queue **before** `inbound_messages`. Students sending commands are rejected at the edge without touching Service Bus.
 
@@ -50,11 +51,13 @@ These are easily missed and cause production bugs if violated:
 - `OptimizedRedisChatMessageHistory` intercepts message add and runs `LTRIM` natively (last 40 messages). Use `aadd_message` (async), not `add_message` (sync).
 - Debounce drain uses an atomic Lua script to prevent race conditions between `LRANGE` and `DEL`.
 
-### Data Model
+### Data Model & PostgreSQL Strictness
 - **`lesson_id` is a stable identifier, NOT a positional index.** Inserting a lesson in the sequence must not break existing student pointers.
 - `StudentEnrollment(student_id, course_id, lesson_id)` — pointer is per enrollment (N:N), not per student.
 - Lesson pointer advances based on `ScheduledClasses` + `Attendance.confirmed`, not raw numeric increment.
 - **Every SQL and vector query MUST filter by `teacher_id` AND `course_id`.** Missing filters = data leak between courses.
+- **PostgreSQL Case-Sensitivity:** ALL table names in Raw SQL must be explicitly quoted (e.g., `SELECT * FROM "Teachers"`).
+- **PostgreSQL Data Types:** Do NOT use SQLite semantics for Booleans (use `true`/`false`, not `1`/`0`) and always pass native `datetime` Python objects to `asyncpg` bindings (do NOT use `.isoformat()` or `.strftime()` strings in parametrized queries).
 
 ### Qdrant
 - **Scalar Quantization INT8 must be configured at collection creation** — not retroactive without full reindex.
