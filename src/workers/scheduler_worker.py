@@ -111,7 +111,7 @@ async def process_pending_schedules():
                   AND s.is_active = true
                   AND c.is_active = true
             """),
-            {"now": now_utc.strftime("%Y-%m-%d %H:%M:%S")},
+            {"now": now_utc},
         )
         pending = result.fetchall()
 
@@ -221,8 +221,8 @@ async def process_pending_schedules():
                         WHERE schedule_id = :sid
                     """),
                     {
-                        "now": now_utc.strftime("%Y-%m-%d %H:%M:%S"),
-                        "next_trigger": next_trigger.strftime("%Y-%m-%d %H:%M:%S"),
+                        "now": now_utc,
+                        "next_trigger": next_trigger,
                         "sid": schedule_id,
                     },
                 )

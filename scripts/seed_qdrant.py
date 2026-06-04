@@ -15,14 +15,14 @@ async def seed_qdrant():
 
     print("Buscando Professor e Curso no banco SQLite...")
     async with AsyncSessionLocal() as session:
-        result = await session.execute(text("SELECT id, name FROM Teachers WHERE name = 'Professor Teste' LIMIT 1"))
+        result = await session.execute(text('SELECT id, name FROM \"Teachers\" WHERE name = 'Professor Teste' LIMIT 1'))
         teacher = result.fetchone()
         if not teacher:
             print("❌ Professor não encontrado! Rode o seed_local_db.py primeiro.")
             return
         teacher_id = teacher[0]
 
-        result = await session.execute(text("SELECT id, name FROM Courses WHERE teacher_id = :tid LIMIT 1"), {"tid": teacher_id})
+        result = await session.execute(text('SELECT id, name FROM \"Courses\" WHERE teacher_id = :tid LIMIT 1'), {"tid": teacher_id})
         course = result.fetchone()
         course_id = course[0]
 

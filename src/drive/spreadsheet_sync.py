@@ -304,7 +304,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                                         (schedule_id, student_id, course_id, template_name, preferred_hour, content_type, next_trigger_date, is_active, status)
                                         VALUES (:id, :sid, :cid, 'daily_review', :hr, :ct, :nt, :is_active, 'scheduled');
                                 """),
-                                {"id": sched_id, "sid": student_id, "cid": course_id, "hr": h_clean, "ct": "review", "nt": next_trigger.strftime('%Y-%m-%dT%H:%M:%S'), "is_active": is_active}
+                                {"id": sched_id, "sid": student_id, "cid": course_id, "hr": h_clean, "ct": "review", "nt": next_trigger, "is_active": is_active}
                             )
                         else:
                             await session.execute(
@@ -317,7 +317,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                                         status='scheduled',
                                         updated_at=CURRENT_TIMESTAMP
                                 """),
-                                {"id": sched_id, "sid": student_id, "cid": course_id, "hr": h_clean, "nt": next_trigger.strftime('%Y-%m-%dT%H:%M:%S'), "is_active": is_active}
+                                {"id": sched_id, "sid": student_id, "cid": course_id, "hr": h_clean, "nt": next_trigger, "is_active": is_active}
                             )
                         stats["schedules_upserted"] += 1
                         student_active_schedules[student_id].add(sched_id)
@@ -401,7 +401,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                             "cid": course_id, 
                             "name": class_name, 
                             "lesson": current_lesson,
-                            "start_date": start_date_obj.isoformat() if start_date_obj else None,
+                            "start_date": start_date_obj if start_date_obj else None,
                             "sched_map": schedule_map_json
                         }
                     )
@@ -421,7 +421,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                             "cid": course_id, 
                             "name": class_name, 
                             "lesson": current_lesson,
-                            "start_date": start_date_obj.isoformat() if start_date_obj else None,
+                            "start_date": start_date_obj if start_date_obj else None,
                             "sched_map": schedule_map_json
                         }
                     )
