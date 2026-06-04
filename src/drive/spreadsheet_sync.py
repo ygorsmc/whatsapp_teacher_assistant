@@ -62,10 +62,10 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
 
     async with AsyncSessionLocal() as session:
         # Snapshot before
-        teachers_before = (await session.execute(text("SELECT count(*) FROM Teachers"))).scalar()
-        students_before = (await session.execute(text("SELECT count(*) FROM Students"))).scalar()
-        courses_before = (await session.execute(text("SELECT count(*) FROM Courses"))).scalar()
-        schedules_before = (await session.execute(text("SELECT count(*) FROM StudentSchedule"))).scalar()
+        teachers_before = (await session.execute(text('SELECT count(*) FROM \"Teachers\"'))).scalar()
+        students_before = (await session.execute(text('SELECT count(*) FROM \"Students\"'))).scalar()
+        courses_before = (await session.execute(text('SELECT count(*) FROM \"Courses\"'))).scalar()
+        schedules_before = (await session.execute(text('SELECT count(*) FROM \"StudentSchedule\"'))).scalar()
 
         # Pass 1: Upsert Teachers first (so Courses have an owner)
         for row in rows:
@@ -76,7 +76,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
             phone = clean_phone(row[1])
             role = str(row[2]).strip().lower()
             status_val = row[7].strip().lower() if len(row) > 7 else "ativo"
-            is_active = 1 if status_val in ("ativo", "active", "1", "true") else 0
+            is_active = true if status_val in ("ativo", "active", "1", "true") else 0
 
             if role == "professor":
                 teacher_id = generate_id("tea", phone)
@@ -86,7 +86,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 if use_mssql:
                     await session.execute(
                         text("""
-                            MERGE INTO Teachers AS target
+                            MERGE INTO "Teachers" AS target
                             USING (SELECT :phone AS phone) AS source
                             ON target.phone = source.phone
                             WHEN MATCHED THEN UPDATE SET
@@ -98,14 +98,14 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                         """),
                         {"id": teacher_id, "name": name, "phone": phone, "is_active": is_active}
                     )
-                    res = await session.execute(text("SELECT id FROM Teachers WHERE phone = :phone"), {"phone": phone})
+                    res = await session.execute(text('SELECT id FROM \"Teachers\" WHERE phone = :phone'), {"phone": phone})
                     teacher_id = res.scalar()
                     if default_teacher_id == generate_id('tea', phone):
                         default_teacher_id = teacher_id
                 else:
                     res = await session.execute(
                         text("""
-                            INSERT INTO Teachers (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
+                            INSERT INTO "Teachers" (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
                             VALUES (:id, :name, 'Diversos', :phone, 'Seja amigável e direto.', 'Fora do escopo.', :is_active)
                             ON CONFLICT(phone) DO UPDATE SET 
                                 name=excluded.name, 
@@ -126,7 +126,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
             if use_mssql:
                 await session.execute(
                     text("""
-                        MERGE INTO Teachers AS target
+                        MERGE INTO "Teachers" AS target
                         USING (SELECT :id AS id) AS source
                         ON target.id = source.id
                         WHEN NOT MATCHED THEN INSERT (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
@@ -136,7 +136,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
             else:
                 await session.execute(
                     text("""
-                        INSERT OR IGNORE INTO Teachers (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
+                        INSERT OR IGNORE INTO "Teachers" (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
                         VALUES (:id, 'Professor Default', 'Geral', '00000000', 'Seja prestativo.', 'Não sei.', 1)
                     """), {"id": default_teacher_id}
                 )
@@ -164,7 +164,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
             
             # Status: Coluna I(8)
             status_val = row[8].strip().lower() if len(row) > 8 else "ativo"
-            is_active = 1 if status_val in ("ativo", "active", "1", "true") else 0
+            is_active = true if status_val in ("ativo", "active", "1", "true") else 0
 
             if role == "aluno" and phone:
                 student_id = generate_id("stu", phone)
@@ -173,7 +173,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 if use_mssql:
                     await session.execute(
                         text("""
-                            MERGE INTO Students AS target
+                            MERGE INTO "Students" AS target
                             USING (SELECT :phone AS phone) AS source
                             ON target.phone = source.phone
                             WHEN MATCHED THEN UPDATE SET
@@ -185,12 +185,12 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                         """),
                         {"id": student_id, "name": name, "phone": phone, "is_active": is_active}
                     )
-                    res = await session.execute(text("SELECT id FROM Students WHERE phone = :phone"), {"phone": phone})
+                    res = await session.execute(text('SELECT id FROM \"Students\" WHERE phone = :phone'), {"phone": phone})
                     student_id = res.scalar()
                 else:
                     res = await session.execute(
                         text("""
-                            INSERT INTO Students (id, name, phone, is_active)
+                            INSERT INTO "Students" (id, name, phone, is_active)
                             VALUES (:id, :name, :phone, :is_active)
                             ON CONFLICT(phone) DO UPDATE SET 
                                 name=excluded.name, 
@@ -211,7 +211,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 if use_mssql:
                     await session.execute(
                         text("""
-                            MERGE INTO Courses AS target
+                            MERGE INTO "Courses" AS target
                             USING (SELECT :id AS id) AS source
                             ON target.id = source.id
                             WHEN NOT MATCHED THEN INSERT (id, teacher_id, name, is_active)
@@ -222,7 +222,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 else:
                     await session.execute(
                         text("""
-                            INSERT OR IGNORE INTO Courses (id, teacher_id, name, is_active)
+                            INSERT OR IGNORE INTO "Courses" (id, teacher_id, name, is_active)
                             VALUES (:id, :tid, :name, 1)
                         """),
                         {"id": course_id, "tid": default_teacher_id, "name": course_name}
@@ -234,7 +234,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 if use_mssql:
                     await session.execute(
                         text("""
-                            MERGE INTO Classes AS target
+                            MERGE INTO "Classes" AS target
                             USING (SELECT :id AS id) AS source
                             ON target.id = source.id
                             WHEN NOT MATCHED THEN INSERT (id, course_id, name, current_lesson_number)
@@ -245,7 +245,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 else:
                     await session.execute(
                         text("""
-                            INSERT OR IGNORE INTO Classes (id, course_id, name, current_lesson_number)
+                            INSERT OR IGNORE INTO "Classes" (id, course_id, name, current_lesson_number)
                             VALUES (:id, :cid, :name, 1)
                         """),
                         {"id": class_id, "cid": course_id, "name": class_name}
@@ -256,7 +256,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 if use_mssql:
                     await session.execute(
                         text("""
-                            MERGE INTO StudentEnrollment AS target
+                            MERGE INTO "StudentEnrollment" AS target
                             USING (SELECT :sid AS student_id, :cid AS class_id) AS source
                             ON target.student_id = source.student_id AND target.class_id = source.class_id
                             WHEN NOT MATCHED THEN INSERT (enrollment_id, student_id, class_id)
@@ -267,7 +267,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 else:
                     await session.execute(
                         text("""
-                            INSERT INTO StudentEnrollment (enrollment_id, student_id, class_id)
+                            INSERT INTO "StudentEnrollment" (enrollment_id, student_id, class_id)
                             VALUES (:id, :sid, :cid)
                             ON CONFLICT(student_id, class_id) DO NOTHING
                         """),
@@ -290,7 +290,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                         if use_mssql:
                             await session.execute(
                                 text("""
-                                    MERGE INTO StudentSchedule AS target
+                                    MERGE INTO "StudentSchedule" AS target
                                     USING (SELECT :sid AS student_id, :cid AS course_id, :ct AS content_type, :hr AS preferred_hour) AS source
                                     ON target.student_id = source.student_id 
                                        AND target.course_id = source.course_id 
@@ -309,7 +309,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                         else:
                             await session.execute(
                                 text("""
-                                    INSERT INTO StudentSchedule 
+                                    INSERT INTO "StudentSchedule" 
                                     (schedule_id, student_id, course_id, template_name, preferred_hour, content_type, next_trigger_date, is_active, status)
                                     VALUES (:id, :sid, :cid, 'daily_review', :hr, 'review', :nt, :is_active, 'scheduled')
                                     ON CONFLICT(student_id, course_id, content_type, preferred_hour) DO UPDATE SET
@@ -356,7 +356,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 if use_mssql:
                     await session.execute(
                         text("""
-                            MERGE INTO Courses AS target
+                            MERGE INTO "Courses" AS target
                             USING (SELECT :id AS id) AS source
                             ON target.id = source.id
                             WHEN NOT MATCHED THEN INSERT (id, teacher_id, name, is_active)
@@ -367,7 +367,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 else:
                     await session.execute(
                         text("""
-                            INSERT OR IGNORE INTO Courses (id, teacher_id, name, is_active)
+                            INSERT OR IGNORE INTO "Courses" (id, teacher_id, name, is_active)
                             VALUES (:id, :tid, :name, 1)
                         """),
                         {"id": course_id, "tid": default_teacher_id, "name": course_name}
@@ -385,7 +385,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 if use_mssql:
                     await session.execute(
                         text("""
-                            MERGE INTO Classes AS target
+                            MERGE INTO "Classes" AS target
                             USING (SELECT :id AS id) AS source
                             ON target.id = source.id
                             WHEN MATCHED THEN UPDATE SET
@@ -408,7 +408,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 else:
                     await session.execute(
                         text("""
-                            INSERT INTO Classes (id, course_id, name, current_lesson_number, start_date, schedule_map)
+                            INSERT INTO "Classes" (id, course_id, name, current_lesson_number, start_date, schedule_map)
                             VALUES (:id, :cid, :name, :lesson, :start_date, :sched_map)
                             ON CONFLICT(id) DO UPDATE SET 
                                 start_date=excluded.start_date,
@@ -432,28 +432,28 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
         for sid, class_ids in student_active_courses.items():
             if class_ids:
                 placeholders = ','.join(f"'{cid}'" for cid in class_ids)
-                await session.execute(text(f"DELETE FROM StudentEnrollment WHERE student_id = '{sid}' AND class_id NOT IN ({placeholders})"))
+                await session.execute(text(f"DELETE FROM \"StudentEnrollment\" WHERE student_id = '{sid}' AND class_id NOT IN ({placeholders})"))
             else:
-                await session.execute(text(f"DELETE FROM StudentEnrollment WHERE student_id = '{sid}'"))
+                await session.execute(text(f"DELETE FROM \"StudentEnrollment\" WHERE student_id = '{sid}'"))
                 
         for sid, sched_ids in student_active_schedules.items():
             if sched_ids:
                 placeholders = ','.join(f"'{sch}'" for sch in sched_ids)
-                await session.execute(text(f"DELETE FROM StudentSchedule WHERE student_id = '{sid}' AND schedule_id NOT IN ({placeholders})"))
+                await session.execute(text(f"DELETE FROM \"StudentSchedule\" WHERE student_id = '{sid}' AND schedule_id NOT IN ({placeholders})"))
             else:
-                await session.execute(text(f"DELETE FROM StudentSchedule WHERE student_id = '{sid}'"))
+                await session.execute(text(f"DELETE FROM \"StudentSchedule\" WHERE student_id = '{sid}'"))
 
         await session.commit()
         
         # Snapshot after
         stats["teachers_before"] = teachers_before
-        stats["teachers_after"] = (await session.execute(text("SELECT count(*) FROM Teachers"))).scalar()
+        stats["teachers_after"] = (await session.execute(text('SELECT count(*) FROM \"Teachers\"'))).scalar()
         stats["students_before"] = students_before
-        stats["students_after"] = (await session.execute(text("SELECT count(*) FROM Students"))).scalar()
+        stats["students_after"] = (await session.execute(text('SELECT count(*) FROM \"Students\"'))).scalar()
         stats["courses_before"] = courses_before
-        stats["courses_after"] = (await session.execute(text("SELECT count(*) FROM Courses"))).scalar()
+        stats["courses_after"] = (await session.execute(text('SELECT count(*) FROM \"Courses\"'))).scalar()
         stats["schedules_before"] = schedules_before
-        stats["schedules_after"] = (await session.execute(text("SELECT count(*) FROM StudentSchedule"))).scalar()
+        stats["schedules_after"] = (await session.execute(text('SELECT count(*) FROM \"StudentSchedule\"'))).scalar()
 
         logger.info("Spreadsheet sync completed", stats=stats)
         return stats

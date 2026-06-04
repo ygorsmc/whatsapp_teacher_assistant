@@ -47,7 +47,7 @@ async def get_user_role(sender_id: str, query_column: str) -> Optional[str]:
     async with AsyncSessionLocal() as session:
         # Check student
         result = await session.execute(
-            sql_text(f"SELECT 1 FROM Students WHERE {query_column} = :sid AND is_active = 1"),
+            sql_text(f'SELECT 1 FROM \"Students\" WHERE {query_column} = :sid AND is_active = true'),
             {"sid": sender_id}
         )
         if result.scalar_one_or_none():
@@ -56,7 +56,7 @@ async def get_user_role(sender_id: str, query_column: str) -> Optional[str]:
             
         # Check teacher
         result = await session.execute(
-            sql_text(f"SELECT 1 FROM Teachers WHERE {query_column} = :sid AND is_active = 1"),
+            sql_text(f'SELECT 1 FROM \"Teachers\" WHERE {query_column} = :sid AND is_active = true'),
             {"sid": sender_id}
         )
         if result.scalar_one_or_none():
@@ -87,7 +87,7 @@ async def handle_telegram_linking(chat_id: str, text: str) -> Response:
     async with AsyncSessionLocal() as session:
         # Busca o estudante pelo telefone (usando LIKE nos ultimos 11 digitos)
         result = await session.execute(
-            sql_text("SELECT id FROM Students WHERE phone LIKE :phone_like AND is_active = 1"),
+            sql_text('SELECT id FROM \"Students\" WHERE phone LIKE :phone_like AND is_active = true'),
             {"phone_like": f"%{phone_digits}"}
         )
         student_id = result.scalar_one_or_none()
@@ -95,7 +95,7 @@ async def handle_telegram_linking(chat_id: str, text: str) -> Response:
         if student_id:
             # Vincula!
             await session.execute(
-                sql_text("UPDATE Students SET telegram_chat_id = :chat_id WHERE id = :id"),
+                sql_text('UPDATE \"Students\" SET telegram_chat_id = :chat_id WHERE id = :id'),
                 {"chat_id": chat_id, "id": student_id}
             )
             await session.commit()
@@ -157,7 +157,7 @@ async def _process_message(msg: InboundMessage, channel: IMessagingChannel):
     # 3.1. Log interaction in DB
     async with AsyncSessionLocal() as session:
         res = await session.execute(
-            sql_text(f"SELECT id FROM Students WHERE {query_column} = :p"), 
+            sql_text(f'SELECT id FROM \"Students\" WHERE {query_column} = :p'), 
             {"p": sender_id}
         )
         student_row = res.fetchone()
@@ -169,7 +169,7 @@ async def _process_message(msg: InboundMessage, channel: IMessagingChannel):
             
             await session.execute(
                 sql_text("""
-                    INSERT INTO StudentInteractions (id, student_id, interaction_type, message_content) 
+                    INSERT INTO "StudentInteractions" (id, student_id, interaction_type, message_content) 
                     VALUES (:id, :sid, :itype, :msg)
                 """),
                 {

@@ -179,7 +179,7 @@ async def sync_google_drive():
                 continue
                 
             result = await session.execute(
-                text("SELECT id, teacher_id FROM Courses WHERE name = :name LIMIT 1"), 
+                text('SELECT id, teacher_id FROM \"Courses\" WHERE name = :name LIMIT 1'), 
                 {"name": course_name}
             )
             course_row = result.fetchone()

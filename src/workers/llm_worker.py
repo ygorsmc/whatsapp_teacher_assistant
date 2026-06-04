@@ -167,7 +167,7 @@ async def handle_quiz_response(
         result = await session.execute(
             text("""
                 SELECT quiz_id, correct_answer, explanation, question_text, status
-                FROM PendingQuizzes
+                FROM "PendingQuizzes"
                 WHERE quiz_id = :quiz_id AND student_id = :student_id
             """),
             {"quiz_id": quiz_id, "student_id": student_id}
@@ -188,7 +188,7 @@ async def handle_quiz_response(
         # Atualiza o registro do quiz
         await session.execute(
             text("""
-                UPDATE PendingQuizzes
+                UPDATE "PendingQuizzes"
                 SET student_answer = :answer, is_correct = :correct,
                     status = 'answered', answered_at = CURRENT_TIMESTAMP
                 WHERE quiz_id = :quiz_id
@@ -295,7 +295,7 @@ async def handle_review_request(channel, sender_id: str, student_context: dict) 
     async with AsyncSessionLocal() as session:
         await session.execute(
             text("""
-                INSERT INTO StudentInteractions (id, student_id, course_id, interaction_type, message_content) 
+                INSERT INTO "StudentInteractions" (id, student_id, course_id, interaction_type, message_content) 
                 VALUES (:id, :sid, :cid, :itype, :msg)
             """),
             {

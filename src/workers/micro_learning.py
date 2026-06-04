@@ -24,7 +24,7 @@ async def send_quiz_to_student(channel, student: dict, quiz: QuizOutput) -> str:
     async with AsyncSessionLocal() as session:
         await session.execute(
             text("""
-                INSERT INTO PendingQuizzes
+                INSERT INTO "PendingQuizzes"
                     (quiz_id, student_id, course_id, lesson_id, question_text,
                      alternatives, correct_answer, explanation, expires_at, status)
                 VALUES

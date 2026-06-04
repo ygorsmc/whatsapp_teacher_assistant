@@ -53,14 +53,14 @@ async def run_list_cursos_command(channel, sender_id: str):
     try:
         async with AsyncSessionLocal() as session:
             query_col = channel.get_user_query_column()
-            result = await session.execute(text(f"SELECT id FROM Teachers WHERE {query_col} = :sid"), {"sid": sender_id})
+            result = await session.execute(text(f'SELECT id FROM \"Teachers\" WHERE {query_col} = :sid'), {"sid": sender_id})
             teacher = result.fetchone()
             if not teacher:
                 await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
             
             result = await session.execute(
-                text("SELECT name, id FROM Courses WHERE teacher_id = :tid AND is_active = 1"),
+                text('SELECT name, id FROM \"Courses\" WHERE teacher_id = :tid AND is_active = true'),
                 {"tid": teacher[0]}
             )
             courses = result.fetchall()
@@ -81,7 +81,7 @@ async def run_list_materiais_command(channel, sender_id: str, course_query: str)
     from src.drive.client import drive_client
     try:
         async with AsyncSessionLocal() as session:
-            result = await session.execute(text("SELECT id FROM Teachers WHERE phone = :phone"), {"phone": phone})
+            result = await session.execute(text('SELECT id FROM \"Teachers\" WHERE phone = :phone'), {"phone": phone})
             teacher = result.fetchone()
             if not teacher:
                 await send_whatsapp_message(phone, "❌ Professor não encontrado no sistema.")
@@ -141,7 +141,7 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
             return
 
         async with AsyncSessionLocal() as session:
-            result = await session.execute(text("SELECT id FROM Teachers WHERE phone = :phone"), {"phone": phone})
+            result = await session.execute(text('SELECT id FROM \"Teachers\" WHERE phone = :phone'), {"phone": phone})
             teacher = result.fetchone()
             if not teacher:
                 await send_whatsapp_message(phone, "❌ Professor não encontrado no sistema.")
@@ -149,8 +149,8 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
             
             stmt = text("""
                 SELECT c.id, c.current_lesson_number 
-                FROM Classes c
-                JOIN Courses crs ON c.course_id = crs.id
+                FROM "Classes" c
+                JOIN "Courses" crs ON c.course_id = crs.id
                 WHERE c.name = :cname AND crs.teacher_id = :tid
             """)
             result = await session.execute(stmt, {"cname": class_name, "tid": teacher[0]})
@@ -163,7 +163,7 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
             class_id = class_row[0]
             
             await session.execute(
-                text("UPDATE Classes SET current_lesson_number = :num, updated_at = CURRENT_TIMESTAMP WHERE id = :cid"),
+                text('UPDATE \"Classes\" SET current_lesson_number = :num, updated_at = CURRENT_TIMESTAMP WHERE id = :cid'),
                 {"num": new_lesson, "cid": class_id}
             )
             await session.commit()
@@ -186,7 +186,7 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
         async with AsyncSessionLocal() as session:
             # 1. Fetch Teacher
             query_col = channel.get_user_query_column()
-            result = await session.execute(text(f"SELECT id FROM Teachers WHERE {query_col} = :sid"), {"sid": sender_id})
+            result = await session.execute(text(f'SELECT id FROM \"Teachers\" WHERE {query_col} = :sid'), {"sid": sender_id})
             teacher = result.fetchone()
             if not teacher:
                 await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
@@ -195,8 +195,8 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
             # 2. Fetch Class & Course
             stmt = text("""
                 SELECT c.id, c.current_lesson_number, crs.id as course_id, c.name
-                FROM Classes c
-                JOIN Courses crs ON c.course_id = crs.id
+                FROM "Classes" c
+                JOIN "Courses" crs ON c.course_id = crs.id
                 WHERE c.name = :cname AND crs.teacher_id = :tid
             """)
             result = await session.execute(stmt, {"cname": class_name, "tid": teacher[0]})
@@ -214,9 +214,9 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
             # 3. Fetch Enrolled Active Students
             stmt_students = text("""
                 SELECT s.id, s.phone, s.name 
-                FROM Students s
-                JOIN StudentEnrollment se ON s.id = se.student_id
-                WHERE se.class_id = :cid AND s.is_active = 1
+                FROM "Students" s
+                JOIN "StudentEnrollment" se ON s.id = se.student_id
+                WHERE se.class_id = :cid AND s.is_active = true
             """)
             result = await session.execute(stmt_students, {"cid": class_id})
             students = result.fetchall()

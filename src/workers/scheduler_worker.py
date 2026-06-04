@@ -102,14 +102,14 @@ async def process_pending_schedules():
                        ss.preferred_hour, ss.content_type,
                        s.name AS student_name, s.{query_col} AS sender_id,
                        c.name AS course_name
-                FROM StudentSchedule ss
-                JOIN Students s ON s.id = ss.student_id
-                JOIN Courses c ON c.id = ss.course_id
+                FROM "StudentSchedule" ss
+                JOIN "Students" s ON s.id = ss.student_id
+                JOIN "Courses" c ON c.id = ss.course_id
                 WHERE ss.status = 'scheduled'
                   AND ss.next_trigger_date <= :now
-                  AND ss.is_active = 1
-                  AND s.is_active = 1
-                  AND c.is_active = 1
+                  AND ss.is_active = true
+                  AND s.is_active = true
+                  AND c.is_active = true
             """),
             {"now": now_utc.strftime("%Y-%m-%d %H:%M:%S")},
         )
@@ -136,7 +136,7 @@ async def process_pending_schedules():
                 res = await session.execute(
                     text("""
                         SELECT MAX(timestamp) 
-                        FROM StudentInteractions 
+                        FROM "StudentInteractions" 
                         WHERE student_id = :sid 
                           AND interaction_type IN ('message_received', 'quiz_answered')
                     """),
@@ -214,7 +214,7 @@ async def process_pending_schedules():
                 next_trigger = compute_next_trigger(row.preferred_hour)
                 await session.execute(
                     text("""
-                        UPDATE StudentSchedule
+                        UPDATE "StudentSchedule"
                         SET status = 'scheduled',
                             last_sent_at = :now,
                             next_trigger_date = :next_trigger
@@ -253,7 +253,7 @@ async def process_pending_schedules():
                 # Mark as failed but don't stop processing others
                 await session.execute(
                     text("""
-                        UPDATE StudentSchedule
+                        UPDATE "StudentSchedule"
                         SET status = 'failed'
                         WHERE schedule_id = :sid
                     """),
@@ -272,7 +272,7 @@ async def advance_classes_pointer():
     ontem_weekday = str(ontem.weekday()) # 0=Monday, 6=Sunday
     
     async with AsyncSessionLocal() as session:
-        result = await session.execute(text("SELECT id, start_date, schedule_map, current_lesson_number, last_advanced_date FROM Classes"))
+        result = await session.execute(text('SELECT id, start_date, schedule_map, current_lesson_number, last_advanced_date FROM \"Classes\"'))
         classes = result.fetchall()
         
         advanced_count = 0
@@ -315,7 +315,7 @@ async def advance_classes_pointer():
             
             await session.execute(
                 text("""
-                    UPDATE Classes
+                    UPDATE "Classes"
                     SET current_lesson_number = :num, last_advanced_date = :hoje, updated_at = CURRENT_TIMESTAMP
                     WHERE id = :cid
                 """),
