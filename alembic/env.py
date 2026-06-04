@@ -9,7 +9,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.db.models import Base
+from src.db.database import Base
+import src.db.models  # Ensure models are loaded into Base.metadata
 from src.shared.config import settings
 
 config = context.config
