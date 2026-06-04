@@ -9,6 +9,7 @@ def client(mocker):
     # Mock telemetry and DB
     mocker.patch("src.shared.telemetry.setup_telemetry")
     mocker.patch("src.shared.telemetry.track_event")
+    import src.db.database
     mocker.patch("src.db.database.init_db")
     
     # Now import the app safely

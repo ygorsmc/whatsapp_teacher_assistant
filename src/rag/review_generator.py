@@ -29,7 +29,7 @@ class ReviewQuiz(BaseModel):
 
 class ReviewOutput(BaseModel):
     summary: str = Field(
-        description="Resumo pedagógico dos pontos-chave da aula, em formato WhatsApp (máx 800 chars)"
+        description="Resumo pedagógico dos pontos-chave da aula, em formato conversacional (máx 800 chars)"
     )
     key_points: list[str] = Field(
         description="Lista de 3 a 5 pontos-chave extraídos do conteúdo"

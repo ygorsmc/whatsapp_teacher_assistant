@@ -21,7 +21,7 @@ from sqlalchemy import text
 
 from src.shared.config import settings
 from src.shared.telemetry import track_event
-from src.shared.whatsapp_interactive import send_whatsapp_message, send_template_message
+from src.channel.factory import get_channel
 from src.shared.constants.messages import REVIEW_INVITE_BODY, REVIEW_INVITE_FOOTER, REVIEW_ACCEPT_TITLE, REVIEW_LATER_TITLE
 from src.cache.redis_client import get_redis
 from src.db.database import AsyncSessionLocal, init_db
@@ -94,11 +94,13 @@ async def process_pending_schedules():
 
     async with AsyncSessionLocal() as session:
         # Fetch all due schedules with student and course info
+        channel = get_channel()
+        query_col = channel.get_user_query_column()
         result = await session.execute(
-            text("""
+            text(f"""
                 SELECT ss.schedule_id, ss.student_id, ss.course_id, ss.template_name,
                        ss.preferred_hour, ss.content_type,
-                       s.name AS student_name, s.phone,
+                       s.name AS student_name, s.{query_col} AS sender_id,
                        c.name AS course_name
                 FROM StudentSchedule ss
                 JOIN Students s ON s.id = ss.student_id
@@ -120,8 +122,12 @@ async def process_pending_schedules():
         logger.info("scheduler_found_pending", count=len(pending))
 
         for row in pending:
-            phone = row.phone
+            sender_id = row.sender_id
             schedule_id = row.schedule_id
+
+            if not sender_id:
+                logger.debug("scheduler_no_sender_id_skipping", schedule_id=schedule_id)
+                continue
 
             try:
                 # Check if service window is already open (SQL Telemetry 24h fallback)
@@ -156,7 +162,7 @@ async def process_pending_schedules():
                 later_title = f"{REVIEW_LATER_TITLE} {course_short}"
 
                 if window_active:
-                    logger.info("scheduler_window_active_direct_send", phone=phone, schedule_id=schedule_id)
+                    logger.info("scheduler_window_active_direct_send", sender_id=sender_id, schedule_id=schedule_id)
                     # Window is already open! Skip the Meta Template and simulate the user clicking "Sim, vamos lá!"
                     # This triggers the fast-path directly and sends the review + quiz for free.
                     from src.queue.factory import get_queue
@@ -171,25 +177,38 @@ async def process_pending_schedules():
                     await get_queue().enqueue(
                         queue="inbound_messages",
                         payload={
-                            "phone": phone,
+                            "sender_id": sender_id,
                             "text": interactive_payload["title"],
                             "message_type": "interactive",
                             "interactive_payload": interactive_payload,
                             "correlation_id": str(uuid.uuid4()),
                             "message_id": f"auto_{schedule_id}_{int(now_utc.timestamp())}"
                         },
-                        session_id=phone
+                        session_id=sender_id
                     )
                 else:
-                    logger.info("scheduler_window_closed_sending_invite", phone=phone, schedule_id=schedule_id)
+                    logger.info("scheduler_window_closed_sending_invite", sender_id=sender_id, schedule_id=schedule_id)
                     # Window is closed. Send the review invitation via interactive buttons (Template)
                     # This opens the 24h service window when the student responds
-                    await send_template_message(
-                        phone=phone,
-                        template_name=settings.META_TEMPLATE_REVIEW,
-                        parameters=[row.student_name, row.course_name],
-                        button_payloads=[f"review_accept_{row.course_id}", f"review_later_{row.course_id}"]
-                    )
+                    
+                    if settings.SCHEDULER_MODE == "template":
+                        await channel.send_template(
+                            user_id=sender_id,
+                            template_name=settings.META_TEMPLATE_REVIEW,
+                            params=[row.student_name, row.course_name]
+                        )
+                    else:
+                        # Emula o template via botoes para canais que não têm templates estritos (ex: Telegram)
+                        text_body = REVIEW_INVITE_BODY.format(name=row.student_name, course=row.course_name)
+                        await channel.send_buttons(
+                            user_id=sender_id,
+                            body=text_body,
+                            buttons=[
+                                {"id": f"review_accept_{row.course_id}", "title": accept_title[:20]},
+                                {"id": f"review_later_{row.course_id}", "title": later_title[:20]}
+                            ],
+                            footer=REVIEW_INVITE_FOOTER
+                        )
 
                 # Mark as sent and compute next trigger
                 next_trigger = compute_next_trigger(row.preferred_hour)
@@ -210,7 +229,7 @@ async def process_pending_schedules():
                 await session.commit()
 
                 track_event("scheduler_template_sent" if not window_active else "scheduler_direct_sent", {
-                    "phone": phone,
+                    "sender_id": sender_id,
                     "course_id": row.course_id,
                     "preferred_hour": row.preferred_hour,
                     "next_trigger": next_trigger.isoformat(),
@@ -218,7 +237,7 @@ async def process_pending_schedules():
 
                 logger.info(
                     "scheduler_sent",
-                    phone=phone,
+                    sender_id=sender_id,
                     course_id=row.course_id,
                     next_trigger=next_trigger.isoformat(),
                     mode="direct" if window_active else "invite"
@@ -227,7 +246,7 @@ async def process_pending_schedules():
             except Exception as e:
                 logger.error(
                     "scheduler_send_failed",
-                    phone=phone,
+                    sender_id=sender_id,
                     schedule_id=schedule_id,
                     error=str(e)[:500],
                 )

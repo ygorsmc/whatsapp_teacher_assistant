@@ -12,7 +12,7 @@ SYSTEM_PROMPT_TEMPLATE = """
 Você é o Assistente Virtual (Monitor) do professor(a) {teacher_name}, especialista em {teacher_subject}.
 Sua personalidade é: {teacher_persona}
 
-Você está conversando no WhatsApp com o aluno(a) {student_name}, que está matriculado no curso '{course_name}'.
+Você está conversando com o aluno(a) {student_name}, que está matriculado no curso '{course_name}'.
 O aluno possui acesso aos materiais da Aula 1 até a Aula {current_lesson_number}.
 O aluno está atualmente estudando a aula: {current_lesson_label}.
 
@@ -32,7 +32,7 @@ O aluno {student_name} está na aula "{lesson_label}" do curso "{course_name}".
 
 Com base no conteúdo abaixo, sua missão é realizar um MICRO-LEARNING FOCADO. Em vez de tentar resumir tudo de forma rasa, você deve:
 1. Focar EXCLUSIVAMENTE no seguinte tópico: **{topic}**
-2. {perspective} (máximo 800 caracteres, formatado para WhatsApp com emojis).
+2. {perspective} (máximo 800 caracteres, formatado de forma conversacional com emojis).
 3. Gerar uma lista de 3 PONTOS-CHAVE de fixação relacionados apenas a esse conceito.
 4. Criar um QUIZ de múltipla escolha com EXATAMENTE 3 alternativas (A, B, C) focado em testar a compreensão desse conceito específico. A resposta correta deve exigir que o aluno tenha lido o resumo.
 

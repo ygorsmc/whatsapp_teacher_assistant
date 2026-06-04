@@ -24,6 +24,12 @@ class Settings(BaseSettings):
     TIMEZONE_OFFSET_HOURS: int = Field(default=-3)
     MAX_WHATSAPP_MESSAGE_LENGTH: int = Field(default=4000)
     
+    # Messaging Channel
+    CHANNEL_BACKEND: str = Field(default="whatsapp") # "whatsapp" ou "telegram"
+    TELEGRAM_BOT_TOKEN: str = Field(default="YOUR_TELEGRAM_TOKEN")
+    TELEGRAM_WEBHOOK_SECRET: str = Field(default="YOUR_TELEGRAM_SECRET")
+    SCHEDULER_MODE: str = Field(default="template") # "template" (WhatsApp) ou "buttons" (Telegram)
+    
     # Redis
     REDIS_URL: str = Field(default="redis://localhost:6379/0")
     DEBOUNCE_TTL_SECONDS: int = Field(default=2)

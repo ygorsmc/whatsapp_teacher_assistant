@@ -23,7 +23,7 @@ async def lifespan(app: FastAPI):
     track_event("app_shutdown")
 
 app = FastAPI(
-    title="WhatsApp Teacher Assistant Edge",
+    title="Teacher Assistant Edge",
     lifespan=lifespan,
     docs_url=None, # Disable Swagger in production
     redoc_url=None

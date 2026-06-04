@@ -8,7 +8,8 @@ class Teacher(Base):
     id = Column(String(255), primary_key=True)
     name = Column(String(255), nullable=False)
     subject = Column(String(255), nullable=False)
-    phone = Column(String(255), unique=True)
+    phone = Column(String(255), unique=True, nullable=False)
+    telegram_chat_id = Column(String(255), unique=True, nullable=True)
     is_active = Column(Boolean, default=True)
     
     assistant_persona = Column(Text, nullable=False)
@@ -24,6 +25,7 @@ class Student(Base):
     id = Column(String(255), primary_key=True)
     name = Column(String(255), nullable=False)
     phone = Column(String(255), unique=True, nullable=False)
+    telegram_chat_id = Column(String(255), unique=True, nullable=True)
     is_active = Column(Boolean, default=True)
     
     created_at = Column(DateTime, server_default=func.now())

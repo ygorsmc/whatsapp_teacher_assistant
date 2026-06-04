@@ -42,7 +42,7 @@ class RedisStreamContext(MessageContext):
 class RedisStreamsQueue(IMessageQueue):
     def __init__(self):
         self.client = redis.from_url(settings.REDIS_URL, decode_responses=False)
-        self.group_name = "whatsapp_workers"
+        self.group_name = "messaging_workers"
         self.consumer_name = f"worker_{uuid.uuid4().hex[:8]}"
 
     async def _ensure_group(self, queue: str):

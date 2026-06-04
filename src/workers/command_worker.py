@@ -3,8 +3,8 @@ import json
 import structlog
 from src.queue.interfaces import MessageContext
 from src.shared.config import settings
+from src.channel.factory import get_channel
 from src.shared.telemetry import track_event, logger
-from src.shared.whatsapp_interactive import send_whatsapp_message
 from src.db.database import AsyncSessionLocal
 from sqlalchemy import text
 from src.shared.constants.messages import (
@@ -14,13 +14,13 @@ from src.shared.constants.commands import parse_command, CommandType
 
 logger = structlog.get_logger(__name__)
 
-async def run_sync_alunos_command(phone: str):
+async def run_sync_alunos_command(channel, sender_id: str):
     from src.drive.spreadsheet_sync import sync_users_from_sheet
     try:
-        await send_whatsapp_message(phone, CMD_SYNC_ALUNOS_START)
+        await channel.send_text(sender_id, CMD_SYNC_ALUNOS_START)
         stats = await sync_users_from_sheet()
         if "error" in stats:
-            await send_whatsapp_message(phone, CMD_SYNC_ERROR.format(error=stats['error']))
+            await channel.send_text(sender_id, CMD_SYNC_ERROR.format(error=stats['error']))
         else:
             msg = CMD_SYNC_SUCCESS.format(
                 teachers_before=stats.get('teachers_before', 0),
@@ -32,30 +32,31 @@ async def run_sync_alunos_command(phone: str):
                 schedules_before=stats.get('schedules_before', 0),
                 schedules_after=stats.get('schedules_after', 0)
             )
-            await send_whatsapp_message(phone, msg)
+            await channel.send_text(sender_id, msg)
     except Exception as e:
-        await send_whatsapp_message(phone, f"❌ Erro inesperado: {str(e)[:100]}")
+        await channel.send_text(sender_id, f"❌ Erro inesperado: {str(e)[:100]}")
 
-async def run_sync_materiais_command(phone: str):
+async def run_sync_materiais_command(channel, sender_id: str):
     from src.workers.ingestion_worker import sync_google_drive
     try:
-        await send_whatsapp_message(phone, CMD_SYNC_MATERIAIS_START)
+        await channel.send_text(sender_id, CMD_SYNC_MATERIAIS_START)
         stats = await sync_google_drive()
         msg = CMD_SYNC_MATERIAIS_SUCCESS.format(
             docs_before=stats.get('docs_before', 0) if stats else 0,
             docs_after=stats.get('docs_after', 0) if stats else 0
         )
-        await send_whatsapp_message(phone, msg)
+        await channel.send_text(sender_id, msg)
     except Exception as e:
-        await send_whatsapp_message(phone, f"❌ Erro na ingestão: {str(e)[:100]}")
+        await channel.send_text(sender_id, f"❌ Erro na ingestão: {str(e)[:100]}")
 
-async def run_list_cursos_command(phone: str):
+async def run_list_cursos_command(channel, sender_id: str):
     try:
         async with AsyncSessionLocal() as session:
-            result = await session.execute(text("SELECT id FROM Teachers WHERE phone = :phone"), {"phone": phone})
+            query_col = channel.get_user_query_column()
+            result = await session.execute(text(f"SELECT id FROM Teachers WHERE {query_col} = :sid"), {"sid": sender_id})
             teacher = result.fetchone()
             if not teacher:
-                await send_whatsapp_message(phone, "❌ Professor não encontrado no sistema.")
+                await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
             
             result = await session.execute(
@@ -65,18 +66,18 @@ async def run_list_cursos_command(phone: str):
             courses = result.fetchall()
             
             if not courses:
-                await send_whatsapp_message(phone, "📚 Você não possui cursos cadastrados.")
+                await channel.send_text(sender_id, "📚 Você não possui cursos cadastrados.")
                 return
                 
             msg = "📚 *Seus Cursos Cadastrados:*\n\n"
             for idx, c in enumerate(courses, 1):
                 msg += f"{idx}. *{c[0]}*\n(ID: `{c[1]}`)\n\n"
             msg += "💡 *Dica:* Para listar os materiais do Drive, digite `/listar_materiais`"
-            await send_whatsapp_message(phone, msg)
+            await channel.send_text(sender_id, msg)
     except Exception as e:
-        await send_whatsapp_message(phone, "❌ Erro ao buscar cursos.")
+        await channel.send_text(sender_id, "❌ Erro ao buscar cursos.")
 
-async def run_list_materiais_command(phone: str, course_query: str):
+async def run_list_materiais_command(channel, sender_id: str, course_query: str):
     from src.drive.client import drive_client
     try:
         async with AsyncSessionLocal() as session:
@@ -88,12 +89,12 @@ async def run_list_materiais_command(phone: str, course_query: str):
                 
             folder_id = settings.GOOGLE_DRIVE_FOLDER_ID
             if not folder_id:
-                await send_whatsapp_message(phone, "❌ O Google Drive não está configurado.")
+                await channel.send_text(sender_id, "❌ O Google Drive não está configurado.")
                 return
                 
             files = await drive_client.list_pdf_files(folder_id)
             if not files:
-                await send_whatsapp_message(phone, "📂 A pasta do Google Drive está vazia.")
+                await channel.send_text(sender_id, "📂 A pasta do Google Drive está vazia.")
                 return
                 
             # Fetch statuses from DB
@@ -121,14 +122,14 @@ async def run_list_materiais_command(phone: str, course_query: str):
                 c_name = f.get('course_name', 'Pasta Raiz')
                 msg += f"{emoji} *{f['name']}*\nCurso: {c_name}\nStatus: {status}\n\n"
                 
-            await send_whatsapp_message(phone, msg[:4000])
+            await channel.send_text(sender_id, msg[:4000])
     except Exception as e:
-        await send_whatsapp_message(phone, f"❌ Erro ao buscar materiais: {str(e)[:100]}")
+        await channel.send_text(sender_id, f"❌ Erro ao buscar materiais: {str(e)[:100]}")
 
-async def run_update_lesson_command(phone: str, args: str):
+async def run_update_lesson_command(channel, sender_id: str, args: str):
     try:
         if "=" not in args:
-            await send_whatsapp_message(phone, "❌ Formato inválido. Use: `/aula Nome da Turma = 2`")
+            await channel.send_text(sender_id, "❌ Formato inválido. Use: `/aula Nome da Turma = 2`")
             return
             
         parts = args.split("=", 1)
@@ -136,7 +137,7 @@ async def run_update_lesson_command(phone: str, args: str):
         try:
             new_lesson = int(parts[1].strip())
         except ValueError:
-            await send_whatsapp_message(phone, "❌ O número da aula deve ser um valor inteiro.")
+            await channel.send_text(sender_id, "❌ O número da aula deve ser um valor inteiro.")
             return
 
         async with AsyncSessionLocal() as session:
@@ -167,27 +168,28 @@ async def run_update_lesson_command(phone: str, args: str):
             )
             await session.commit()
             
-            await send_whatsapp_message(phone, f"✅ Turma '{class_name}' atualizada para a aula {new_lesson} com sucesso!")
+            await channel.send_text(sender_id, f"✅ Turma '{class_name}' atualizada para a aula {new_lesson} com sucesso!")
             
     except Exception as e:
-        await send_whatsapp_message(phone, f"❌ Erro ao atualizar aula: {str(e)[:100]}")
+        await channel.send_text(sender_id, f"❌ Erro ao atualizar aula: {str(e)[:100]}")
 
-async def run_broadcast_quiz_command(phone: str, class_name: str):
+async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
     try:
         # Removendo '_' caso o professor digite /quiz_1
         if class_name.startswith("_"):
             class_name = class_name[1:]
             
         if not class_name:
-            await send_whatsapp_message(phone, "❌ Informe a turma. Exemplo: `/quiz 1` ou `/quiz_1`")
+            await channel.send_text(sender_id, "❌ Informe a turma. Exemplo: `/quiz 1` ou `/quiz_1`")
             return
             
         async with AsyncSessionLocal() as session:
             # 1. Fetch Teacher
-            result = await session.execute(text("SELECT id FROM Teachers WHERE phone = :phone"), {"phone": phone})
+            query_col = channel.get_user_query_column()
+            result = await session.execute(text(f"SELECT id FROM Teachers WHERE {query_col} = :sid"), {"sid": sender_id})
             teacher = result.fetchone()
             if not teacher:
-                await send_whatsapp_message(phone, "❌ Professor não encontrado no sistema.")
+                await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
                 
             # 2. Fetch Class & Course
@@ -201,7 +203,7 @@ async def run_broadcast_quiz_command(phone: str, class_name: str):
             class_row = result.fetchone()
             
             if not class_row:
-                await send_whatsapp_message(phone, f"❌ Turma '{class_name}' não encontrada.")
+                await channel.send_text(sender_id, f"❌ Turma '{class_name}' não encontrada.")
                 return
                 
             class_id = class_row[0]
@@ -220,11 +222,11 @@ async def run_broadcast_quiz_command(phone: str, class_name: str):
             students = result.fetchall()
             
             if not students:
-                await send_whatsapp_message(phone, f"❌ Nenhum aluno ativo encontrado na turma '{c_name}'.")
+                await channel.send_text(sender_id, f"❌ Nenhum aluno ativo encontrado na turma '{c_name}'.")
                 return
                 
         # Send a loading message to teacher
-        await send_whatsapp_message(phone, f"⏳ Gerando quiz para a aula {current_lesson} da turma {c_name}...\nIsso pode levar alguns segundos.")
+        await channel.send_text(sender_id, f"⏳ Gerando quiz para a aula {current_lesson} da turma {c_name}...\nIsso pode levar alguns segundos.")
         
         # 4. Generate Quiz
         from src.rag.retriever import retrieve_context
@@ -240,7 +242,7 @@ async def run_broadcast_quiz_command(phone: str, class_name: str):
         )
         
         if not lesson_content:
-            await send_whatsapp_message(phone, f"❌ Nenhum material encontrado no banco de dados para a aula {current_lesson}.")
+            await channel.send_text(sender_id, f"❌ Nenhum material encontrado no banco de dados para a aula {current_lesson}.")
             return
             
         quiz = await generate_quiz(
@@ -251,7 +253,7 @@ async def run_broadcast_quiz_command(phone: str, class_name: str):
         )
         
         if not quiz:
-            await send_whatsapp_message(phone, "❌ Falha ao gerar o quiz com a IA.")
+            await channel.send_text(sender_id, "❌ Falha ao gerar o quiz com a IA.")
             return
             
         # 5. Broadcast quiz to all students
@@ -261,9 +263,10 @@ async def run_broadcast_quiz_command(phone: str, class_name: str):
         for st in students:
             try:
                 await send_quiz_to_student(
+                    channel=channel,
                     student={
                         "id": st[0],
-                        "phone": st[1],
+                        "sender_id": st[1],
                         "course_id": course_id,
                         "lesson_pointer": str(current_lesson)
                     },
@@ -273,37 +276,38 @@ async def run_broadcast_quiz_command(phone: str, class_name: str):
             except Exception as e:
                 logger.error("failed_to_send_quiz_to_student", student_id=st[0], error=str(e))
                 
-        await send_whatsapp_message(phone, f"✅ Quiz enviado com sucesso para {success_count} aluno(s) da turma '{c_name}'!")
+        await channel.send_text(sender_id, f"✅ Quiz enviado com sucesso para {success_count} aluno(s) da turma '{c_name}'!")
         
     except Exception as e:
-        await send_whatsapp_message(phone, f"❌ Erro ao enviar quiz: {str(e)[:100]}")
+        await channel.send_text(sender_id, f"❌ Erro ao enviar quiz: {str(e)[:100]}")
 
 async def process_command_message(message_body: dict):
-    phone = message_body.get("phone")
+    sender_id = message_body.get("sender_id", message_body.get("phone"))
     text_content = message_body.get("text", "")
+    channel = get_channel()
     
     command, args = parse_command(text_content)
-    logger.info("process_command_message", phone=phone, command=command, args=args)
+    logger.info("process_command_message", sender_id=sender_id, command=command, args=args)
     
     if command == CommandType.SYNC_STUDENTS:
-        await run_sync_alunos_command(phone)
+        await run_sync_alunos_command(channel, sender_id)
     elif command == CommandType.SYNC_MATERIALS:
-        await run_sync_materiais_command(phone)
+        await run_sync_materiais_command(channel, sender_id)
     elif command == CommandType.LIST_COURSES:
-        await run_list_cursos_command(phone)
+        await run_list_cursos_command(channel, sender_id)
     elif command == CommandType.LIST_MATERIALS:
-        await run_list_materiais_command(phone, args)
+        await run_list_materiais_command(channel, sender_id, args)
     elif command == CommandType.UPDATE_LESSON:
-        await run_update_lesson_command(phone, args)
+        await run_update_lesson_command(channel, sender_id, args)
     elif command == CommandType.SEND_QUIZ:
-        await run_broadcast_quiz_command(phone, args)
+        await run_broadcast_quiz_command(channel, sender_id, args)
     elif command == CommandType.HELP:
-        await send_whatsapp_message(phone, "Comandos disponíveis:\n/sinc_alunos\n/sinc_materiais\n/listar_cursos\n/listar_materiais\n/aula [turma] = [numero]\n/quiz_[turma]")
+        await channel.send_text(sender_id, "Comandos disponíveis:\n/sinc_alunos\n/sinc_materiais\n/listar_cursos\n/listar_materiais\n/aula [turma] = [numero]\n/quiz_[turma]")
     elif command == CommandType.WAKEUP:
         logger.info("waking_up_worker_via_hack")
         return
     else:
-        await send_whatsapp_message(phone, "❌ Comando desconhecido.")
+        await channel.send_text(sender_id, "❌ Comando desconhecido.")
 
 async def command_loop():
     logger.info("main_worker_starting", environment=settings.ENVIRONMENT, worker_type="command")

@@ -5,7 +5,6 @@ from src.db.database import AsyncSessionLocal
 from sqlalchemy import text
 
 from src.rag.quiz_generator import QuizOutput
-from src.shared.whatsapp_interactive import send_reply_buttons, send_list_message
 from src.shared.constants.messages import (
     QUIZ_BODY_PREFIX,
     QUIZ_FOOTER_BUTTONS,
@@ -14,7 +13,7 @@ from src.shared.constants.messages import (
     QUIZ_LIST_SECTION_TITLE,
 )
 
-async def send_quiz_to_student(student: dict, quiz: QuizOutput) -> str:
+async def send_quiz_to_student(channel, student: dict, quiz: QuizOutput) -> str:
     """Salva o quiz no banco e envia ao aluno via mensagem interativa.
     
     Retorna o quiz_id para rastreamento.
@@ -46,7 +45,7 @@ async def send_quiz_to_student(student: dict, quiz: QuizOutput) -> str:
         )
         await session.commit()
 
-    phone = student["phone"]
+    sender_id = student["sender_id"]
 
     # Prepare the body text with full alternatives included
     options_text = "\n".join([f"{alt.id}) {alt.text}" for alt in quiz.alternatives])
@@ -58,9 +57,9 @@ async def send_quiz_to_student(student: dict, quiz: QuizOutput) -> str:
             {"id": f"quiz_{quiz_id}_{alt.id}", "title": f"Alternativa {alt.id}"}
             for alt in quiz.alternatives
         ]
-        await send_reply_buttons(
-            phone=phone,
-            body_text=full_body_text,
+        await channel.send_buttons(
+            user_id=sender_id,
+            body=full_body_text,
             buttons=buttons,
             footer=QUIZ_FOOTER_BUTTONS,
         )
@@ -73,9 +72,9 @@ async def send_quiz_to_student(student: dict, quiz: QuizOutput) -> str:
             }
             for alt in quiz.alternatives
         ]
-        await send_list_message(
-            phone=phone,
-            body_text=full_body_text,
+        await channel.send_list(
+            user_id=sender_id,
+            body=full_body_text,
             button_text=QUIZ_LIST_BUTTON_TEXT,
             sections=[{"title": QUIZ_LIST_SECTION_TITLE, "rows": rows}],
             footer=QUIZ_FOOTER_LIST,

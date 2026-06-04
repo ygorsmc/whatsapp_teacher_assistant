@@ -5,7 +5,6 @@ from src.queue.interfaces import MessageContext
 from src.shared.config import settings
 from src.shared.telemetry import track_event, logger
 from src.cache.debounce import drain_buffer
-from src.shared.whatsapp_interactive import send_whatsapp_message, send_whatsapp_typing
 from src.shared.constants.messages import (
     ERROR_INVALID_RESPONSE,
     ERROR_QUIZ_NOT_FOUND,
@@ -19,12 +18,13 @@ from src.shared.constants.messages import (
     ERROR_TECHNICAL,
     TEACHER_CHAT_REPLY,
 )
+from src.channel.factory import get_channel
 from src.rag.review_generator import generate_review
 from src.workers.micro_learning import send_quiz_to_student
 from src.rag.quiz_generator import QuizOutput, QuizAlternative
 
 # RAG pipeline with conversational memory
-async def run_rag_pipeline(student_context: dict, phone: str, text: str) -> str:
+async def run_rag_pipeline(student_context: dict, text: str) -> str:
     """Executes the LLM pipeline with Redis history and Qdrant RAG."""
     from src.llm.factory import get_provider
     from src.cache.session_history import OptimizedRedisChatMessageHistory
@@ -66,7 +66,10 @@ async def run_rag_pipeline(student_context: dict, phone: str, text: str) -> str:
         system_message += "\n\n(Nenhum contexto específico encontrado nos materiais para esta pergunta.)"
     
     # 4. Load conversation history from Redis (last 40 messages)
-    history = OptimizedRedisChatMessageHistory(session_id=phone)
+    # Sempre usamos o phone cadastrado como session_id unificador, 
+    # mesmo que a mensagem venha do Telegram.
+    student_phone = student.phone
+    history = OptimizedRedisChatMessageHistory(session_id=student_phone)
     previous_messages = await history.aget_messages()
     
     # Call LLM with full conversational context
@@ -84,7 +87,7 @@ async def run_rag_pipeline(student_context: dict, phone: str, text: str) -> str:
     
     return response
 
-async def get_student_context_by_phone(phone: str, course_id: str | None = None):
+async def get_student_context(sender_id: str, query_column: str, course_id: str | None = None):
     """Fetches real DB data: Student, Enrollment, CourseClass, Course, and Teacher.
     
     If course_id is provided, filters for the specific enrollment and returns a dict.
@@ -94,6 +97,7 @@ async def get_student_context_by_phone(phone: str, course_id: str | None = None)
     from src.db.models.user import Student, Teacher
     from src.db.models.course import StudentEnrollment, CourseClass, Course
     from sqlalchemy import select
+    from sqlalchemy import text as sql_text
     
     async with AsyncSessionLocal() as session:
         # Join tables to get the full context in one query
@@ -103,7 +107,7 @@ async def get_student_context_by_phone(phone: str, course_id: str | None = None)
             .join(CourseClass, StudentEnrollment.class_id == CourseClass.id)
             .join(Course, CourseClass.course_id == Course.id)
             .join(Teacher, Course.teacher_id == Teacher.id)
-            .where(Student.phone == phone)
+            .where(getattr(Student, query_column) == sender_id)
         )
         
         # Filter by specific course if provided (e.g., from review button)
@@ -136,12 +140,10 @@ async def get_student_context_by_phone(phone: str, course_id: str | None = None)
                 for r in rows
             ]
 
-async def send_whatsapp_typing(phone: str):
-    """Sends typing indicator."""
-    pass
 
 async def handle_quiz_response(
-    phone: str,
+    channel,
+    sender_id: str,
     student_id: str,
     reply_id: str,
     interactive_payload: dict,
@@ -151,7 +153,7 @@ async def handle_quiz_response(
     # Parse do reply_id: "quiz_{quiz_id}_{answer_id}" → quiz_id, answer_id
     parts = reply_id.split("_", 2)
     if len(parts) < 3:
-        await send_whatsapp_message(phone, ERROR_INVALID_RESPONSE, reply_to_message_id=message_id)
+        await channel.send_text(sender_id, ERROR_INVALID_RESPONSE, reply_to=message_id)
         return
     
     quiz_id = parts[1]
@@ -173,11 +175,11 @@ async def handle_quiz_response(
         quiz = result.fetchone()
 
         if not quiz:
-            await send_whatsapp_message(phone, ERROR_QUIZ_NOT_FOUND, reply_to_message_id=message_id)
+            await channel.send_text(sender_id, ERROR_QUIZ_NOT_FOUND, reply_to=message_id)
             return
 
         if quiz.status != "pending":
-            await send_whatsapp_message(phone, ERROR_QUIZ_ANSWERED, reply_to_message_id=message_id)
+            await channel.send_text(sender_id, ERROR_QUIZ_ANSWERED, reply_to=message_id)
             return
 
         # ── VALIDAÇÃO DETERMINÍSTICA — if/else puro, sem LLM ──
@@ -201,7 +203,7 @@ async def handle_quiz_response(
     else:
         feedback = FEEDBACK_INCORRECT.format(correct_answer=quiz.correct_answer, explanation=quiz.explanation)
 
-    await send_whatsapp_message(phone, feedback, reply_to_message_id=message_id)
+    await channel.send_text(sender_id, feedback, reply_to=message_id)
 
     # Telemetria
     track_event("quiz_answered", {
@@ -211,7 +213,7 @@ async def handle_quiz_response(
         "answer": answer_id,
     })
 
-async def handle_review_request(phone: str, student_context: dict) -> None:
+async def handle_review_request(channel, sender_id: str, student_context: dict) -> None:
     """Generates and sends a review summary + quiz when student accepts the daily review.
 
     Flow:
@@ -242,7 +244,7 @@ async def handle_review_request(phone: str, student_context: dict) -> None:
     )
 
     if not review:
-        await send_whatsapp_message(phone, ERROR_NO_MATERIAL)
+        await channel.send_text(sender_id, ERROR_NO_MATERIAL)
         return
 
     # Format and send the summary
@@ -254,7 +256,7 @@ async def handle_review_request(phone: str, student_context: dict) -> None:
         f"🔑 *Pontos-chave:*\n{key_points_text}\n\n"
         f"_Leia com atenção — o quiz a seguir é baseado neste resumo!_ 👇"
     )
-    await send_whatsapp_message(phone, summary_message)
+    await channel.send_text(sender_id, summary_message)
 
     # Convert ReviewQuiz to QuizOutput for micro_learning compatibility
     quiz_output = QuizOutput(
@@ -269,9 +271,10 @@ async def handle_review_request(phone: str, student_context: dict) -> None:
 
     # Send quiz via interactive buttons (uses existing micro_learning flow)
     quiz_id = await send_quiz_to_student(
+        channel=channel,
         student={
             "id": student.id,
-            "phone": phone,
+            "sender_id": sender_id,
             "course_id": course.id,
             "lesson_pointer": str(current_lesson),
         },
@@ -307,16 +310,20 @@ async def handle_review_request(phone: str, student_context: dict) -> None:
 
 
 async def process_inbound(event: dict, ctx: MessageContext):
-
-    phone = event.get("phone")
+    
+    # Suporte legado para payload na transição
+    sender_id = event.get("sender_id", event.get("phone"))
     text = event.get("text")
     message_type = event.get("message_type", "text")
     interactive_payload = event.get("interactive_payload")
     correlation_id = event.get("correlation_id", "unknown")
     message_id = event.get("message_id")
     
-    with structlog.contextvars.bound_contextvars(correlation_id=correlation_id, phone=phone):
-        student_contexts = await get_student_context_by_phone(phone)
+    channel = get_channel()
+    query_column = channel.get_user_query_column()
+    
+    with structlog.contextvars.bound_contextvars(correlation_id=correlation_id, sender_id=sender_id):
+        student_contexts = await get_student_context(sender_id, query_column)
 
         # Guard clause: student may have been deactivated or not enrolled
         if not student_contexts:
@@ -326,11 +333,11 @@ async def process_inbound(event: dict, ctx: MessageContext):
             
             # Check if this is a teacher
             async with AsyncSessionLocal() as session:
-                result = await session.execute(select(Teacher).where(Teacher.phone == phone))
+                result = await session.execute(select(Teacher).where(getattr(Teacher, query_column) == sender_id))
                 if result.scalar_one_or_none():
-                    await send_whatsapp_message(phone, TEACHER_CHAT_REPLY, reply_to_message_id=message_id)
+                    await channel.send_text(sender_id, TEACHER_CHAT_REPLY, reply_to=message_id)
                 else:
-                    await send_whatsapp_message(phone, ERROR_NOT_ENROLLED, reply_to_message_id=message_id)
+                    await channel.send_text(sender_id, ERROR_NOT_ENROLLED, reply_to=message_id)
                     
             await ctx.complete()
             return
@@ -341,7 +348,7 @@ async def process_inbound(event: dict, ctx: MessageContext):
         if message_type == "interactive" and interactive_payload:
             reply_id = interactive_payload.get("id", "")
             if reply_id.startswith("quiz_"):
-                await handle_quiz_response(phone, student_context["student"].id, reply_id, interactive_payload, message_id=message_id)
+                await handle_quiz_response(channel, sender_id, student_context["student"].id, reply_id, interactive_payload, message_id=message_id)
                 await ctx.complete()
                 return
 
@@ -354,7 +361,7 @@ async def process_inbound(event: dict, ctx: MessageContext):
                     logger.info(f"DEBUG_ROUTING: Extracted review_course_id: {review_course_id}")
                     
                     # Re-fetch context for the SPECIFIC course from the button
-                    review_context = await get_student_context_by_phone(phone, course_id=review_course_id)
+                    review_context = await get_student_context(sender_id, query_column, course_id=review_course_id)
                     
                     if not review_context:
                         logger.info("DEBUG_ROUTING: review_context was None! Falling back to default.")
@@ -362,19 +369,19 @@ async def process_inbound(event: dict, ctx: MessageContext):
                     else:
                         logger.info(f"DEBUG_ROUTING: review_context found! Course: {review_context['course'].name}")
                         
-                    await handle_review_request(phone, review_context)
+                    await handle_review_request(channel, sender_id, review_context)
                 except Exception as e:
                     import traceback
                     logger.error("Fast-path review_accept error", error=str(e), exc_info=True)
                     traceback.print_exc()
-                    await send_whatsapp_message(phone, ERROR_TECHNICAL)
+                    await channel.send_text(sender_id, ERROR_TECHNICAL)
                 finally:
                     await ctx.complete()
                 return
 
             # Fast-path: aluno adia a revisão
             if reply_id.startswith("review_later_"):
-                await send_whatsapp_message(phone, REVIEW_LATER_ACK)
+                await channel.send_text(sender_id, REVIEW_LATER_ACK)
                 await ctx.complete()
                 return
 
@@ -382,8 +389,8 @@ async def process_inbound(event: dict, ctx: MessageContext):
         from src.cache.redis_client import get_redis
         redis = await get_redis()
         
-        buffer_key = f"buffer:{phone}"
-        user_key = f"debounce:{phone}"
+        buffer_key = f"buffer:{sender_id}"
+        user_key = f"debounce:{sender_id}"
 
         await redis.rpush(buffer_key, text)
         await redis.expire(buffer_key, 10)
@@ -399,12 +406,12 @@ async def process_inbound(event: dict, ctx: MessageContext):
         await asyncio.sleep(settings.DEBOUNCE_TTL_SECONDS)
 
         # Drain the buffer atomically
-        messages = await drain_buffer(phone, cooldown=1)
+        messages = await drain_buffer(sender_id, cooldown=1)
         combined = " ".join(messages)
 
         if not combined or len(combined) > settings.MAX_BUFFER_CHARS:
             if combined:
-                await send_whatsapp_message(phone, ERROR_MESSAGE_TOO_LONG, reply_to_message_id=message_id)
+                await channel.send_text(sender_id, ERROR_MESSAGE_TOO_LONG, reply_to=message_id)
             await ctx.complete()
             return
 
@@ -433,9 +440,9 @@ async def process_inbound(event: dict, ctx: MessageContext):
                     f"matriculado(a) em mais de um curso comigo:\n\n{course_list_str}\n\n"
                     "Por favor, reformule sua pergunta informando o **nome do curso** que deseja consultar! 👇"
                 )
-                await send_whatsapp_message(phone, ambiguous_msg, reply_to_message_id=message_id)
+                await channel.send_text(sender_id, ambiguous_msg, reply_to=message_id)
                 await ctx.complete()
-                track_event("intent_ambiguous", {"phone": phone})
+                track_event("intent_ambiguous", {"sender_id": sender_id})
                 return
         # --------------------------------------------------------
 
@@ -452,12 +459,12 @@ async def process_inbound(event: dict, ctx: MessageContext):
 
         try:
             # Typing indicator sent from Worker for precise timing
-            await send_whatsapp_typing(phone)
+            await channel.send_typing(sender_id)
             
             # Execute heavy LLM/RAG pipeline
-            response = await run_rag_pipeline(student_context, phone, combined)
+            response = await run_rag_pipeline(student_context, combined)
             
-            await send_whatsapp_message(phone, response, reply_to_message_id=message_id)
+            await channel.send_text(sender_id, response, reply_to=message_id)
             await ctx.complete()
             track_event("llm_pipeline_success")
             
@@ -465,7 +472,7 @@ async def process_inbound(event: dict, ctx: MessageContext):
             import traceback
             traceback.print_exc()
             track_event("worker_error", {"error": str(e)[:500]})
-            await send_whatsapp_message(phone, ERROR_TECHNICAL, reply_to_message_id=message_id)
+            await channel.send_text(sender_id, ERROR_TECHNICAL, reply_to=message_id)
             await ctx.dead_letter(reason="Pipeline Error", description=str(e)[:500])
         finally:
             lock_task.cancel()
