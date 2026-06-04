@@ -16,7 +16,7 @@ async def init_qdrant_collection(collection_name: str = "documents"):
     if not exists:
         await qdrant_client.create_collection(
             collection_name=collection_name,
-            vectors_config=VectorParams(size=1536, distance=Distance.COSINE),
+            vectors_config=VectorParams(size=settings.EMBEDDING_DIMENSIONS, distance=Distance.COSINE),
             quantization_config=ScalarQuantization(
                 scalar=ScalarQuantizationConfig(
                     type=ScalarType.INT8,

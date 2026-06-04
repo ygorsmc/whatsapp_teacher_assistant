@@ -116,6 +116,8 @@ class DeepSeekLLMProvider(BaseLangChainProvider):
 
 
 class OpenAIEmbeddingProvider(EmbeddingProvider):
+    DIMENSIONS = 1536
+
     def __init__(self, model_name: str = "text-embedding-3-small"):
         self.embeddings = OpenAIEmbeddings(
             model=model_name,
@@ -123,11 +125,13 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
             max_retries=3
         )
 
+    def get_dimensions(self) -> int:
+        return self.DIMENSIONS
+
     async def aembed_query(self, text: str) -> List[float]:
         return await self.embeddings.aembed_query(text)
 
     async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
-        # Batching is mandatory as per MLOps patterns
         return await self.embeddings.aembed_documents(texts)
 
 
@@ -163,6 +167,8 @@ class GeminiLLMProvider(BaseLangChainProvider):
         })
 
 class GeminiEmbeddingProvider(EmbeddingProvider):
+    DIMENSIONS = 768
+
     def __init__(self, model_name: str = "models/text-embedding-004"):
         if not settings.GOOGLE_API_KEY:
             raise ValueError("GOOGLE_API_KEY is not set in environment.")
@@ -172,17 +178,33 @@ class GeminiEmbeddingProvider(EmbeddingProvider):
             google_api_key=settings.GOOGLE_API_KEY
         )
 
+    def get_dimensions(self) -> int:
+        return self.DIMENSIONS
+
     async def aembed_query(self, text: str) -> List[float]:
         return await self.embeddings.aembed_query(text)
 
+    async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
+        return await self.embeddings.aembed_documents(texts)
+
 class LocalEmbeddingProvider(EmbeddingProvider):
+    DIMENSIONS = 384
+
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
 
+    def get_dimensions(self) -> int:
+        return self.DIMENSIONS
+
     async def aembed_query(self, text: str) -> List[float]:
         return await self.embeddings.aembed_query(text)
 
+    async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
+        return await self.embeddings.aembed_documents(texts)
+
 class AzureEmbeddingProvider(EmbeddingProvider):
+    DIMENSIONS = 1536
+
     def __init__(self, deployment_name: str = "text-embedding-3-small"):
         if not settings.AZURE_OPENAI_API_KEY or not settings.AZURE_OPENAI_ENDPOINT:
             raise ValueError("AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT must be set.")
@@ -193,6 +215,9 @@ class AzureEmbeddingProvider(EmbeddingProvider):
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
             api_key=settings.AZURE_OPENAI_API_KEY,
         )
+
+    def get_dimensions(self) -> int:
+        return self.DIMENSIONS
 
     async def aembed_query(self, text: str) -> List[float]:
         return await self.embeddings.aembed_query(text)

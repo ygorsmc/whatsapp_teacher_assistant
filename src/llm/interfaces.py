@@ -23,3 +23,9 @@ class EmbeddingProvider(ABC):
     async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
         """Embeds a list of document strings asynchronously."""
         pass
+
+    @abstractmethod
+    def get_dimensions(self) -> int:
+        """Returns the vector dimensions produced by this embedding model."""
+        pass
+

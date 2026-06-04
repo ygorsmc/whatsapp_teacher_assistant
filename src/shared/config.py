@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     # LLMs e IA
     DEFAULT_LLM_PROVIDER: str = Field(default="deepseek")
     DEFAULT_EMBEDDER_PROVIDER: str = Field(default="azure")
+    EMBEDDING_DIMENSIONS: int = Field(default=1536)  # 1536=OpenAI/Azure, 768=Gemini, 384=MiniLM
     LLM_TEMPERATURE: float = Field(default=0.3)
     LLM_MAX_RETRIES: int = Field(default=3)
     DEEPSEEK_BASE_URL: str = Field(default="https://api.deepseek.com")

@@ -1,5 +1,8 @@
 from typing import Dict, Type
 from src.llm.interfaces import LLMProvider, EmbeddingProvider
+import structlog
+
+_logger = structlog.get_logger(__name__)
 
 _providers: Dict[str, Type[LLMProvider]] = {}
 _embedders: Dict[str, Type[EmbeddingProvider]] = {}
@@ -24,4 +27,18 @@ def get_embedder(name: str = None) -> EmbeddingProvider:
     cls = _embedders.get(embedder_name)
     if cls is None:
         raise ValueError(f"Embedder '{embedder_name}' not registered.")
-    return cls()
+    instance = cls()
+
+    # Fail-fast: validate EMBEDDING_DIMENSIONS matches the provider's actual output
+    provider_dims = instance.get_dimensions()
+    configured_dims = settings.EMBEDDING_DIMENSIONS
+    if provider_dims != configured_dims:
+        _logger.warning(
+            "EMBEDDING_DIMENSIONS mismatch! Qdrant collection may be incompatible.",
+            configured=configured_dims,
+            provider=embedder_name,
+            provider_dimensions=provider_dims,
+        )
+
+    return instance
+
