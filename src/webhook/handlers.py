@@ -7,7 +7,7 @@ from sqlalchemy import text as sql_text
 from src.shared.config import settings
 
 from src.webhook.security import verify_meta_signature, check_rate_limit
-from src.shared.service_bus import service_bus
+from src.queue.factory import get_queue
 from src.shared.telemetry import track_event
 from src.cache.redis_client import get_redis
 from src.db.database import AsyncSessionLocal
@@ -201,7 +201,7 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
                 
             # Route all commands directly to the Service Bus command_messages queue
             print(f"[DIAG] Step 4b: Enqueueing command to Service Bus")
-            await service_bus.enqueue("command_messages", {
+            await get_queue().enqueue("command_messages", {
                 "phone": phone,
                 "text": text,
                 "message_id": msg_id
@@ -210,7 +210,7 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
 
         # 6. Enqueue to Inbound Messages with session FIFO
         correlation_id = str(uuid4())
-        await service_bus.enqueue(
+        await get_queue().enqueue(
             queue="inbound_messages",
             payload={
                 "phone": phone,
@@ -227,7 +227,7 @@ async def handle_webhook(request: Request, background_tasks: BackgroundTasks):
         # Session Queues (inbound_messages) take 3 minutes to trigger KEDA scale up due to Azure Monitor.
         # command_messages is a normal queue and triggers in 15 seconds via Connection String.
         # By dropping an empty wakeup ping, we instantly turn on the worker!
-        await service_bus.enqueue("command_messages", {
+        await get_queue().enqueue("command_messages", {
             "phone": phone,
             "text": "/wakeup",
             "message_id": f"wakeup_{msg_id}"

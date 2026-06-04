@@ -1,7 +1,7 @@
 import asyncio
 import json
 import structlog
-from azure.servicebus.aio import ServiceBusClient, AutoLockRenewer
+from src.queue.interfaces import MessageContext
 from src.shared.config import settings
 from src.shared.telemetry import track_event, logger
 from src.cache.debounce import drain_buffer
@@ -91,7 +91,8 @@ async def get_student_context_by_phone(phone: str, course_id: str | None = None)
     Otherwise returns a list of all active enrollments.
     """
     from src.db.database import AsyncSessionLocal
-    from src.db.models import Student, StudentEnrollment, CourseClass, Course, Teacher
+    from src.db.models.user import Student, Teacher
+    from src.db.models.course import StudentEnrollment, CourseClass, Course
     from sqlalchemy import select
     
     async with AsyncSessionLocal() as session:
@@ -305,13 +306,7 @@ async def handle_review_request(phone: str, student_context: dict) -> None:
         await session.commit()
 
 
-async def process_inbound(receiver, message):
-    try:
-        body_bytes = b"".join(message.body)
-        event = json.loads(body_bytes.decode('utf-8'))
-    except Exception as e:
-        await receiver.dead_letter_message(message, reason="Invalid JSON", error_description=str(e)[:500])
-        return
+async def process_inbound(event: dict, ctx: MessageContext):
 
     phone = event.get("phone")
     text = event.get("text")
@@ -326,7 +321,7 @@ async def process_inbound(receiver, message):
         # Guard clause: student may have been deactivated or not enrolled
         if not student_contexts:
             from src.db.database import AsyncSessionLocal
-            from src.db.models import Teacher
+            from src.db.models.user import Teacher
             from sqlalchemy import select
             
             # Check if this is a teacher
@@ -337,7 +332,7 @@ async def process_inbound(receiver, message):
                 else:
                     await send_whatsapp_message(phone, ERROR_NOT_ENROLLED, reply_to_message_id=message_id)
                     
-            await receiver.complete_message(message)
+            await ctx.complete()
             return
 
         student_context = student_contexts[0]  # Default fallback context
@@ -347,7 +342,7 @@ async def process_inbound(receiver, message):
             reply_id = interactive_payload.get("id", "")
             if reply_id.startswith("quiz_"):
                 await handle_quiz_response(phone, student_context["student"].id, reply_id, interactive_payload, message_id=message_id)
-                await receiver.complete_message(message)
+                await ctx.complete()
                 return
 
             # Fast-path: aluno aceita a revisão diária
@@ -374,13 +369,13 @@ async def process_inbound(receiver, message):
                     traceback.print_exc()
                     await send_whatsapp_message(phone, ERROR_TECHNICAL)
                 finally:
-                    await receiver.complete_message(message)
+                    await ctx.complete()
                 return
 
             # Fast-path: aluno adia a revisão
             if reply_id.startswith("review_later_"):
                 await send_whatsapp_message(phone, REVIEW_LATER_ACK)
-                await receiver.complete_message(message)
+                await ctx.complete()
                 return
 
         # Debouncing no worker (movido do webhook)
@@ -397,7 +392,7 @@ async def process_inbound(receiver, message):
         if not is_first:
             # Another message is currently counting down the debounce window
             # We don't complete this message, it gets rolled into the drain
-            await receiver.complete_message(message)
+            await ctx.complete()
             return
 
         # Wait the debounce window
@@ -410,7 +405,7 @@ async def process_inbound(receiver, message):
         if not combined or len(combined) > settings.MAX_BUFFER_CHARS:
             if combined:
                 await send_whatsapp_message(phone, ERROR_MESSAGE_TOO_LONG, reply_to_message_id=message_id)
-            await receiver.complete_message(message)
+            await ctx.complete()
             return
 
         # --- INTENT CLASSIFICATION FOR MULTIPLE ENROLLMENTS ---
@@ -439,21 +434,21 @@ async def process_inbound(receiver, message):
                     "Por favor, reformule sua pergunta informando o **nome do curso** que deseja consultar! 👇"
                 )
                 await send_whatsapp_message(phone, ambiguous_msg, reply_to_message_id=message_id)
-                await receiver.complete_message(message)
+                await ctx.complete()
                 track_event("intent_ambiguous", {"phone": phone})
                 return
         # --------------------------------------------------------
 
         # Background lock renewal
-        async def renew_lock_periodically(rcv, msg, interval=60):
+        async def renew_lock_periodically(context: MessageContext, interval=60):
             while True:
                 await asyncio.sleep(interval)
                 try:
-                    await rcv.renew_message_lock(msg)
+                    await context.renew_lock()
                 except Exception:
                     break
 
-        lock_task = asyncio.create_task(renew_lock_periodically(receiver, message))
+        lock_task = asyncio.create_task(renew_lock_periodically(ctx))
 
         try:
             # Typing indicator sent from Worker for precise timing
@@ -463,7 +458,7 @@ async def process_inbound(receiver, message):
             response = await run_rag_pipeline(student_context, phone, combined)
             
             await send_whatsapp_message(phone, response, reply_to_message_id=message_id)
-            await receiver.complete_message(message)
+            await ctx.complete()
             track_event("llm_pipeline_success")
             
         except Exception as e:
@@ -471,79 +466,20 @@ async def process_inbound(receiver, message):
             traceback.print_exc()
             track_event("worker_error", {"error": str(e)[:500]})
             await send_whatsapp_message(phone, ERROR_TECHNICAL, reply_to_message_id=message_id)
-            await receiver.dead_letter_message(message, reason="Pipeline Error", error_description=str(e)[:500])
+            await ctx.dead_letter(reason="Pipeline Error", description=str(e)[:500])
         finally:
             lock_task.cancel()
 
 async def llm_loop():
     """Main loop for the LLM worker consuming inbound_messages queue."""
-    from src.shared.service_bus import service_bus
-    from azure.servicebus import NEXT_AVAILABLE_SESSION
-    from azure.servicebus.exceptions import OperationTimeoutError
-    import asyncio
+    from src.queue.factory import get_queue
     import os
     
     is_dev = os.getenv("ENVIRONMENT", "development") in ("dev", "development")
-    
     logger.info("main_worker_starting", environment="dev" if is_dev else "production")
     
-    client = await service_bus.get_client()
-    logger.info("service_bus_client_acquired")
-        
-    async with client:
-        logger.info("service_bus_client_context_entered", mode="dev" if is_dev else "session-fifo")
-        poll_count = 0
-        while True:
-            try:
-                poll_count += 1
-                if poll_count % 30 == 1:
-                    logger.info("worker_poll_heartbeat", poll_count=poll_count, mode="dev" if is_dev else "session")
-                    
-                if is_dev:
-                    receiver = client.get_queue_receiver(
-                        queue_name="inbound_messages",
-                        max_wait_time=10
-                    )
-                    async with receiver:
-                        messages = await receiver.receive_messages(max_message_count=10, max_wait_time=5)
-                        if messages:
-                            logger.info("messages_received", count=len(messages))
-                        for msg in messages:
-                            await process_inbound(receiver, msg)
-                else:
-                    # Production: session-enabled FIFO per student
-                    # NEXT_AVAILABLE_SESSION can block indefinitely on `async with receiver:`
-                    # We wrap it in wait_for to prevent the worker from hanging.
-                    receiver = client.get_queue_receiver(
-                        queue_name="inbound_messages", 
-                        session_id=NEXT_AVAILABLE_SESSION,
-                        max_wait_time=10
-                    )
-                    try:
-                        async with receiver:
-                            logger.info("session_acquired")
-                            messages = await receiver.receive_messages(max_message_count=10, max_wait_time=5)
-                            if messages:
-                                logger.info("messages_received", count=len(messages))
-                            for msg in messages:
-                                await process_inbound(receiver, msg)
-                    except OperationTimeoutError:
-                        # No sessions available right now, retry
-                        pass
-                        
-            except OperationTimeoutError:
-                # No active sessions available, just loop and wait
-                if poll_count % 30 == 0:
-                    logger.info("worker_idle_no_sessions", poll_count=poll_count)
-                await asyncio.sleep(2)
-            except Exception as e:
-                logger.error("main_worker_error", error=str(e)[:500], error_type=type(e).__name__)
-                if "amqp:socket-error" in str(e).lower() or "connection closed" in str(e).lower():
-                    await asyncio.sleep(10)
-                else:
-                    import traceback
-                    traceback.print_exc()
-                    await asyncio.sleep(5)
+    queue = get_queue()
+    await queue.consume_loop("inbound_messages", process_inbound, use_sessions=True)
 
 async def main_worker():
     from src.workers.command_worker import command_loop

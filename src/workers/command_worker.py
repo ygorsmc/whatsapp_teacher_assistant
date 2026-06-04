@@ -1,7 +1,7 @@
 import asyncio
 import json
 import structlog
-from azure.servicebus.aio import ServiceBusClient, AutoLockRenewer
+from src.queue.interfaces import MessageContext
 from src.shared.config import settings
 from src.shared.telemetry import track_event, logger
 from src.shared.whatsapp_interactive import send_whatsapp_message
@@ -308,28 +308,16 @@ async def process_command_message(message_body: dict):
 async def command_loop():
     logger.info("main_worker_starting", environment=settings.ENVIRONMENT, worker_type="command")
     
-    if not settings.SERVICEBUS_CONNECTION_STRING:
-        logger.error("SERVICEBUS_CONNECTION_STRING is missing")
-        return
-
-    # Standard queue receiver (not session-enabled for commands)
-    async with ServiceBusClient.from_connection_string(settings.SERVICEBUS_CONNECTION_STRING, keep_alive_interval=30) as client:
-        receiver = client.get_queue_receiver(queue_name="command_messages", prefetch_count=10)
-        async with receiver:
-            logger.info("command_worker_listening", queue="command_messages")
-            while True:
-                try:
-                    messages = await receiver.receive_messages(max_wait_time=5, max_message_count=10)
-                    for message in messages:
-                        try:
-                            body_bytes = b"".join(message.body)
-                            payload = json.loads(body_bytes.decode('utf-8'))
-                            await process_command_message(payload)
-                            await receiver.complete_message(message)
-                        except Exception as e:
-                            logger.error("error_processing_command", error=str(e))
-                            # Depending on requirements, we can deadletter it or just complete it to prevent poison loops
-                            await receiver.dead_letter_message(message, reason="Processing Error", error_description=str(e)[:500])
-                except Exception as e:
-                    logger.error("command_worker_loop_error", error=str(e))
-                    await asyncio.sleep(5)
+    from src.queue.factory import get_queue
+    from src.queue.interfaces import MessageContext
+    
+    async def handler(payload: dict, ctx: MessageContext):
+        try:
+            await process_command_message(payload)
+            await ctx.complete()
+        except Exception as e:
+            logger.error("error_processing_command", error=str(e))
+            await ctx.dead_letter(reason="Processing Error", description=str(e)[:500])
+            
+    queue = get_queue()
+    await queue.consume_loop("command_messages", handler, use_sessions=False)

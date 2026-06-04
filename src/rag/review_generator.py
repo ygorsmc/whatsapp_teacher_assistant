@@ -73,8 +73,8 @@ async def generate_review(
         course_id=course_id,
         current_lesson_number=current_lesson_number,
         query=f"resumo principal da aula {current_lesson_number}",
-        top_k=8,  # More chunks for comprehensive review
-        score_threshold=0.3,  # Lower threshold to capture more content
+        top_k=settings.RAG_TOP_K * 2,  # More chunks for comprehensive review
+        score_threshold=settings.RAG_SCORE_THRESHOLD,  # Lower threshold to capture more content
     )
 
     if not lesson_content:

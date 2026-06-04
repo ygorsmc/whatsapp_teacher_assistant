@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 
 from src.shared.config import settings
 from src.shared.telemetry import setup_telemetry, track_event
-from src.shared.service_bus import service_bus
+from src.queue.factory import get_queue
 from src.db.database import init_db
 from src.webhook.handlers import router as webhook_router
 
@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
     yield
     
     # Teardown
-    await service_bus.close()
+    await get_queue().close()
     track_event("app_shutdown")
 
 app = FastAPI(

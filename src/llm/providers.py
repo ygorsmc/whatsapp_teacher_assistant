@@ -79,9 +79,9 @@ class OpenAILLMProvider(BaseLangChainProvider):
         # Placeholder implementation - can be swapped to Gemini/DeepSeek
         self.llm = ChatOpenAI(
             model=model_name, 
-            temperature=0.3,
+            temperature=settings.LLM_TEMPERATURE,
             api_key=settings.OPENAI_API_KEY,
-            max_retries=3
+            max_retries=settings.LLM_MAX_RETRIES
         )
 
     def _track_usage(self, response: Any):
@@ -100,10 +100,10 @@ class DeepSeekLLMProvider(BaseLangChainProvider):
             
         self.llm = ChatOpenAI(
             model=model_name, 
-            temperature=0.5,
+            temperature=settings.LLM_TEMPERATURE,
             api_key=settings.DEEPSEEK_API_KEY,
-            base_url="https://api.deepseek.com",
-            max_retries=3
+            base_url=settings.DEEPSEEK_BASE_URL,
+            max_retries=settings.LLM_MAX_RETRIES
         )
 
     def _track_usage(self, response: Any):
@@ -140,9 +140,9 @@ class GeminiLLMProvider(BaseLangChainProvider):
         
         self.llm = ChatGoogleGenerativeAI(
             model=model_name,
-            temperature=0.3,
+            temperature=settings.LLM_TEMPERATURE,
             google_api_key=settings.GOOGLE_API_KEY,
-            max_retries=3
+            max_retries=settings.LLM_MAX_RETRIES
         )
 
 

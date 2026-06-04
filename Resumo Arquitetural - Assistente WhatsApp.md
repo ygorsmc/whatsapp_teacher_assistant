@@ -28,10 +28,10 @@ WhatsApp (Meta Cloud API)
 │   ├── /aula [turma] = N → atualiza ponteiro de aula da turma
 │   └── /ajuda            → resposta imediata
 ├── Idempotência por message_id           ← evita processamento duplicado
-└── Enfileira → Service Bus               ← NUNCA executa lógica de negócio
+└── Enfileira → IMessageQueue             ← NUNCA executa lógica de negócio
         │
         ▼
-[Service Bus]
+[Message Queue (Redis Streams / Service Bus)]
 ├── inbound_messages  ┐
 └── command_messages  ┴→ [Worker LLM]       ← RAG + comandos + memória Redis
 ├── index_documents   → [Worker Ingestão]  ← Gotenberg + 2-Up FinOps + Azure DI + Qdrant
@@ -53,7 +53,7 @@ WhatsApp (Meta Cloud API)
 A Meta requer resposta em menos de 200ms. Qualquer lógica de negócio executada no webhook — incluindo consultas ao banco ou chamadas ao LLM — quebraria esse prazo e causaria reenvios automáticos da mensagem (flood de retries), resultando em comandos executados 5 vezes.
 
 **Regras de Sobrevivência do Webhook:** 
-1. **Cache de Conexão:** A conexão TCP/AMQP do ServiceBus é mantida em cache de memória via Singleton (`ServiceBusWrapper`).
+1. **Cache de Conexão:** A conexão com o provedor de fila (ex: Redis) é mantida em cache de memória via Singleton (`QueueFactory`).
 2. **Timeouts Estritos:** O cliente Redis (usado para idempotência e rate limit) possui um `socket_timeout=1.0`. Se a rede interna oscilar, o webhook abandona a tentativa, usa um fallback em memória e retorna 200 OK, garantindo que o webhook **nunca passe de 200ms**.
 3. **Idempotência (Lock):** O `msg_id` da Meta é persistido por 5 minutos via NX Lock.
 
@@ -61,9 +61,9 @@ A Meta requer resposta em menos de 200ms. Qualquer lógica de negócio executada
 
 O design anterior usava `asyncio.sleep()` no webhook para aguardar mensagens rápidas. Isso foi movido para o Worker LLM. Além disso, o worker de comandos (`command_messages`) foi integrado ao `Worker LLM` (usando `asyncio.gather`), permitindo consumir as duas filas simultaneamente e reduzindo a pegada de containers no Azure.
 
-### Telemetria e Janela de 24h no SQL Server
+### Telemetria e Janela de 24h no PostgreSQL
 
-Para garantir resiliência e possibilitar futuros dashboards de Analytics, a verificação da Janela de 24h **não** usa mais o TTL do Redis. Toda interação (seja `message_received` ou `review_sent`) é registrada atomicamente na tabela `StudentInteractions` do Azure SQL. O agendador consulta o `MAX(timestamp)` dessa tabela para decidir com precisão absoluta se a janela está aberta ou fechada. O Redis atua exclusivamente como Fast-Cache (Debounce e Rate Limit).
+Para garantir resiliência e possibilitar futuros dashboards de Analytics, a verificação da Janela de 24h **não** usa mais o TTL do Redis. Toda interação (seja `message_received` ou `review_sent`) é registrada atomicamente na tabela `StudentInteractions` do PostgreSQL. O agendador consulta o `MAX(timestamp)` dessa tabela para decidir com precisão absoluta se a janela está aberta ou fechada. O Redis atua exclusivamente como Fast-Cache (Debounce e Rate Limit).
 
 ### A Arquitetura de Templates (Contorno do Bloqueio da Meta)
 

@@ -2,8 +2,8 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, Asyn
 from sqlalchemy.orm import declarative_base
 from src.shared.config import settings
 
-# Used for local dev (SQLite) or production (Azure SQL with asyncpg/aioodbc)
-# Production URL would look like: mssql+aioodbc://<client_id>@<server>.database.windows.net/<db>?driver=ODBC+Driver+18+for+SQL+Server&authentication=ActiveDirectoryMsi
+# Used for local dev (SQLite) or production (PostgreSQL with asyncpg)
+# Production URL would look like: postgresql+asyncpg://<user>:<pwd>@<server>/<db>
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,

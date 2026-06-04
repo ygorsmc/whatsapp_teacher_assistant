@@ -1,4 +1,4 @@
-from src.db.models import Teacher, Student
+from src.db.models.user import Teacher, Student
 
 from src.shared.constants.prompts import SYSTEM_PROMPT_TEMPLATE
 

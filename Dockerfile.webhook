@@ -7,13 +7,8 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# Drivers ODBC para Azure SQL (Debian 12 compatible)
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl apt-transport-https gnupg2 unixodbc-dev build-essential \
-    && curl -fsSL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /usr/share/keyrings/microsoft-prod.gpg \
-    && echo "deb [arch=amd64,armhf,arm64 signed-by=/usr/share/keyrings/microsoft-prod.gpg] https://packages.microsoft.com/debian/12/prod bookworm main" > /etc/apt/sources.list.d/mssql-release.list \
-    && apt-get update \
-    && ACCEPT_EULA=Y apt-get install -y msodbcsql18 \
+# Instala dependências do SO (se houver, ex: libpq para postgres)
+RUN apt-get update && apt-get install -y --no-install-recommends gcc libpq-dev \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -22,8 +17,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Expõe a porta 80 conforme padrão do Azure Container Apps
-EXPOSE 80
+# Expõe a porta fornecida pelo ambiente (Padrão 80)
+ENV PORT=80
+EXPOSE $PORT
 
 # Comando para iniciar o Webhook (O KEDA escalará este container)
-CMD ["uvicorn", "src.webhook.main:app", "--host", "0.0.0.0", "--port", "80"]
+CMD ["sh", "-c", "exec uvicorn src.webhook.main:app --host 0.0.0.0 --port $PORT"]

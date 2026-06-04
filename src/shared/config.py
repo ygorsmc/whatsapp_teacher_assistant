@@ -29,7 +29,8 @@ class Settings(BaseSettings):
     DEBOUNCE_TTL_SECONDS: int = Field(default=2)
     MAX_BUFFER_CHARS: int = Field(default=4096)
     
-    # Service Bus
+    # Mensageria / Service Bus
+    QUEUE_BACKEND: str = Field(default="servicebus")
     SERVICEBUS_FQDN: str = Field(default="")
     SERVICEBUS_CONNECTION_STRING: Optional[str] = Field(default=None) # Only for local dev with Azurite/Emulator
     
@@ -37,14 +38,24 @@ class Settings(BaseSettings):
     QDRANT_URL: str = Field(default="http://localhost:6333")
     QDRANT_API_KEY: Optional[str] = Field(default=None)
     
-    # Azure Document Intelligence
+    # Azure Document Intelligence / Parsing
+    PARSER_BACKEND: str = Field(default="azure")
     DOCUMENT_INTELLIGENCE_ENDPOINT: str = Field(default="")
     DOCUMENT_INTELLIGENCE_KEY: Optional[str] = Field(default=None) # Used only if Managed Identity isn't available
     GOTENBERG_URL: str = Field(default="http://localhost:3000")
     
-    # OpenAI / Embeddings (Placeholder for Gemini/DeepSeek depending on implementation)
+    # LLMs e IA
     DEFAULT_LLM_PROVIDER: str = Field(default="deepseek")
     DEFAULT_EMBEDDER_PROVIDER: str = Field(default="azure")
+    LLM_TEMPERATURE: float = Field(default=0.3)
+    LLM_MAX_RETRIES: int = Field(default=3)
+    DEEPSEEK_BASE_URL: str = Field(default="https://api.deepseek.com")
+    
+    # RAG (MLOps)
+    RAG_CHUNK_SIZE: int = Field(default=800)
+    RAG_CHUNK_OVERLAP: int = Field(default=150)
+    RAG_SCORE_THRESHOLD: float = Field(default=0.3)
+    RAG_TOP_K: int = Field(default=5)
     OPENAI_API_KEY: Optional[str] = Field(default=None)
     GOOGLE_API_KEY: Optional[str] = Field(default=None)
     DEEPSEEK_API_KEY: Optional[str] = Field(default=None)
@@ -69,48 +80,12 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Se AZURE_KEY_VAULT_URL estiver definido (produção), busca segredos usando Managed Identity
+# Se AZURE_KEY_VAULT_URL estiver definido (produção via Bicep), busca segredos usando Managed Identity.
+# Se for GCP ou AWS, as próprias nuvens já injetam os secrets como Variáveis de Ambiente, 
+# tornando o fallback natural e seguro.
 if settings.AZURE_KEY_VAULT_URL:
     try:
-        from azure.identity import DefaultAzureCredential
-        from azure.keyvault.secrets import SecretClient
-        
-        credential = DefaultAzureCredential()
-        client = SecretClient(vault_url=settings.AZURE_KEY_VAULT_URL, credential=credential)
-        
-        # Mapeia as variáveis sensíveis que devem vir do Key Vault
-        keys_to_fetch = [
-            "META-APP-SECRET", "META-VERIFY-TOKEN", "WHATSAPP-TOKEN",
-            "DOCUMENT-INTELLIGENCE-KEY", "OPENAI-API-KEY", "GOOGLE-API-KEY", "DEEPSEEK-API-KEY",
-            "AZURE-OPENAI-API-KEY", "AZURE-OPENAI-ENDPOINT", "SERVICEBUS-CONNECTION-STRING", "DATABASE-URL",
-            "QDRANT-URL", "QDRANT-API-KEY"
-        ]
-        
-        for kv_key in keys_to_fetch:
-            try:
-                secret = client.get_secret(kv_key)
-                # Converte o padrão do Key Vault (hífen) para o padrão do Python (underscore)
-                env_key = kv_key.replace("-", "_")
-                
-                # SQLAlchemy expects a URL format, not an ODBC string
-                if env_key == "DATABASE_URL" and "Driver=" in secret.value:
-                    import re
-                    import urllib.parse
-                    val = secret.value
-                    server = re.search(r"Server=tcp:([^,;]+)", val).group(1)
-                    database = re.search(r"Database=([^;]+)", val).group(1)
-                    uid = re.search(r"Uid=([^;]+)", val).group(1)
-                    pwd = re.search(r"Pwd=([^;]+)", val).group(1)
-                    pwd_encoded = urllib.parse.quote_plus(pwd)
-                    sa_url = f"mssql+aioodbc://{uid}:{pwd_encoded}@{server}:1433/{database}?driver=ODBC+Driver+18+for+SQL+Server"
-                    setattr(settings, env_key, sa_url)
-                else:
-                    setattr(settings, env_key, secret.value)
-            except Exception as e:
-                logger.warning(f"KeyVault secret '{kv_key}' not found or could not be loaded. Fallback to .env")
-                
-        logger.info("Secrets successfully loaded from Azure Key Vault via Managed Identity")
-    except ImportError:
-        logger.error("azure-identity or azure-keyvault-secrets not installed. Cannot load from Key Vault.")
+        from src.shared.azure_kv import load_azure_secrets
+        load_azure_secrets(settings)
     except Exception as e:
-        logger.error(f"Failed to connect to Azure Key Vault: {e}")
+        logger.error(f"Failed to load azure_kv module: {e}")

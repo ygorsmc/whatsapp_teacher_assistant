@@ -1,4 +1,11 @@
 # ==========================================
+# CONFIGURAÇÃO PRINCIPAL
+# ==========================================
+# Escolha o provedor de nuvem para o qual deseja fazer deploy.
+# Opções válidas: azure | gcp | aws
+TARGET_CLOUD ?= azure
+
+# ==========================================
 # LOCAL OPERATIONS — Infrastructure & CI/CD
 # ==========================================
 
@@ -8,8 +15,25 @@ PYTHONPATH_VAL = .
 # Globals to avoid repetition
 export PYTHONPATH=$(PYTHONPATH_VAL)
 export ENVIRONMENT=$(ENV)
+export CLOUD=$(TARGET_CLOUD)
 
-.PHONY: help dev dev-api dev-seed test test-integration test-all start
+# --- Azure Defaults ---
+AZURE_RG          ?= rg-whatsapp-assistant-prod
+ACR_NAME          ?= $(shell az acr list -g $(AZURE_RG) --query "[0].name" -o tsv 2>/dev/null)
+
+# --- GCP Defaults ---
+GCP_PROJECT       ?= $(shell gcloud config get-value project 2>/dev/null)
+GCP_REGION        ?= southamerica-east1
+GCP_AR_REPO       ?= whatsapp-assistant
+GCP_AR_HOST       ?= $(GCP_REGION)-docker.pkg.dev/$(GCP_PROJECT)/$(GCP_AR_REPO)
+
+# --- AWS Defaults ---
+AWS_REGION        ?= sa-east-1
+AWS_ACCOUNT_ID    ?= $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null)
+AWS_ECR_REPO      ?= $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
+
+.PHONY: help dev dev-api dev-seed test test-integration test-all start \
+        deploy-webhook deploy-worker deploy-scheduler deploy-all deploy-infra destroy-cloud
 
 help:
 	@echo ""
@@ -30,13 +54,15 @@ help:
 	@echo "  make test-integration       - Run integration tests"
 	@echo "  make test-all               - Run all tests with coverage"
 	@echo ""
-	@echo "  ☁️ CLOUD DEPLOYMENT"
-	@echo "  make deploy-webhook         - Build and deploy Webhook to Azure"
-	@echo "  make deploy-worker          - Build and deploy Worker LLM to Azure"
-	@echo "  make deploy-scheduler       - Build and deploy Worker Scheduler to Azure"
-	@echo "  make deploy-all             - Deploy all components to Azure"
-	@echo "  make deploy-infra           - Provision all Azure resources via Bicep"
-	@echo "  make destroy-cloud          - Delete ALL Azure resources (CAREFUL!)"
+	@echo "  ☁️  CLOUD DEPLOYMENT (CLOUD=azure|gcp|aws)"
+	@echo "  make deploy-webhook         - Build and deploy Webhook"
+	@echo "  make deploy-worker          - Build and deploy Worker LLM"
+	@echo "  make deploy-scheduler       - Build and deploy Worker Scheduler"
+	@echo "  make deploy-all             - Deploy all components"
+	@echo "  make deploy-infra           - Provision cloud resources"
+	@echo "  make destroy-cloud          - Delete ALL cloud resources (CAREFUL!)"
+	@echo ""
+	@echo "  Current CLOUD provider: $(CLOUD)"
 	@echo ""
 
 # ==========================================
@@ -45,9 +71,9 @@ help:
 dev:
 	@echo "[INFO] Starting local infrastructure with docker-compose..."
 	docker-compose up -d
-	@echo "[INFO] Waiting 60s for Service Bus Emulator to initialize internal SQL..."
-	sleep 60
-	@echo "[INFO] Stack running: Redis, Azurite (Service Bus Emulator), Qdrant"
+	@echo "[INFO] Waiting for services to initialize..."
+	sleep 10
+	@echo "[INFO] Stack running: Redis, PostgreSQL, Qdrant"
 
 dev-api:
 	@echo "[INFO] Starting FastAPI webhook server..."
@@ -88,40 +114,184 @@ test-all:
 	pytest tests/ -v --cov=src --cov-report=term-missing
 
 # ==========================================
-# 3. CLOUD DEPLOYMENT (Azure)
+# 3. CLOUD DEPLOYMENT (Multi-Cloud Router)
 # ==========================================
-ACR_NAME ?= $(shell az acr list -g rg-whatsapp-assistant-prod --query "[0].name" -o tsv 2>/dev/null)
+# The user picks the cloud via:  make deploy-webhook CLOUD=gcp
+# Internally we delegate to _deploy-<component>-<cloud>
 
 deploy-webhook:
-	@echo "[INFO] Building Webhook image in Azure Container Registry: $(ACR_NAME)..."
-	az acr build --registry $(ACR_NAME) --image whatsapp-webhook:latest --file Dockerfile.webhook .
-	@echo "[INFO] Restarting Webhook Container App..."
-	az containerapp update -n webhook-app -g rg-whatsapp-assistant-prod --set-env-vars FORCE_RESTART=$(shell date +%s) -o none
-	@echo "[SUCCESS] Webhook deployed!"
+	@$(MAKE) _deploy-webhook-$(CLOUD)
 
 deploy-worker:
-	@echo "[INFO] Building Worker image in Azure Container Registry: $(ACR_NAME)..."
-	az acr build --registry $(ACR_NAME) --image whatsapp-worker:latest --file Dockerfile.worker .
-	@echo "[INFO] Restarting Worker Container App..."
-	az containerapp update -n worker-llm -g rg-whatsapp-assistant-prod --set-env-vars FORCE_RESTART=$(shell date +%s) -o none
-	@echo "[SUCCESS] Worker deployed!"
+	@$(MAKE) _deploy-worker-$(CLOUD)
 
 deploy-scheduler:
-	@echo "[INFO] Building Worker image in Azure Container Registry: $(ACR_NAME)..."
-	az acr build --registry $(ACR_NAME) --image whatsapp-worker:latest --file Dockerfile.worker .
-	@echo "[INFO] Restarting Scheduler Container App..."
-	az containerapp update -n worker-scheduler -g rg-whatsapp-assistant-prod --set-env-vars FORCE_RESTART=$(shell date +%s) -o none
-	@echo "[SUCCESS] Scheduler deployed!"
+	@$(MAKE) _deploy-scheduler-$(CLOUD)
 
 deploy-all: deploy-webhook deploy-worker deploy-scheduler
-	@echo "[SUCCESS] All cloud components deployed successfully!"
+	@echo "[SUCCESS] All components deployed to $(CLOUD)!"
 
+# ------------------------------------------
+# 3a. AZURE (Container Apps + ACR)
+# ------------------------------------------
+_deploy-webhook-azure:
+	@echo "[AZURE] Building Webhook image in ACR: $(ACR_NAME)..."
+	az acr build --registry $(ACR_NAME) --image whatsapp-webhook:latest --file Dockerfile.webhook .
+	@echo "[AZURE] Updating Webhook Container App..."
+	az containerapp update -n webhook-app -g $(AZURE_RG) --set-env-vars FORCE_RESTART=$(shell date +%s) -o none
+	@echo "[SUCCESS] Webhook deployed to Azure!"
+
+_deploy-worker-azure:
+	@echo "[AZURE] Building Worker image in ACR: $(ACR_NAME)..."
+	az acr build --registry $(ACR_NAME) --image whatsapp-worker:latest --file Dockerfile.worker .
+	@echo "[AZURE] Updating Worker Container App..."
+	az containerapp update -n worker-llm -g $(AZURE_RG) --set-env-vars FORCE_RESTART=$(shell date +%s) -o none
+	@echo "[SUCCESS] Worker deployed to Azure!"
+
+_deploy-scheduler-azure:
+	@echo "[AZURE] Building Scheduler image in ACR: $(ACR_NAME)..."
+	az acr build --registry $(ACR_NAME) --image whatsapp-worker:latest --file Dockerfile.worker .
+	@echo "[AZURE] Updating Scheduler Container App..."
+	az containerapp update -n worker-scheduler -g $(AZURE_RG) --set-env-vars FORCE_RESTART=$(shell date +%s) -o none
+	@echo "[SUCCESS] Scheduler deployed to Azure!"
+
+# ------------------------------------------
+# 3b. GCP (Cloud Run + Artifact Registry)
+# ------------------------------------------
+_deploy-webhook-gcp:
+	@echo "[GCP] Building Webhook image via Cloud Build..."
+	gcloud builds submit --tag $(GCP_AR_HOST)/whatsapp-webhook:latest --timeout=900 .
+	@echo "[GCP] Deploying Webhook to Cloud Run..."
+	gcloud run deploy webhook-app \
+		--image $(GCP_AR_HOST)/whatsapp-webhook:latest \
+		--region $(GCP_REGION) \
+		--platform managed \
+		--allow-unauthenticated \
+		--port 8080 \
+		--memory 512Mi \
+		--cpu 1 \
+		--min-instances 1 \
+		--max-instances 10 \
+		--set-env-vars QUEUE_BACKEND=redis,PARSER_BACKEND=azure,ENVIRONMENT=production
+	@echo "[SUCCESS] Webhook deployed to GCP Cloud Run!"
+
+_deploy-worker-gcp:
+	@echo "[GCP] Building Worker image via Cloud Build..."
+	gcloud builds submit --tag $(GCP_AR_HOST)/whatsapp-worker:latest --timeout=900 .
+	@echo "[GCP] Deploying Worker to Cloud Run (always-on)..."
+	gcloud run deploy worker-llm \
+		--image $(GCP_AR_HOST)/whatsapp-worker:latest \
+		--region $(GCP_REGION) \
+		--platform managed \
+		--no-allow-unauthenticated \
+		--memory 1Gi \
+		--cpu 1 \
+		--min-instances 1 \
+		--max-instances 4 \
+		--set-env-vars WORKER_TYPE=llm,QUEUE_BACKEND=redis,PARSER_BACKEND=azure,ENVIRONMENT=production \
+		--command "python","-m","src.workers.llm_worker"
+	@echo "[SUCCESS] Worker deployed to GCP Cloud Run!"
+
+_deploy-scheduler-gcp:
+	@echo "[GCP] Building Scheduler image via Cloud Build..."
+	gcloud builds submit --tag $(GCP_AR_HOST)/whatsapp-worker:latest --timeout=900 .
+	@echo "[GCP] Deploying Scheduler to Cloud Run..."
+	gcloud run deploy worker-scheduler \
+		--image $(GCP_AR_HOST)/whatsapp-worker:latest \
+		--region $(GCP_REGION) \
+		--platform managed \
+		--no-allow-unauthenticated \
+		--memory 512Mi \
+		--cpu 1 \
+		--min-instances 1 \
+		--max-instances 2 \
+		--set-env-vars WORKER_TYPE=scheduler,QUEUE_BACKEND=redis,PARSER_BACKEND=azure,ENVIRONMENT=production \
+		--command "python","-m","src.workers.scheduler_worker"
+	@echo "[SUCCESS] Scheduler deployed to GCP Cloud Run!"
+
+# ------------------------------------------
+# 3c. AWS (ECS Fargate + ECR)
+# ------------------------------------------
+_ecr-login:
+	@echo "[AWS] Authenticating with ECR..."
+	aws ecr get-login-password --region $(AWS_REGION) | docker login --username AWS --password-stdin $(AWS_ECR_REPO)
+
+_ensure-ecr-repo:
+	@aws ecr describe-repositories --repository-names $(1) --region $(AWS_REGION) 2>/dev/null || \
+		aws ecr create-repository --repository-name $(1) --region $(AWS_REGION) --image-scanning-configuration scanOnPush=true
+
+_deploy-webhook-aws: _ecr-login
+	@echo "[AWS] Building Webhook image locally and pushing to ECR..."
+	$(MAKE) _ensure-ecr-repo 1=whatsapp-webhook
+	docker build -f Dockerfile.webhook -t $(AWS_ECR_REPO)/whatsapp-webhook:latest .
+	docker push $(AWS_ECR_REPO)/whatsapp-webhook:latest
+	@echo "[AWS] Updating ECS Service (webhook)..."
+	aws ecs update-service \
+		--cluster whatsapp-assistant \
+		--service webhook-app \
+		--force-new-deployment \
+		--region $(AWS_REGION)
+	@echo "[SUCCESS] Webhook deployed to AWS ECS!"
+
+_deploy-worker-aws: _ecr-login
+	@echo "[AWS] Building Worker image locally and pushing to ECR..."
+	$(MAKE) _ensure-ecr-repo 1=whatsapp-worker
+	docker build -f Dockerfile.worker -t $(AWS_ECR_REPO)/whatsapp-worker:latest .
+	docker push $(AWS_ECR_REPO)/whatsapp-worker:latest
+	@echo "[AWS] Updating ECS Service (worker-llm)..."
+	aws ecs update-service \
+		--cluster whatsapp-assistant \
+		--service worker-llm \
+		--force-new-deployment \
+		--region $(AWS_REGION)
+	@echo "[SUCCESS] Worker deployed to AWS ECS!"
+
+_deploy-scheduler-aws: _ecr-login
+	@echo "[AWS] Building Scheduler image locally and pushing to ECR..."
+	$(MAKE) _ensure-ecr-repo 1=whatsapp-worker
+	docker build -f Dockerfile.worker -t $(AWS_ECR_REPO)/whatsapp-worker:latest .
+	docker push $(AWS_ECR_REPO)/whatsapp-worker:latest
+	@echo "[AWS] Updating ECS Service (scheduler)..."
+	aws ecs update-service \
+		--cluster whatsapp-assistant \
+		--service worker-scheduler \
+		--force-new-deployment \
+		--region $(AWS_REGION)
+	@echo "[SUCCESS] Scheduler deployed to AWS ECS!"
+
+# ==========================================
+# 4. INFRASTRUCTURE PROVISIONING
+# ==========================================
 deploy-infra:
-	@echo "[INFO] Provisioning infrastructure using Bicep..."
-	bash infra/deploy_infra.sh
+ifeq ($(CLOUD),azure)
+	@echo "[AZURE] Provisioning infrastructure using Bicep..."
+	bash infra/azure/deploy_infra.sh
+else ifeq ($(CLOUD),gcp)
+	@echo "[GCP] Provisioning infrastructure using gcloud CLI..."
+	bash infra/gcp/deploy_infra.sh
+else ifeq ($(CLOUD),aws)
+	@echo "[AWS] Provisioning infrastructure using AWS CLI..."
+	bash infra/aws/deploy_infra.sh
+endif
 
+# ==========================================
+# 5. TEARDOWN
+# ==========================================
 destroy-cloud:
-	@echo "[WARNING] Initiating total destruction of cloud resources..."
-	@echo "This will delete the entire Resource Group rg-whatsapp-assistant-prod."
-	@echo "If you are sure, run this command manually to confirm:"
-	@echo "az group delete --name rg-whatsapp-assistant-prod --yes --no-wait"
+ifeq ($(CLOUD),azure)
+	@echo "[WARNING] This will delete the entire Resource Group $(AZURE_RG)."
+	@echo "Run manually to confirm:"
+	@echo "  az group delete --name $(AZURE_RG) --yes --no-wait"
+else ifeq ($(CLOUD),gcp)
+	@echo "[WARNING] This will delete GCP Cloud Run services."
+	@echo "Run manually to confirm:"
+	@echo "  gcloud run services delete webhook-app --region $(GCP_REGION) --quiet"
+	@echo "  gcloud run services delete worker-llm --region $(GCP_REGION) --quiet"
+	@echo "  gcloud run services delete worker-scheduler --region $(GCP_REGION) --quiet"
+else ifeq ($(CLOUD),aws)
+	@echo "[WARNING] This will stop ECS services."
+	@echo "Run manually to confirm:"
+	@echo "  aws ecs update-service --cluster whatsapp-assistant --service webhook-app --desired-count 0 --region $(AWS_REGION)"
+	@echo "  aws ecs update-service --cluster whatsapp-assistant --service worker-llm --desired-count 0 --region $(AWS_REGION)"
+	@echo "  aws ecs delete-cluster --cluster whatsapp-assistant --region $(AWS_REGION)"
+endif

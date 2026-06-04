@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # Redis para debouncing, histórico de conversas e tracking de janelas de 24h
+  # Redis — Filas (Redis Streams), debouncing, histórico de conversas e tracking de janelas de 24h
   redis:
     image: redis:7-alpine
     container_name: whatsapp_redis
@@ -10,6 +10,19 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redis_data:/data
+
+  # PostgreSQL — Banco de dados relacional (substituiu o Azure SQL / SQL Edge)
+  postgres:
+    image: postgres:16-alpine
+    container_name: whatsapp_postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=whatsapp
+      - POSTGRES_PASSWORD=whatsapp_dev_2026
+      - POSTGRES_DB=whatsapp_assistant
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
 
   # Qdrant para o banco vetorial local (RAG)
   qdrant:
@@ -21,18 +34,7 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
 
-  # Azurite atua como um emulador local APENAS para Azure Blob Storage (não suporta Service Bus)
-  azurite:
-    image: mcr.microsoft.com/azure-storage/azurite:3.33.0
-    container_name: azurite
-    ports:
-      - "10000:10000"
-      - "10001:10001"
-      - "10002:10002"
-    volumes:
-      - ./data/azurite:/data
-    command: azurite --loose --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --location /data
-
+  # Gotenberg — Conversão de DOCX/PPTX para PDF (para o parser de documentos)
   gotenberg:
     image: gotenberg/gotenberg:8
     container_name: gotenberg
@@ -42,34 +44,7 @@ services:
       - "gotenberg"
       - "--api-port=3000"
 
-  # Banco de dados SQL interno necessário para o emulador do Service Bus guardar estado
-  sqledge:
-    image: mcr.microsoft.com/azure-sql-edge:latest
-    container_name: whatsapp_sqledge
-    environment:
-      - ACCEPT_EULA=1
-      - MSSQL_SA_PASSWORD=YourStrong!Passw0rd
-    ports:
-      - "1433:1433"
-
-  # Emulador Oficial do Azure Service Bus
-  servicebus:
-    image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
-    container_name: whatsapp_servicebus
-    ports:
-      - "5672:5672"
-      - "5300:5300"
-    environment:
-      - ACCEPT_EULA=Y
-      - SQL_SERVER=sqledge
-      - MSSQL_SA_PASSWORD=YourStrong!Passw0rd
-      - CONFIG_PATH=/ServiceBus_Emulator/ConfigFiles/Config.json
-    volumes:
-      - ./emulator_config.json:/ServiceBus_Emulator/ConfigFiles/Config.json
-    depends_on:
-      - sqledge
-
 volumes:
   redis_data:
+  postgres_data:
   qdrant_data:
-  azurite_data:

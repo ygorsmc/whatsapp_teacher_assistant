@@ -159,7 +159,7 @@ async def process_pending_schedules():
                     logger.info("scheduler_window_active_direct_send", phone=phone, schedule_id=schedule_id)
                     # Window is already open! Skip the Meta Template and simulate the user clicking "Sim, vamos lá!"
                     # This triggers the fast-path directly and sends the review + quiz for free.
-                    from src.shared.service_bus import service_bus
+                    from src.queue.factory import get_queue
                     import uuid
                     
                     interactive_payload = {
@@ -168,7 +168,7 @@ async def process_pending_schedules():
                         "title": accept_title[:20]
                     }
                     
-                    await service_bus.enqueue(
+                    await get_queue().enqueue(
                         queue="inbound_messages",
                         payload={
                             "phone": phone,

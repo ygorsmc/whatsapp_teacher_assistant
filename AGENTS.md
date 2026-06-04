@@ -20,7 +20,7 @@ Validation scripts: `python .agent/scripts/checklist.py .` (pre-commit) and `pyt
 | API framework | FastAPI (ASGI — sync I/O blocks the event loop) |
 | Orchestration | LangChain (`ConversationalRetrievalChain`, `ConversationBufferMemory`) |
 | LLMs | Gemini (initial), DeepSeek (planned); embedding provider independent |
-| Infra | Azure Container Apps + KEDA (Managed Identity), Azure Functions, Service Bus Standard, SQL DTU Basic, Redis, Blob, Key Vault |
+| Infra | Multi-Cloud (Azure, GCP, AWS) via `Makefile`. Docker-based with PostgreSQL, Redis, and Qdrant. |
 | Vector DB | Qdrant Cloud (Scalar Quantization INT8) |
 | Document parsing | Azure Document Intelligence |
 | Retry | Tenacity (exponential backoff on all external APIs) |
@@ -38,11 +38,10 @@ These are easily missed and cause production bugs if violated:
 - `minReplicas=1` mandatory (cold start = ~5-30s, breaks Meta's 200ms SLA).
 - Route `/` commands to `command_messages` queue **before** `inbound_messages`. Students sending commands are rejected at the edge without touching Service Bus.
 
-### Service Bus
-- **Tier Standard** (required for session FIFO).
-- `inbound_messages` queue: `requiresSession=true`, `LockDuration=PT5M` (default 30s is too short for LLM calls — causes infinite retry loops).
-- Session lock renewal: background task renews lock every 60s during pipeline processing.
-- Messages enqueued with `SessionId=phone` for FIFO per student.
+### Mensageria / Filas (Agnostic via IMessageQueue)
+- **Redis Streams** é o provedor nativo via variável `QUEUE_BACKEND=redis`.
+- Azure Service Bus mantido como alternativa legada (`QUEUE_BACKEND=servicebus`).
+- **NUNCA** injetar SDKs específicos de nuvem diretamente nos Workers ou no Webhook. O `QueueFactory` gerencia a abstração.
 
 ### Cache / Redis
 - **`role:{phone}` stores `"student"` or `"teacher"`, NOT just a presence bit.** Needed for edge-level command rejection.
@@ -68,10 +67,10 @@ These are easily missed and cause production bugs if violated:
 - `LLMProvider` (completion) and `EmbeddingProvider` (embeddings) are separate interfaces. Swapping the generation LLM must not require reindexing.
 - All LLM provider methods are async.
 
-### Auth / Infra
-- **Managed Identity (`DefaultAzureCredential`) everywhere — zero connection strings in code.**
-- **EXCEÇÃO KEDA**: O escalonador KEDA utiliza a *Connection String* do Service Bus diretamente nos secrets do Container App. O uso de *Managed Identity* causava um delay de agregação de 3 a 5 minutos na leitura das filas via Azure Monitor. O código Python (Worker) continua usando Managed Identity.
-- Secrets via Azure Key Vault only.
+### Auth / Infra & Segredos (12-Factor App)
+- **Nenhum Vendor Lock-in na configuração.** Segredos são mapeados estritamente via variáveis de ambiente no formato nativo (ex: `postgresql+asyncpg://...`).
+- O módulo `src/shared/azure_kv.py` é importado apenas condicionalmente se `AZURE_KEY_VAULT_URL` existir (em ambientes Azure Bicep). Em GCP e AWS, usa-se a injeção nativa de variáveis.
+- **Managed Identity (`DefaultAzureCredential`)** atua apenas no módulo opcional do Key Vault, evitando falhas em outros ambientes.
 
 ### Ingestion Worker
 - `max_concurrent_calls=2` (per replica) + `maxReplicas=2` = max 4 concurrent Document Intelligence calls.
@@ -103,7 +102,7 @@ tests/e2e/
 ## Testing
 
 - Unit: `pytest + pytest-asyncio` — mock external I/O
-- Integration: `pytest + Qdrant Docker + Azurite` (local Service Bus emulation)
+- Integration: `pytest + Qdrant Docker + PostgreSQL + Redis` (local infra emulated via `docker-compose.yml`)
 - E2E: `pytest + WhatsApp Cloud API Sandbox` — validate 200ms webhook timeout
 - Load: Locust — simulate N concurrent students, validate concurrency limits
 

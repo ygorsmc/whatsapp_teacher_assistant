@@ -38,9 +38,11 @@ async def retrieve_context(
     course_id: str,
     current_lesson_number: int,
     query: str,
-    top_k: int = 5,
-    score_threshold: float = 0.30
+    top_k: int | None = None,
+    score_threshold: float | None = None
 ) -> str:
+    top_k = top_k or settings.RAG_TOP_K
+    score_threshold = score_threshold or settings.RAG_SCORE_THRESHOLD
     """Retrieves relevant document context from Qdrant using semantic search.
     
     Uses a two-stage strategy when the student explicitly mentions a lesson number:

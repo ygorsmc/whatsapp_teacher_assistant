@@ -15,12 +15,23 @@ spec:
   minReplicaCount: 0  # Escala para ZERO para economizar 100% quando não houver alunos enviando mensagens!
   maxReplicaCount: 10 # Previne estourar o limite de custo ou rate-limit das APIs
   triggers:
-  - type: azure-servicebus
+  # TRIGER 1: Redis Streams (Novo padrão cloud-agnostic)
+  - type: redis-streams
     metadata:
-      queueName: inbound_messages
-      messageCount: "5" # Uma nova réplica sobe a cada 5 mensagens na fila
-    authenticationRef:
-      name: keda-mi-auth # Usa Managed Identity (sem connection strings no código)
+      address: redis-master.redis.svc.cluster.local:6379 # Atualizar para endereço do Azure Cache for Redis se usar PaaS
+      stream: inbound_messages
+      consumerGroup: whatsapp_workers
+      pendingEntriesCount: "5"
+    # authenticationRef: 
+    #   name: keda-redis-auth
+      
+  # TRIGER 2: Azure Service Bus (Legado/Opcional)
+  # - type: azure-servicebus
+  #   metadata:
+  #     queueName: inbound_messages
+  #     messageCount: "5"
+  #   authenticationRef:
+  #     name: keda-mi-auth
 
 ---
 apiVersion: keda.sh/v1alpha1

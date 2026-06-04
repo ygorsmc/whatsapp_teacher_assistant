@@ -265,21 +265,23 @@ properties:
       rules:
       - custom:
           auth:
-          - secretRef: sb-connection-string
-            triggerParameter: connection
+          - secretRef: redis-url
+            triggerParameter: address
           metadata:
-            messageCount: '1'
-            queueName: inbound_messages
-          type: azure-servicebus
+            stream: inbound_messages
+            consumerGroup: whatsapp_workers
+            pendingEntriesCount: '5'
+          type: redis-streams
         name: inbound-messages-rule
       - custom:
           auth:
-          - secretRef: sb-connection-string
-            triggerParameter: connection
+          - secretRef: redis-url
+            triggerParameter: address
           metadata:
-            messageCount: '1'
-            queueName: command_messages
-          type: azure-servicebus
+            stream: command_messages
+            consumerGroup: whatsapp_workers
+            pendingEntriesCount: '1'
+          type: redis-streams
         name: command-messages-rule
     serviceBinds: null
     terminationGracePeriodSeconds: null

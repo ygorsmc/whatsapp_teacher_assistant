@@ -10,16 +10,14 @@ from src.drive.client import drive_client
 from src.rag.qdrant_client import get_qdrant, init_qdrant_collection
 from src.llm.factory import get_embedder
 from qdrant_client.models import PointStruct
-from azure.core.credentials import AzureKeyCredential
-from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
-from src.rag.text_splitter import split_document_text
+from src.parsing.factory import get_parser
 import src.llm # Init providers
 
 logger = structlog.get_logger(__name__)
 
 async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id: str, course_id: str, lesson_number: int):
     """
-    Downloads a file from Google Drive, parses it (PDF via Azure DI, others via native parsers), 
+    Downloads a file from Google Drive, parses it (via factory parsers), 
     embeds chunks with Gemini, and upserts to Qdrant.
     """
     logger.info(f"Starting ingestion for file: {file_name} ({mime_type})")
@@ -40,13 +38,6 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
     is_pdf = "pdf" in mime_type.lower() or file_name.endswith('.pdf')
 
     if is_pdf or is_office:
-        import fitz
-        endpoint = settings.DOCUMENT_INTELLIGENCE_ENDPOINT
-        key = settings.DOCUMENT_INTELLIGENCE_KEY
-        if not endpoint or not key:
-            logger.error("Azure Document Intelligence credentials missing.")
-            return False
-
         pdf_bytes = file_bytes
 
         if is_office:
@@ -63,85 +54,23 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
                 logger.error("Gotenberg conversion failed", error=str(e))
                 return False
 
-        # --- COMPRESSÃO FINOPS: 2-UP EMPILHADO PARA SLIDES ---
-        def _compress_presentation_pdf(p_bytes: bytes) -> bytes:
-            try:
-                import fitz
-                doc = fitz.open(stream=p_bytes, filetype="pdf")
-                if len(doc) <= 1:
-                    doc.close()
-                    return p_bytes
-                    
-                first_page = doc[0]
-                # Verifica se é formato paisagem (Slide)
-                if first_page.rect.width > first_page.rect.height * 1.1:
-                    logger.info("Formato de Apresentação detectado: Agrupando páginas 2 a 2 na vertical (FinOps).")
-                    new_doc = fitz.open()
-                    
-                    for i in range(0, len(doc), 2):
-                        p1 = doc[i]
-                        p2 = doc[i+1] if i+1 < len(doc) else None
-                        
-                        w = p1.rect.width
-                        h1 = p1.rect.height
-                        h2 = p2.rect.height if p2 else 0
-                        total_h = h1 + h2
-                        
-                        new_page = new_doc.new_page(width=w, height=total_h)
-                        new_page.show_pdf_page(fitz.Rect(0, 0, w, h1), doc, p1.number)
-                        
-                        if p2:
-                            new_page.show_pdf_page(fitz.Rect(0, h1, w, total_h), doc, p2.number)
-                            
-                    compressed_bytes = new_doc.tobytes()
-                    doc.close()
-                    new_doc.close()
-                    return compressed_bytes
-                else:
-                    doc.close()
-                    return p_bytes
-            except Exception as ex:
-                logger.error("Compression failed, using original PDF", error=str(ex))
-                return p_bytes
-                
-        # Aplica a compressão (se aplicável)
-        pdf_bytes = _compress_presentation_pdf(pdf_bytes)
-
+        # --- COMPRESSÃO FINOPS: PARSER ABSTRAÍDO ---
+        from src.parsing.factory import get_parser
+        parser = get_parser()
+        
         try:
-            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-            total_pages = len(doc)
-            logger.info(f"PDF has {total_pages} pages. Processing with Azure DI.")
-
-            for start in range(0, total_pages, 2):
-                end = min(start + 2, total_pages)
-                batch_doc = fitz.open()
-                batch_doc.insert_pdf(doc, from_page=start, to_page=end - 1)
-                batch_bytes = batch_doc.tobytes()
-                batch_doc.close()
-
-                async with DocumentIntelligenceClient(endpoint=endpoint, credential=AzureKeyCredential(key)) as di_client:
-                    poller = await di_client.begin_analyze_document("prebuilt-layout", body=batch_bytes, content_type="application/octet-stream")
-                    result = await poller.result()
-                    
-                full_text += (result.content or "") + "\n\n"
-                if result.paragraphs:
-                    raw_paragraphs.extend([p.content.strip() for p in result.paragraphs if p.content and len(p.content.strip()) > 30])
-            doc.close()
+            raw_paragraphs = await parser.parse(blob_url="", file_bytes=pdf_bytes, filename=file_name)
+            full_text = "\n\n".join(raw_paragraphs)
         except Exception as e:
-            logger.error("Azure Document Intelligence processing failed", error=str(e))
+            logger.error("Parsing failed", error=str(e))
             return False
-
-    else:
-        # TXT / MD or Fallback
-        full_text = file_bytes.decode('utf-8', errors='ignore')
-        logger.info(f"Raw Text extracted {len(full_text)} chars.")
         
     # 3. Semantic chunking
     if not raw_paragraphs:
         chunks = split_document_text(
             text=full_text,
-            chunk_size=800,
-            chunk_overlap=150,
+            chunk_size=settings.RAG_CHUNK_SIZE,
+            chunk_overlap=settings.RAG_CHUNK_OVERLAP,
             separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]
         )
 
@@ -149,20 +78,20 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
         chunks = []
         buffer = ""
         for para in raw_paragraphs:
-            if len(buffer) + len(para) + 2 <= 800:
+            if len(buffer) + len(para) + 2 <= settings.RAG_CHUNK_SIZE:
                 buffer = (buffer + "\n\n" + para).strip()
             else:
                 if buffer:
-                    chunks.extend(split_document_text(buffer, chunk_size=800, chunk_overlap=150))
+                    chunks.extend(split_document_text(buffer, chunk_size=settings.RAG_CHUNK_SIZE, chunk_overlap=settings.RAG_CHUNK_OVERLAP))
                 buffer = para
         if buffer:
-            chunks.extend(split_document_text(buffer, chunk_size=800, chunk_overlap=150))
+            chunks.extend(split_document_text(buffer, chunk_size=settings.RAG_CHUNK_SIZE, chunk_overlap=settings.RAG_CHUNK_OVERLAP))
     else:
         logger.warning("No structured paragraphs found. Falling back to plain text splitting.")
         chunks = split_document_text(
             text=full_text,
-            chunk_size=800,
-            chunk_overlap=150,
+            chunk_size=settings.RAG_CHUNK_SIZE,
+            chunk_overlap=settings.RAG_CHUNK_OVERLAP,
             separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]
         )
 

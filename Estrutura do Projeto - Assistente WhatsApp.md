@@ -11,10 +11,10 @@ WhatsApp API
 ├── 3\. Filtro de tipo de mensagem (só texto)             ← executado ANTES do roteamento  
 ├── 4\. Roteamento de comandos (mensagens com /)          ← role=student → rejeita na borda  
 ├── 5\. Idempotência: lock por message\_id  
-├── 6\. Enfileira → Service Bus: inbound\_messages (com SessionId \= phone, correlation\_id)  
+├── 6\. Enfileira → Fila (Redis Streams / Service Bus) (com SessionId \= phone, correlation\_id)  
 └── 7\. Retorna HTTP 200 em \< 200ms — NUNCA executa lógica de negócio  
      ↓  
-\[Service Bus\]  
+\[Message Queue (Redis Streams preferencial)\]  
 ├── inbound_messages     ┐  
 └── command_messages     ┴→ \[Worker LLM\]         ← pipeline RAG \+ comandos \+ memória Redis (com LTRIM)  
 ├── index_documents      → \[Worker Ingestão\]    ← parse \+ embedding \+ Qdrant (maxReplicas=2, Tenacity)  
@@ -29,27 +29,28 @@ WhatsApp API
 ├── Gemini Adapter  
 └── DeepSeek Adapter
 
-## **2\. Serviços Azure**
+## **2\. Serviços e Infraestrutura (Multi-Cloud)**
+
+A arquitetura agora é **Cloud-Agnostic** (via `Makefile` e interfaces), podendo rodar na Azure, GCP ou AWS.
 
 | **Função** | **Serviço** | **Observação** |  
-| Webhook Receiver | Azure Container Apps | **minReplicas=1 obrigatório** — Cache local do `ServiceBusSender` e Redis timeout de 1.0s garantem latência \< 50ms para blindar contra flood da Meta. |  
-| Workers (LLM, Ingestão, Exclusão) | Azure Container Apps | Escalam via KEDA a partir de zero. (Worker LLM consome simultaneamente `inbound_messages` e `command_messages`). |  
-| Triggers agendados | Azure Functions (Timer Trigger) | Scheduler de aulas, DLQ Janitor, health check do Qdrant e verificação de acesso à Service Account. |  
-| Filas \+ DLQ | Azure Service Bus (Standard) | Tier Standard obrigatório para sessions FIFO. Filas: inbound\_messages, command\_messages, index\_documents, delete\_vectors. Autenticação via Managed Identity. |  
-| Banco de dados relacional | Azure SQL Database (DTU Basic) | \~US$ 5/mês, sem cold start. (Inserções `DATETIME` via formatação adaptada `%Y-%m-%dT%H:%M:%S`). |  
-| Cache de sessão \+ whitelist \+ locks | Container App Interno (`redis:7-alpine`) | Imagem oficial rodando internamente no ambiente Serverless. Usado para idempotência, debouncing, whitelist e sessão. Substitui o managed "Azure Cache for Redis" para economia. |  
+| Webhook Receiver | Container Apps / Cloud Run / ECS | **minReplicas=1 obrigatório** — Cache local do Client de fila e Redis timeout de 1.0s garantem latência \< 50ms para blindar contra flood da Meta. |  
+| Workers (LLM, Ingestão, Exclusão) | Container Apps / Cloud Run / ECS | Escalam automaticamente a partir da métrica da fila. (Worker LLM consome simultaneamente `inbound_messages` e `command_messages`). |  
+| Triggers agendados | Cloud Functions / EventBridge | Scheduler de aulas, DLQ Janitor, health check do Qdrant e verificação de acesso à Service Account. |  
+| Filas \+ DLQ | Redis Streams / Service Bus / SQS | Filas: inbound\_messages, command\_messages, index\_documents, delete\_vectors. A fila agora é isolada via interface `IMessageQueue`. |  
+| Banco de dados relacional | PostgreSQL (Flexible Server / Cloud SQL / RDS) | Migrado do SQL Server para PostgreSQL para reduzir o tamanho da imagem Docker e erradicar Vendor Lock-in de drivers. |  
+| Cache de sessão \+ whitelist \+ locks | Redis (Memorystore / ElastiCache / Azure Cache) | Usado para idempotência, debouncing, whitelist e sessão. |  
 | Banco vetorial | Qdrant Cloud (free tier) | Mesma região que os Container Apps — verificar antes de provisionar. |  
-| Parse de documentos | Azure Document Intelligence | OCR avançado para PDFs pedagógicos. |  
+| Parse de documentos | Gotenberg / Azure Document Intelligence | OCR avançado e conversão de PDFs (Estratégias isoladas via `IDocumentParser`). |  
 | Orquestração RAG \+ Memória | LangChain \+ FastAPI | ConversationBufferMemory com backend Redis. |  
-| Autenticação | Microsoft Entra ID | Login via Azure Static Web Apps. |  
-| Segredos | Azure Key Vault | Armazenamento de chaves e strings de conexão. |  
-| TTS | Azure Cognitive Services Speech | Geração de áudio. |  
-| Arquivos de áudio | Azure Blob Storage | TTL de 24–48h. |  
-| Logs e telemetria | Azure Application Insights | Erros do worker, tokens consumidos, falhas de ingestão, **alertas de custo do LLM**. |  
-| Painel do professor | Azure Static Web App \+ Azure Function | |  
-**Por que DTU Basic e não SQL Serverless?** O modelo Serverless cobra por segundo de vCore ativo. Um Timer Trigger de aquecimento manteria o banco ativo 24/7, anulando a economia. O DTU Basic oferece custo fixo de \~US$ 5/mês, sem cold start e sem armadilha de cobrança.  
-**Alerta de capacidade DTU Basic:** 5 DTUs suportam carga transacional leve. Monitorar via Application Insights e definir limiar de upgrade para DTU Standard S0 (\~US$ 15/mês). Configurar alerta para uso acima de 70% por mais de 5 minutos consecutivos.  
-**Banco vetorial — regra de deploy:** Verificar disponibilidade de região Azure no Qdrant Cloud **antes** de provisionar qualquer serviço. Todos os recursos devem ser alinhados à região disponível. Cruzamento de regiões adiciona 150–200ms por busca vetorial.  
+| Segredos | Key Vault / Secret Manager | Armazenamento de chaves e strings de conexão (Injetados via ambiente no padrão 12-Factor). |  
+| TTS | Nuvem (GCP TTS / Azure Speech) | Geração de áudio. |  
+| Arquivos de áudio | Blob Storage / S3 / GCS | TTL de 24–48h. |  
+| Logs e telemetria | Application Insights / Cloud Logging | Erros do worker, tokens consumidos, falhas de ingestão, alertas de custo do LLM. |  
+
+**Por que PostgreSQL Burstable/Micro e não Serverless?** O modelo Serverless na nuvem cobra por uso esporádico mas pode apresentar cold-start de conexão de rede. Instâncias fixas baratas (B1ms no Azure, f1-micro no GCP) oferecem custo fixo de \~US$ 10/mês, sem cold start e sem armadilha de cobrança.  
+**Alerta de capacidade:** Tiers micro suportam carga transacional leve. Monitorar via logs da nuvem e definir limiar de upgrade. Configurar alerta para uso de CPU acima de 70% por mais de 5 minutos consecutivos.  
+**Banco vetorial — regra de deploy:** Verificar disponibilidade de região na nuvem do Qdrant Cloud **antes** de provisionar qualquer serviço. Todos os recursos devem ser alinhados à região disponível. Cruzamento de regiões adiciona 150–200ms por busca vetorial.  
 **Qdrant Cloud free tier — limitação de inatividade:** Clusters gratuitos são suspensos após 1 semana de inatividade e deletados após 4 semanas. Para evitar suspensão acidental, uma Azure Function Timer Trigger executa um health check (busca simples no Qdrant) a cada 6 dias.  
 **Alerta de custo LLM:** Configurar budgets no Azure Cost Management e alertas via Application Insights para limite diário de gasto com chamadas ao LLM (tokens). O custo pode escalar rapidamente com o número de alunos ativos.  
 **Service Bus Session Lock Duration:** O lock duration padrão da session é 30s — insuficiente para chamadas ao LLM que frequentemente ultrapassam esse tempo. Se o lock expirar, a sessão é desbloqueada e a mensagem volta para a fila, causando loop infinito. **Correção:** Configurar `LockDuration` da fila inbound\_messages para 5 minutos (ISO 8601: `PT5M`) no momento da criação da fila.  
