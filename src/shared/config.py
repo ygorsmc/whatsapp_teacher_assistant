@@ -35,8 +35,8 @@ class Settings(BaseSettings):
     DEBOUNCE_TTL_SECONDS: int = Field(default=2)
     MAX_BUFFER_CHARS: int = Field(default=4096)
     
-    # Mensageria / Service Bus
-    QUEUE_BACKEND: str = Field(default="servicebus")
+    # Mensageria / Fila
+    QUEUE_BACKEND: str = Field(default="redis")
     SERVICEBUS_FQDN: str = Field(default="")
     SERVICEBUS_CONNECTION_STRING: Optional[str] = Field(default=None) # Only for local dev with Azurite/Emulator
     
