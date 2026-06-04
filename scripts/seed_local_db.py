@@ -26,6 +26,7 @@ def compute_next_trigger_utc(preferred_hour: str) -> datetime:
 async def seed():
     # Ensure tables are empty before seeding to prevent crash loops
     async with AsyncSessionLocal() as session:
+        await session.execute(text('DELETE FROM "StudentInteractions"'))
         await session.execute(text('DELETE FROM "StudentSchedule"'))
         await session.execute(text('DELETE FROM "MessageTemplates"'))
         await session.execute(text('DELETE FROM "StudentEnrollment"'))
