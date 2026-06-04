@@ -1,10 +1,16 @@
 from abc import ABC, abstractmethod
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Type
+from pydantic import BaseModel
 
 class LLMProvider(ABC):
     @abstractmethod
     async def agenerate(self, prompt: str, system_message: Optional[str] = None, history: Optional[List[Any]] = None) -> str:
         """Generates a text response from the model asynchronously."""
+        pass
+
+    @abstractmethod
+    async def agenerate_structured(self, prompt: str, schema: Type[BaseModel], system_message: Optional[str] = None, history: Optional[List[Any]] = None) -> BaseModel:
+        """Generates a structured Pydantic response from the model asynchronously."""
         pass
 
 class EmbeddingProvider(ABC):

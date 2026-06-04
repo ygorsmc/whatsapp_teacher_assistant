@@ -6,7 +6,6 @@ All content is generated in a SINGLE LLM call to minimize token cost.
 """
 
 from pydantic import BaseModel, Field
-from langchain_core.output_parsers import PydanticOutputParser
 from src.llm.factory import get_provider
 from src.rag.retriever import retrieve_context
 from src.rag.quiz_generator import QuizAlternative
@@ -39,8 +38,6 @@ class ReviewOutput(BaseModel):
         description="Quiz de múltipla escolha baseado no resumo (3 alternativas)"
     )
 
-
-parser = PydanticOutputParser(pydantic_object=ReviewOutput)
 
 from src.shared.constants.prompts import REVIEW_PROMPT_TEMPLATE, TOPIC_EXTRACTION_PROMPT
 import random
@@ -119,15 +116,11 @@ async def generate_review(
         topic=chosen_topic,
         perspective=chosen_perspective,
         lesson_content=lesson_content,
-        format_instructions=parser.get_format_instructions(),
     )
 
     # Single LLM call — generates summary + key_points + quiz together
-    response = await llm.agenerate(prompt=prompt)
-
-    # 4. Parse structured output
     try:
-        review = parser.parse(response)
+        review = await llm.agenerate_structured(prompt=prompt, schema=ReviewOutput)
         
         # Algorithmic randomization to prevent LLM bias (always picking B)
         if review.quiz and review.quiz.alternatives:
@@ -153,7 +146,6 @@ async def generate_review(
     except Exception as e:
         logger.error(
             "Failed to parse review output from LLM",
-            error=str(e)[:500],
-            raw_response=response[:200],
+            error=str(e)[:500]
         )
         return None

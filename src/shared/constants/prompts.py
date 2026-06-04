@@ -39,8 +39,6 @@ Com base no conteúdo abaixo, sua missão é realizar um MICRO-LEARNING FOCADO. 
 CONTEÚDO DA AULA:
 {lesson_content}
 
-{format_instructions}
-
 Responda em português brasileiro. O quiz deve ser desafiador mas justo — o aluno deve conseguir responder corretamente SE leu o resumo com atenção."""
 
 TOPIC_EXTRACTION_PROMPT = """Analise o texto abaixo e extraia TODOS os conceitos/tópicos importantes abordados nele.
@@ -59,6 +57,6 @@ IMPORTANTE:
 Conteúdo da aula:
 {context}
 
-{format_instructions}
+
 
 Gere a questão em português, com alternativas claras e uma explicação pedagógica detalhada para a resposta correta."""

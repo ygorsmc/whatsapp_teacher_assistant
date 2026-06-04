@@ -1,5 +1,4 @@
 from pydantic import BaseModel, Field
-from langchain_core.output_parsers import PydanticOutputParser
 from src.llm.factory import get_provider
 
 class QuizAlternative(BaseModel):
@@ -11,8 +10,6 @@ class QuizOutput(BaseModel):
     alternatives: list[QuizAlternative] = Field(description="Lista com EXATAMENTE 3 alternativas (A, B, C)")
     correct_answer: str = Field(description="ID da alternativa correta")
     explanation: str = Field(description="Explicação pedagógica de por que a resposta está correta. NUNCA cite a letra da alternativa (A, B, C) neste texto.")
-
-parser = PydanticOutputParser(pydantic_object=QuizOutput)
 
 from src.shared.constants.prompts import QUIZ_GENERATION_PROMPT, TOPIC_EXTRACTION_PROMPT
 import random
@@ -59,16 +56,13 @@ async def generate_quiz(
     chosen_topic = random.choice(topics)
     chosen_perspective = random.choice(QUIZ_PERSPECTIVES)
     
-    # Etapa 2: Geração focada
     prompt = QUIZ_GENERATION_PROMPT.format(
         context=lesson_content,
         topic=chosen_topic,
         perspective=chosen_perspective,
-        format_instructions=parser.get_format_instructions(),
     )
     
-    response_text = await llm.agenerate(prompt)
-    quiz = parser.parse(response_text)
+    quiz = await llm.agenerate_structured(prompt, QuizOutput)
     
     # Algorithmic randomization
     if quiz.alternatives:

@@ -12,7 +12,7 @@ from src.llm.factory import get_embedder
 from qdrant_client.models import PointStruct
 from azure.core.credentials import AzureKeyCredential
 from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from src.rag.text_splitter import split_document_text
 import src.llm # Init providers
 
 logger = structlog.get_logger(__name__)
@@ -137,11 +137,13 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
         logger.info(f"Raw Text extracted {len(full_text)} chars.")
         
     # 3. Semantic chunking
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=150,
-        separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]
-    )
+    if not raw_paragraphs:
+        chunks = split_document_text(
+            text=full_text,
+            chunk_size=800,
+            chunk_overlap=150,
+            separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]
+        )
 
     if raw_paragraphs:
         chunks = []
@@ -151,13 +153,18 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
                 buffer = (buffer + "\n\n" + para).strip()
             else:
                 if buffer:
-                    chunks.extend(text_splitter.split_text(buffer))
+                    chunks.extend(split_document_text(buffer, chunk_size=800, chunk_overlap=150))
                 buffer = para
         if buffer:
-            chunks.extend(text_splitter.split_text(buffer))
+            chunks.extend(split_document_text(buffer, chunk_size=800, chunk_overlap=150))
     else:
         logger.warning("No structured paragraphs found. Falling back to plain text splitting.")
-        chunks = text_splitter.split_text(full_text)
+        chunks = split_document_text(
+            text=full_text,
+            chunk_size=800,
+            chunk_overlap=150,
+            separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]
+        )
 
     # Remove duplicates
     seen = set()
