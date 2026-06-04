@@ -33,8 +33,9 @@ class TelegramChannel(IMessagingChannel):
             "text": text,
             "parse_mode": "Markdown"  # Suporta *bold*, _italic_, etc.
         }
-        if reply_to:
-            payload["reply_to_message_id"] = reply_to
+        # Ignoramos intencionalmente o parâmetro `reply_to` no Telegram.
+        # Enviar `reply_to_message_id` faz com que o cliente do Telegram agrupe
+        # as mensagens em "Threads/Respostas", o que confunde a UX num chat 1-a-1.
             
         return await self._send_request("sendMessage", payload)
 
