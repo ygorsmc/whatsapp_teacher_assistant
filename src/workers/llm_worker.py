@@ -420,17 +420,17 @@ async def process_inbound(event: dict, ctx: MessageContext):
             from src.llm.classifier import classify_course_intent
             
             enrolled_courses = [
-                {"id": ctx["course"].id, "name": ctx["course"].name}
-                for ctx in student_contexts
+                {"id": s_ctx["course"].id, "name": s_ctx["course"].name}
+                for s_ctx in student_contexts
             ]
             
             classified_course_id = await classify_course_intent(combined, enrolled_courses)
             
             if classified_course_id:
                 # Override the default context with the classified one
-                for ctx in student_contexts:
-                    if ctx["course"].id == classified_course_id:
-                        student_context = ctx
+                for s_ctx in student_contexts:
+                    if s_ctx["course"].id == classified_course_id:
+                        student_context = s_ctx
                         break
             else:
                 # Ambiguous intent - ask the student to specify
