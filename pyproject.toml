@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+# Coloca a raiz do projeto no sys.path para que "import src.*" funcione tanto na
+# CI (script "pytest") quanto localmente, sem precisar exportar PYTHONPATH=.
+pythonpath = ["."]
+testpaths = ["tests"]
+# Os testes async usam @pytest.mark.asyncio; "strict" exige o marcador explícito.
+asyncio_mode = "strict"
