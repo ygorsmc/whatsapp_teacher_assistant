@@ -467,6 +467,7 @@ async def process_inbound(event: dict, ctx: MessageContext):
         except Exception as e:
             import traceback
             traceback.print_exc()
+            logger.error("worker_pipeline_failed", error=str(e), exc_info=True)
             track_event("worker_error", {"error": str(e)[:500]})
             await channel.send_text(sender_id, ERROR_TECHNICAL, reply_to=message_id)
             await ctx.dead_letter(reason="Pipeline Error", description=str(e)[:500])
