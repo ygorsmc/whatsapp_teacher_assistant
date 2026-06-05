@@ -381,6 +381,12 @@ async def process_inbound(event: dict, ctx: MessageContext):
                 await ctx.complete()
                 return
 
+            # Fast-path: aviso de janela de 23.5h
+            if reply_id == "window_warning_later":
+                await channel.send_text(sender_id, "Combinado! Vou aguardar até o horário do seu próximo agendamento. Bons estudos!")
+                await ctx.complete()
+                return
+
         # Debouncing no worker (movido do webhook)
         from src.cache.redis_client import get_redis
         redis = await get_redis()

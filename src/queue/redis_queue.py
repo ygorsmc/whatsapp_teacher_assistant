@@ -39,9 +39,19 @@ class RedisStreamContext(MessageContext):
         # Redis streams PEL doesn't expire implicitly, so no renewal is needed
         pass
 
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from redis.exceptions import ConnectionError, TimeoutError
+
 class RedisStreamsQueue(IMessageQueue):
     def __init__(self):
-        self.client = redis.from_url(settings.REDIS_URL, decode_responses=False)
+        self.client = redis.from_url(
+            settings.REDIS_URL, 
+            decode_responses=False,
+            socket_timeout=5.0,
+            socket_connect_timeout=5.0,
+            retry_on_timeout=True,
+            health_check_interval=30
+        )
         self.group_name = "messaging_workers"
         self.consumer_name = f"worker_{uuid.uuid4().hex[:8]}"
 
@@ -52,6 +62,11 @@ class RedisStreamsQueue(IMessageQueue):
             if "BUSYGROUP Consumer Group name already exists" not in str(e):
                 raise
 
+    @retry(
+        stop=stop_after_attempt(4),
+        wait=wait_exponential(multiplier=1, min=1, max=10),
+        retry=retry_if_exception_type((ConnectionError, TimeoutError))
+    )
     async def enqueue(self, queue: str, payload: dict, session_id: str | None = None):
         fields = {
             "payload": json.dumps(payload),

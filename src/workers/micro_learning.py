@@ -40,7 +40,7 @@ async def send_quiz_to_student(channel, student: dict, quiz: QuizOutput) -> str:
                 "alternatives": json.dumps([{"id": a.id, "text": a.text} for a in quiz.alternatives]),
                 "correct_answer": quiz.correct_answer,
                 "explanation": quiz.explanation,
-                "expires_at": datetime.now(timezone.utc) + timedelta(hours=24),
+                "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).replace(tzinfo=None),
             }
         )
         await session.commit()

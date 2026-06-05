@@ -341,6 +341,97 @@ async def advance_classes_pointer():
         if advanced_count > 0:
             await session.commit()
 
+async def process_window_extensions():
+    """Busca alunos ociosos (23h30m a 23h50m) e envia aviso interativo para maximizar a janela da Meta."""
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    min_idle_time = timedelta(hours=23, minutes=30)
+    max_idle_time = timedelta(hours=23, minutes=50)
+
+    async with AsyncSessionLocal() as session:
+        channel = get_channel()
+        query_col = channel.get_user_query_column()
+
+        # Busca todos os estudantes ativos
+        result = await session.execute(
+            text(f"""
+                SELECT id as student_id, {query_col} AS sender_id, course_id
+                FROM "Students"
+                WHERE is_active = true AND {query_col} IS NOT NULL
+            """)
+        )
+        students = result.fetchall()
+
+        for student in students:
+            # Pega a última interação real do aluno
+            res_last = await session.execute(
+                text("""
+                    SELECT MAX(timestamp) 
+                    FROM "StudentInteractions" 
+                    WHERE student_id = :sid 
+                      AND interaction_type IN ('message_received', 'quiz_answered')
+                """),
+                {"sid": student.student_id}
+            )
+            last_interaction = res_last.scalar()
+
+            if not last_interaction:
+                continue
+
+            idle_duration = now_utc - last_interaction
+
+            if min_idle_time <= idle_duration <= max_idle_time:
+                # Verifica se já mandamos o aviso NESTE ciclo (ou seja, depois da última interação)
+                res_warn = await session.execute(
+                    text("""
+                        SELECT 1 FROM "StudentInteractions"
+                        WHERE student_id = :sid
+                          AND interaction_type = 'window_closing_warning_sent'
+                          AND timestamp > :last_int
+                    """),
+                    {"sid": student.student_id, "last_int": last_interaction}
+                )
+                already_warned = res_warn.scalar()
+
+                if not already_warned:
+                    logger.info("sending_window_extension_warning", student_id=student.student_id, idle=str(idle_duration))
+                    
+                    body_text = (
+                        "⏰ *Aviso Importante*\n\n"
+                        "Para que eu possa continuar enviando seus quizzes e dicas sem interrupções "
+                        "nos próximos horários, preciso que você interaja comigo!\n\n"
+                        "Quer aproveitar e responder um quiz rápido agora ou prefere deixar para o próximo agendamento?"
+                    )
+                    
+                    course_id = student.course_id
+                    buttons = [
+                        {"id": f"review_accept_{course_id}", "title": "Responder Quiz Agora"},
+                        {"id": "window_warning_later", "title": "Responder Depois"}
+                    ]
+                    
+                    # No Telegram, usamos list / buttons emulados
+                    # No WhatsApp, max 3 botões usa send_buttons
+                    await channel.send_buttons(
+                        user_id=student.sender_id,
+                        body=body_text,
+                        buttons=buttons,
+                        footer="Mantenha seus estudos em dia!"
+                    )
+                    
+                    # Registra que avisamos
+                    await session.execute(
+                        text("""
+                            INSERT INTO "StudentInteractions" (student_id, interaction_type)
+                            VALUES (:sid, 'window_closing_warning_sent')
+                        """),
+                        {"sid": student.student_id}
+                    )
+                    await session.commit()
+                    
+                    track_event("window_extension_sent", {
+                        "student_id": student.student_id,
+                        "idle_seconds": idle_duration.total_seconds()
+                    })
+
 
 async def scheduler_loop():
     """Main scheduler loop — polls every 5 minutes."""
@@ -354,6 +445,7 @@ async def scheduler_loop():
             await perform_daily_user_sync()
             await advance_classes_pointer()
             await process_pending_schedules()
+            await process_window_extensions()
         except Exception as e:
             logger.error("scheduler_loop_error", error=str(e)[:500])
 
