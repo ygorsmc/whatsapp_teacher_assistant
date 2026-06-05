@@ -3,7 +3,6 @@ Spreadsheet Sync Module - Synchronizes Google Sheets rows into the Azure SQL Dat
 Uses MERGE statements for MSSQL compatibility.
 """
 
-import uuid
 import structlog
 import re
 import json

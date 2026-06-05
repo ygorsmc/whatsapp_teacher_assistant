@@ -1,7 +1,6 @@
 import structlog
 import logging
 from typing import Any, Dict, Optional
-import json
 
 def setup_telemetry(log_level: str = "INFO"):
     """

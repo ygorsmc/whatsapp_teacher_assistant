@@ -2,8 +2,8 @@ import re
 from src.rag.qdrant_client import get_qdrant, init_qdrant_collection
 from src.llm.factory import get_embedder
 from src.shared.config import settings
-from qdrant_client.models import Filter, FieldCondition, MatchValue, MatchAny, Range
-from typing import List, Optional
+from qdrant_client.models import Filter, FieldCondition, MatchValue, Range
+from typing import Optional
 import structlog
 
 logger = structlog.get_logger(__name__)

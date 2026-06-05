@@ -23,7 +23,6 @@ from src.shared.config import settings
 from src.shared.telemetry import track_event
 from src.channel.factory import get_channel
 from src.shared.constants.messages import REVIEW_INVITE_BODY, REVIEW_INVITE_FOOTER, REVIEW_ACCEPT_TITLE, REVIEW_LATER_TITLE
-from src.cache.redis_client import get_redis
 from src.db.database import AsyncSessionLocal, init_db
 
 logger = structlog.get_logger(__name__)
@@ -90,7 +89,6 @@ def compute_next_trigger(preferred_hour: str, from_date: datetime | None = None)
 async def process_pending_schedules():
     """Finds and processes all student schedules that are due."""
     now_utc = datetime.now(timezone.utc)
-    redis = await get_redis()
 
     async with AsyncSessionLocal() as session:
         # Fetch all due schedules with student and course info
@@ -294,7 +292,7 @@ async def advance_classes_pointer():
                     
             try:
                 smap = json.loads(schedule_map_str)
-            except:
+            except Exception:
                 smap = {}
                 
             if last_adv_str and str(last_adv_str)[:10] == hoje_str:

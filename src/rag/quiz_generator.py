@@ -1,5 +1,8 @@
 from pydantic import BaseModel, Field
 from src.llm.factory import get_provider
+from src.shared.constants.prompts import QUIZ_GENERATION_PROMPT, TOPIC_EXTRACTION_PROMPT
+import random
+from src.cache.topic_cache import get_cached_topics, set_cached_topics
 
 class QuizAlternative(BaseModel):
     id: str = Field(description="Identificador da alternativa (A, B, C, D, E)")
@@ -11,9 +14,6 @@ class QuizOutput(BaseModel):
     correct_answer: str = Field(description="ID da alternativa correta")
     explanation: str = Field(description="Explicação pedagógica de por que a resposta está correta. NUNCA cite a letra da alternativa (A, B, C) neste texto.")
 
-from src.shared.constants.prompts import QUIZ_GENERATION_PROMPT, TOPIC_EXTRACTION_PROMPT
-import random
-
 # Lentes Pedagógicas para forçar variação no quiz
 QUIZ_PERSPECTIVES = [
     "Focado em um detalhe técnico minucioso e importante",
@@ -22,8 +22,6 @@ QUIZ_PERSPECTIVES = [
     "Focado na exceção à regra, em uma limitação ou no que NÃO se aplica",
     "Focado na conexão com um problema cotidiano do mercado de trabalho"
 ]
-
-from src.cache.topic_cache import get_cached_topics, set_cached_topics
 
 async def generate_quiz(
     course_id: str,

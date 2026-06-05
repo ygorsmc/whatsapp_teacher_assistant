@@ -2,7 +2,6 @@ import json
 import asyncio
 import structlog
 import uuid
-import os
 from typing import Callable, Awaitable
 import redis.asyncio as redis
 from redis.exceptions import ResponseError

@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Awaitable
+from typing import Callable, Awaitable
 
 class MessageContext(ABC):
     """Context block that allows workers to acknowledge or dead-letter a message."""

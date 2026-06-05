@@ -1,9 +1,7 @@
 import fitz  # PyMuPDF
 import structlog
-import os
 from typing import List
 from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
-from azure.core.credentials import AzureKeyCredential
 from src.parsing.interfaces import IDocumentParser
 
 logger = structlog.get_logger(__name__)

@@ -1,10 +1,9 @@
-from fastapi import Request, Response, APIRouter, BackgroundTasks
+from fastapi import Request, Response, APIRouter
 from typing import Optional
 from uuid import uuid4
 import json
 import re
 from sqlalchemy import text as sql_text
-from src.shared.config import settings
 
 from src.webhook.security import check_rate_limit
 from src.queue.factory import get_queue
@@ -14,10 +13,8 @@ from src.db.database import AsyncSessionLocal
 from src.shared.constants.messages import (
     UNSUPPORTED_MESSAGE_TYPE, ERROR_UNAUTHORIZED
 )
-from src.shared.constants.commands import parse_command, CommandType
 
 from src.channel.interfaces import IMessagingChannel, InboundMessage
-from src.channel.factory import get_channel
 from src.channel.whatsapp import WhatsAppChannel
 from src.channel.telegram import TelegramChannel
 

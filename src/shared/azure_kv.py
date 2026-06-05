@@ -32,7 +32,7 @@ def load_azure_secrets(settings) -> None:
                 # O banco de dados agora é PostgreSQL, a Connection String no KeyVault/Secret Manager
                 # já deve estar no formato nativo do SQLAlchemy: postgresql+asyncpg://...
                 setattr(settings, env_key, secret.value)
-            except Exception as e:
+            except Exception:
                 logger.warning(f"KeyVault secret '{kv_key}' not found or could not be loaded. Fallback to .env")
                 
         logger.info("Secrets successfully loaded from Azure Key Vault via Managed Identity")

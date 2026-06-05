@@ -12,6 +12,8 @@ from src.rag.quiz_generator import QuizAlternative
 from src.shared.config import settings
 from typing import Optional
 import structlog
+import random
+from src.shared.constants.prompts import REVIEW_PROMPT_TEMPLATE, TOPIC_EXTRACTION_PROMPT
 
 logger = structlog.get_logger(__name__)
 
@@ -39,8 +41,6 @@ class ReviewOutput(BaseModel):
     )
 
 
-from src.shared.constants.prompts import REVIEW_PROMPT_TEMPLATE, TOPIC_EXTRACTION_PROMPT
-import random
 
 # Lentes Pedagógicas customizadas para o Resumo Agendado
 REVIEW_PERSPECTIVES = [

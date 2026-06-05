@@ -1,17 +1,14 @@
 import asyncio
-import io
 import uuid
 import structlog
-from datetime import datetime
 from sqlalchemy import text
 from src.shared.config import settings
 from src.db.database import AsyncSessionLocal
 from src.drive.client import drive_client
 from src.rag.qdrant_client import get_qdrant, init_qdrant_collection
+from src.rag.text_splitter import split_document_text
 from src.llm.factory import get_embedder
 from qdrant_client.models import PointStruct
-from src.parsing.factory import get_parser
-import src.llm # Init providers
 
 logger = structlog.get_logger(__name__)
 
@@ -27,7 +24,7 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
         file_bytes = await drive_client.download_file(file_id)
         logger.info(f"Downloaded {len(file_bytes)} bytes from Drive.")
     except Exception as e:
-        logger.error(f"Failed to download from Drive", error=str(e))
+        logger.error("Failed to download from Drive", error=str(e))
         return False
 
     full_text = ""

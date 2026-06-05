@@ -191,7 +191,8 @@ class LocalEmbeddingProvider(EmbeddingProvider):
     DIMENSIONS = 384
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
-        self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
+        # self.embeddings = HuggingFaceEmbeddings(model_name=model_name)
+        raise NotImplementedError("Local embeddings require langchain-huggingface")
 
     def get_dimensions(self) -> int:
         return self.DIMENSIONS
@@ -226,7 +227,7 @@ class AzureEmbeddingProvider(EmbeddingProvider):
         return await self.embeddings.aembed_documents(texts)
 
 
-from src.llm.factory import register_provider, register_embedder
+from src.llm.factory import register_provider, register_embedder  # noqa: E402
 register_provider("openai", OpenAILLMProvider)
 register_embedder("openai", OpenAIEmbeddingProvider)
 register_provider("gemini", GeminiLLMProvider)

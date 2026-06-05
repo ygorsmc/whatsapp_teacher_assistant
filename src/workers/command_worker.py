@@ -1,10 +1,7 @@
-import asyncio
-import json
-import structlog
 from src.queue.interfaces import MessageContext
 from src.shared.config import settings
 from src.channel.factory import get_channel
-from src.shared.telemetry import track_event, logger
+from src.shared.telemetry import logger
 from src.db.database import AsyncSessionLocal
 from sqlalchemy import text
 from src.shared.constants.messages import (
@@ -12,7 +9,7 @@ from src.shared.constants.messages import (
 )
 from src.shared.constants.commands import parse_command, CommandType
 
-logger = structlog.get_logger(__name__)
+
 
 async def run_sync_alunos_command(channel, sender_id: str):
     from src.drive.spreadsheet_sync import sync_users_from_sheet
@@ -74,17 +71,17 @@ async def run_list_cursos_command(channel, sender_id: str):
                 msg += f"{idx}. *{c[0]}*\n(ID: `{c[1]}`)\n\n"
             msg += "💡 *Dica:* Para listar os materiais do Drive, digite `/listar_materiais`"
             await channel.send_text(sender_id, msg)
-    except Exception as e:
+    except Exception:
         await channel.send_text(sender_id, "❌ Erro ao buscar cursos.")
 
 async def run_list_materiais_command(channel, sender_id: str, course_query: str):
     from src.drive.client import drive_client
     try:
         async with AsyncSessionLocal() as session:
-            result = await session.execute(text('SELECT id FROM \"Teachers\" WHERE phone = :phone'), {"phone": phone})
+            result = await session.execute(text('SELECT id FROM \"Teachers\" WHERE phone = :phone'), {"phone": sender_id})
             teacher = result.fetchone()
             if not teacher:
-                await send_whatsapp_message(phone, "❌ Professor não encontrado no sistema.")
+                await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
                 
             folder_id = settings.GOOGLE_DRIVE_FOLDER_ID
@@ -141,10 +138,10 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
             return
 
         async with AsyncSessionLocal() as session:
-            result = await session.execute(text('SELECT id FROM \"Teachers\" WHERE phone = :phone'), {"phone": phone})
+            result = await session.execute(text('SELECT id FROM \"Teachers\" WHERE phone = :phone'), {"phone": sender_id})
             teacher = result.fetchone()
             if not teacher:
-                await send_whatsapp_message(phone, "❌ Professor não encontrado no sistema.")
+                await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
             
             stmt = text("""
@@ -157,7 +154,7 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
             class_row = result.fetchone()
             
             if not class_row:
-                await send_whatsapp_message(phone, f"❌ Turma '{class_name}' não encontrada.")
+                await channel.send_text(sender_id, f"❌ Turma '{class_name}' não encontrada.")
                 return
                 
             class_id = class_row[0]
@@ -313,7 +310,6 @@ async def command_loop():
     logger.info("main_worker_starting", environment=settings.ENVIRONMENT, worker_type="command")
     
     from src.queue.factory import get_queue
-    from src.queue.interfaces import MessageContext
     
     async def handler(payload: dict, ctx: MessageContext):
         try:

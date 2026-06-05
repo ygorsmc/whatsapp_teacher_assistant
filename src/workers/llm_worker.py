@@ -1,5 +1,4 @@
 import asyncio
-import json
 import structlog
 from src.queue.interfaces import MessageContext
 from src.shared.config import settings
@@ -38,7 +37,6 @@ async def run_rag_pipeline(student_context: dict, text: str) -> str:
     teacher = student_context["teacher"]
     student = student_context["student"]
     course = student_context["course"]
-    enrollment = student_context["enrollment"]
     
     # 2. Retrieve Document Context from Qdrant
     # For now, we assume the student only has access to their current lesson pointer
@@ -97,7 +95,6 @@ async def get_student_context(sender_id: str, query_column: str, course_id: str 
     from src.db.models.user import Student, Teacher
     from src.db.models.course import StudentEnrollment, CourseClass, Course
     from sqlalchemy import select
-    from sqlalchemy import text as sql_text
     
     async with AsyncSessionLocal() as session:
         # Join tables to get the full context in one query
@@ -225,7 +222,6 @@ async def handle_review_request(channel, sender_id: str, student_context: dict) 
     teacher = student_context["teacher"]
     student = student_context["student"]
     course = student_context["course"]
-    enrollment = student_context["enrollment"]
     current_lesson = student_context["class_obj"].current_lesson_number
 
     from src.rag.prompt_builder import resolve_lesson_label
