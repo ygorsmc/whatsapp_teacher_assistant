@@ -79,4 +79,23 @@ _docs/
 
 .venv_migration/
 .venv_test/
+.venv_lint/
 
+# Scripts de rascunho e utilitários isolados
+doc_generator.py
+test_db.py
+test_query.py
+run_sync.py
+
+# Documentação Interna / AI e Regras
+AGENTS.md
+Estrutura do Projeto - Assistente WhatsApp.md
+Resumo Arquitetural - Assistente WhatsApp.md
+
+# Chaves, Credenciais JSON e Emuladores (SEGURANÇA)
+service_account.json
+envs.json
+emulator_config.json
+
+# Volumes Docker Locais
+data/
