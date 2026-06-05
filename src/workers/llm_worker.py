@@ -308,7 +308,7 @@ async def handle_review_request(channel, sender_id: str, student_context: dict) 
 async def process_inbound(event: dict, ctx: MessageContext):
     
     # Suporte legado para payload na transição
-    sender_id = event.get("sender_id", event.get("phone"))
+    sender_id = str(event.get("sender_id", event.get("phone", "")))
     text = event.get("text")
     message_type = event.get("message_type", "text")
     interactive_payload = event.get("interactive_payload")

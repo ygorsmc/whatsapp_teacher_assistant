@@ -89,7 +89,7 @@ async def run_list_materiais_command(channel, sender_id: str, course_query: str)
                 await channel.send_text(sender_id, "❌ O Google Drive não está configurado.")
                 return
                 
-            files = await drive_client.list_pdf_files(folder_id)
+            files = await drive_client.list_course_files(folder_id)
             if not files:
                 await channel.send_text(sender_id, "📂 A pasta do Google Drive está vazia.")
                 return
@@ -279,7 +279,7 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
         await channel.send_text(sender_id, f"❌ Erro ao enviar quiz: {str(e)[:100]}")
 
 async def process_command_message(message_body: dict):
-    sender_id = message_body.get("sender_id", message_body.get("phone"))
+    sender_id = str(message_body.get("sender_id", message_body.get("phone", "")))
     text_content = message_body.get("text", "")
     channel = get_channel()
     

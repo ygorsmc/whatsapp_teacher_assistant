@@ -1,7 +1,7 @@
 from src.shared.config import settings
 from src.channel.interfaces import IMessagingChannel
 
-_channel_instance = None
+_channel_instance: IMessagingChannel | None = None
 
 def get_channel() -> IMessagingChannel:
     global _channel_instance

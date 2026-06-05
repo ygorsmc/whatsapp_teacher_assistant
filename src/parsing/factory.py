@@ -1,7 +1,7 @@
 from src.shared.config import settings
 from src.parsing.interfaces import IDocumentParser
 
-_parser_instance = None
+_parser_instance: IDocumentParser | None = None
 
 def get_parser() -> IDocumentParser:
     global _parser_instance

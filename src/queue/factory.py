@@ -1,7 +1,7 @@
 from src.shared.config import settings
 from src.queue.interfaces import IMessageQueue
 
-_queue_instance = None
+_queue_instance: IMessageQueue | None = None
 
 def get_queue() -> IMessageQueue:
     global _queue_instance

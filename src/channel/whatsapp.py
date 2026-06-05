@@ -86,7 +86,7 @@ class WhatsAppChannel(IMessagingChannel):
         if len(buttons) > 3:
             raise ValueError("Reply Buttons suportam no máximo 3 opções no WhatsApp")
 
-        message = {
+        message: dict[str, Any] = {
             "messaging_product": "whatsapp",
             "to": user_id,
             "type": "interactive",
@@ -114,7 +114,7 @@ class WhatsAppChannel(IMessagingChannel):
         if total_rows > 10:
             raise ValueError("List Messages suportam no máximo 10 itens no WhatsApp")
 
-        message = {
+        message: dict[str, Any] = {
             "messaging_product": "whatsapp",
             "to": user_id,
             "type": "interactive",
@@ -135,7 +135,7 @@ class WhatsAppChannel(IMessagingChannel):
     async def send_template(self, user_id: str, template_name: str, params: list[str]) -> dict:
         # Simplificado para os templates existentes que suportam array of strings
         # A lógica completa original com botões e languages extras pode ser expandida aqui se necessário
-        body = {
+        body: dict[str, Any] = {
             "messaging_product": "whatsapp",
             "to": user_id,
             "type": "template",

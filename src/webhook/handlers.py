@@ -196,7 +196,7 @@ async def _process_message(msg: InboundMessage, channel: IMessagingChannel):
                     "id": str(uuid4()),
                     "sid": student_id,
                     "itype": interaction_type,
-                    "msg": msg.text or msg.interactive_payload.get("title", "")
+                    "msg": msg.text or (msg.interactive_payload.get("title", "") if msg.interactive_payload else "")
                 }
             )
             await session.commit()

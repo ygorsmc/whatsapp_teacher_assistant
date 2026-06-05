@@ -13,7 +13,7 @@ def register_provider(name: str, cls: Type[LLMProvider]):
 def register_embedder(name: str, cls: Type[EmbeddingProvider]):
     _embedders[name] = cls
 
-def get_provider(name: str = None) -> LLMProvider:
+def get_provider(name: str | None = None) -> LLMProvider:
     from src.shared.config import settings
     provider_name = name or settings.DEFAULT_LLM_PROVIDER
     cls = _providers.get(provider_name)
@@ -21,7 +21,7 @@ def get_provider(name: str = None) -> LLMProvider:
         raise ValueError(f"Provider '{provider_name}' not registered.")
     return cls()
 
-def get_embedder(name: str = None) -> EmbeddingProvider:
+def get_embedder(name: str | None = None) -> EmbeddingProvider:
     from src.shared.config import settings
     embedder_name = name or settings.DEFAULT_EMBEDDER_PROVIDER
     cls = _embedders.get(embedder_name)

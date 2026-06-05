@@ -18,6 +18,8 @@ class BaseLangChainProvider(LLMProvider):
     dependências do LangChain para o resto do sistema.
     """
     
+    llm: Any
+    
     async def agenerate_structured(self, prompt: str, schema: Type[BaseModel], system_message: Optional[str] = None, history: Optional[List[BaseMessage]] = None) -> BaseModel:
         """
         Gera uma resposta estritamente tipada utilizando Function Calling (JSON Mode) da IA.
@@ -189,6 +191,8 @@ class GeminiEmbeddingProvider(EmbeddingProvider):
 
 class LocalEmbeddingProvider(EmbeddingProvider):
     DIMENSIONS = 384
+
+    embeddings: Any
 
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         # self.embeddings = HuggingFaceEmbeddings(model_name=model_name)

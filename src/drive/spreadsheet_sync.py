@@ -35,7 +35,7 @@ def _is_mssql(url: str) -> bool:
     return "mssql" in url.lower() or "aioodbc" in url.lower()
 
 
-async def sync_users_from_sheet(sheet_id: str = None) -> dict:
+async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
     """
     Reads the Google Sheet and synchronizes Students, Teachers, Courses, and Schedules.
     Returns a summary of operations.
