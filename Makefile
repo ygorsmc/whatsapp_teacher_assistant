@@ -5,6 +5,15 @@
 # Opções válidas: azure | gcp | aws
 TARGET_CLOUD ?= azure
 
+# --- Chave liga/desliga do deploy automático LOCAL (medida TEMPORÁRIA) ---
+# A assinatura "Azure for Students" no tenant da PUCPR não permite criar
+# Service Principal, então o GitHub Actions não consegue autenticar/deployar.
+# Enquanto isso, `make ship` faz o deploy a partir da sua máquina (az login).
+#   true  -> após os testes passarem, `make ship` deploya local no Azure.
+#   false -> `make ship` só faz push; o deploy fica a cargo do GitHub Actions.
+# Pode sobrescrever na chamada: `make ship AUTO_DEPLOY=false`.
+AUTO_DEPLOY ?= true
+
 # ==========================================
 # LOCAL OPERATIONS — Infrastructure & CI/CD
 # ==========================================
@@ -33,7 +42,7 @@ AWS_ACCOUNT_ID    ?= $(shell aws sts get-caller-identity --query Account --outpu
 AWS_ECR_REPO      ?= $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 
 .PHONY: help dev dev-api dev-seed test test-integration test-all start \
-        deploy-webhook deploy-worker deploy-scheduler deploy-all deploy-infra destroy-cloud
+        ship deploy-webhook deploy-worker deploy-scheduler deploy-all deploy-infra destroy-cloud
 
 help:
 	@echo ""
@@ -112,6 +121,25 @@ test-integration:
 test-all:
 	@echo "[INFO] Running full test suite with coverage..."
 	pytest tests/ -v --cov=src --cov-report=term-missing
+
+# ==========================================
+# 2b. SHIP — testar, enviar e (se AUTO_DEPLOY) deployar localmente
+# ==========================================
+# Fluxo único enquanto o deploy via CI está indisponível (ver AUTO_DEPLOY no topo).
+# Roda o gate local (pytest, espelho do CI), faz o push e — se AUTO_DEPLOY=true —
+# deploya da sua máquina. Ruff/Mypy continuam sendo validados pelo GitHub Actions.
+ship:
+	@echo "[SHIP 1/3] Quality gate local (pytest — espelho do CI)..."
+	pytest tests/
+	@echo "[SHIP 2/3] Enviando código para o GitHub (origin/main)..."
+	git push origin main
+	@if [ "$(AUTO_DEPLOY)" = "true" ]; then \
+		echo "[SHIP 3/3] AUTO_DEPLOY=true -> deploy LOCAL no Azure (requer 'az login')..."; \
+		$(MAKE) deploy-all; \
+	else \
+		echo "[SHIP 3/3] AUTO_DEPLOY=false -> push feito; deploy delegado ao GitHub Actions."; \
+	fi
+	@echo "[SHIP] Concluido."
 
 # ==========================================
 # 3. CLOUD DEPLOYMENT (Multi-Cloud Router)

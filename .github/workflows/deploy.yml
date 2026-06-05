@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch: {}
 
 permissions:
   id-token: write # Require for OIDC (Azure Workload Identity)
@@ -41,6 +42,12 @@ jobs:
   build-and-deploy:
     name: Build and Deploy
     needs: test
+    # Deploy via CI so roda quando a variavel de repositorio ENABLE_CI_DEPLOY=true.
+    # Hoje fica desligado: a assinatura de estudante (tenant PUCPR) nao permite criar
+    # Service Principal, entao o deploy e feito localmente via `make ship`. Quando
+    # houver um tenant proprio, defina a variable ENABLE_CI_DEPLOY=true e os secrets
+    # AZURE_CLIENT_ID / AZURE_TENANT_ID / AZURE_SUBSCRIPTION_ID.
+    if: ${{ vars.ENABLE_CI_DEPLOY == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
