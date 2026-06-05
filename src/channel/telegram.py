@@ -2,6 +2,7 @@ import httpx
 from typing import Any, Mapping
 from fastapi import Response
 from src.shared.config import settings
+from src.shared.telemetry import logger
 from src.channel.interfaces import IMessagingChannel, InboundMessage
 
 class TelegramChannel(IMessagingChannel):
@@ -27,16 +28,32 @@ class TelegramChannel(IMessagingChannel):
             return response.json()
 
     async def send_text(self, user_id: str, text: str, reply_to: str | None = None) -> dict:
-        payload = {
-            "chat_id": user_id,
-            "text": text,
-            "parse_mode": "Markdown"  # Suporta *bold*, _italic_, etc.
-        }
         # Ignoramos intencionalmente o parâmetro `reply_to` no Telegram.
         # Enviar `reply_to_message_id` faz com que o cliente do Telegram agrupe
         # as mensagens em "Threads/Respostas", o que confunde a UX num chat 1-a-1.
-            
-        return await self._send_request("sendMessage", payload)
+        payload = {
+            "chat_id": user_id,
+            "text": text,
+            "parse_mode": "Markdown",  # Suporta *bold*, _italic_, etc.
+        }
+
+        try:
+            return await self._send_request("sendMessage", payload)
+        except httpx.HTTPStatusError as e:
+            # O parser "Markdown" legado do Telegram exige entidades perfeitamente
+            # balanceadas (*, _, `, [). Respostas livres do LLM ocasionalmente
+            # contêm markdown malformado (ex.: um "_" solto), o que faz o Telegram
+            # rejeitar com 400 "can't parse entities". Em vez de derrubar o pipeline
+            # e devolver ERROR_TECHNICAL ao aluno, reenviamos como texto puro.
+            if e.response.status_code == 400:
+                logger.warning(
+                    "telegram_markdown_fallback",
+                    user_id=user_id,
+                    detail=e.response.text[:300],
+                )
+                payload.pop("parse_mode", None)
+                return await self._send_request("sendMessage", payload)
+            raise
 
     async def send_buttons(self, user_id: str, body: str, buttons: list[dict], footer: str = "") -> dict:
         # Telegram InlineKeyboardMarkup
