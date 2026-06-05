@@ -13,6 +13,7 @@ local_dev.db-journal
 # Ambientes Virtuais (Python)
 venv/
 .venv/
+.venv*/
 env/
 ENV/
 
@@ -21,6 +22,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+!src/**/test_*.py
 
 # IDEs e Editores
 .vscode/
@@ -54,8 +56,10 @@ wheels/
 .installed.cfg
 *.egg
 
-# Testes e Cobertura
+# Testes, type-check e lint (caches de ferramentas)
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 htmlcov/
 .tox/
 .coverage
@@ -69,6 +73,7 @@ azurite_data/
 
 # Other directories
 .agent/
+.claude/
 _docs/
 
 
