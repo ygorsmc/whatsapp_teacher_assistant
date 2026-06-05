@@ -83,12 +83,12 @@ def compute_next_trigger(preferred_hour: str, from_date: datetime | None = None)
 
     # Convert Local TZ to UTC for storage
     target_utc = target_local - LOCAL_TZ_OFFSET
-    return target_utc.replace(tzinfo=timezone.utc)
+    return target_utc.replace(tzinfo=None)
 
 
 async def process_pending_schedules():
     """Finds and processes all student schedules that are due."""
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
     async with AsyncSessionLocal() as session:
         # Fetch all due schedules with student and course info
@@ -124,7 +124,23 @@ async def process_pending_schedules():
             schedule_id = row.schedule_id
 
             if not sender_id:
-                logger.debug("scheduler_no_sender_id_skipping", schedule_id=schedule_id)
+                # Agendamento existe, mas o aluno não tem endereço de entrega no canal atual.
+                # No Telegram isso significa que o aluno ainda não vinculou a conta (telegram_chat_id NULL),
+                # então o quiz NUNCA é disparado. Logamos em WARNING para não ficar invisível.
+                logger.warning(
+                    "scheduler_skip_no_sender_id",
+                    schedule_id=schedule_id,
+                    student_id=row.student_id,
+                    student_name=row.student_name,
+                    query_column=query_col,
+                    preferred_hour=row.preferred_hour,
+                    hint="Aluno sem endereço no canal (ex.: telegram_chat_id NULL). Precisa vincular a conta no bot.",
+                )
+                track_event("scheduler_skip_no_sender_id", {
+                    "schedule_id": schedule_id,
+                    "student_id": row.student_id,
+                    "query_column": query_col,
+                })
                 continue
 
             try:
@@ -147,8 +163,8 @@ async def process_pending_schedules():
                     # Parse safely in case DB driver returns string
                     if isinstance(last_interaction, str):
                         last_interaction = datetime.fromisoformat(last_interaction)
-                    if last_interaction.tzinfo is None:
-                        last_interaction = last_interaction.replace(tzinfo=timezone.utc)
+                    if last_interaction.tzinfo is not None:
+                        last_interaction = last_interaction.replace(tzinfo=None)
                         
                     if last_interaction > twenty_four_hours_ago:
                         window_active = True

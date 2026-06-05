@@ -48,7 +48,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
         
     try:
         # Read from the first sheet instead of forcing a specific sheet name
-        rows = await drive_client.get_spreadsheet_data(sheet_id, "A2:H1000")
+        rows = await drive_client.get_spreadsheet_data(sheet_id, "A2:J1000")
     except Exception as e:
         logger.error("Failed to read Google Sheet", error=str(e))
         return {"error": f"Drive API Error: {str(e)}"}
@@ -458,6 +458,25 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
         stats["courses_after"] = (await session.execute(text('SELECT count(*) FROM \"Courses\"'))).scalar() or 0
         stats["schedules_before"] = schedules_before or 0
         stats["schedules_after"] = (await session.execute(text('SELECT count(*) FROM \"StudentSchedule\"'))).scalar() or 0
+
+        # Alunos com agendamento ativo mas SEM endereço de entrega no canal atual.
+        # No Telegram (query_column = telegram_chat_id) isso quer dizer que o aluno ainda
+        # não vinculou a conta no bot — então o scheduler nunca consegue disparar o quiz.
+        # No WhatsApp (query_column = phone) a coluna é sempre preenchida pela sync, então fica 0.
+        from src.channel.factory import get_channel
+        query_col = get_channel().get_user_query_column()
+        unlinked_rows = (await session.execute(
+            text(f"""
+                SELECT DISTINCT s.name
+                FROM "Students" s
+                JOIN "StudentSchedule" ss ON ss.student_id = s.id AND ss.is_active = true
+                WHERE s.is_active = true
+                  AND (s.{query_col} IS NULL OR s.{query_col} = '')
+                ORDER BY s.name
+            """)
+        )).fetchall()
+        stats["unlinked_names"] = [r[0] for r in unlinked_rows]
+        stats["students_unlinked"] = len(stats["unlinked_names"])
 
         logger.info("Spreadsheet sync completed", stats=stats)
         return stats

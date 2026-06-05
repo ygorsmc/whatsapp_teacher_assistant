@@ -42,6 +42,7 @@ CMD_SYNC_MATERIAIS_START = "⏳ Iniciando download e processamento de PDFs. O ro
 CMD_SYNC_MATERIAIS_SUCCESS = "✅ *Ingestão Concluída!*\n\nOs materiais foram divididos, processados pela Inteligência Artificial e agora fazem parte do meu cérebro! 🧠\n\n📄 Documentos na base: {docs_before} ➡️ {docs_after}"
 CMD_SYNC_SUCCESS = "✅ *Sincronização Concluída!*\n\n👨‍🏫 Professores: {teachers_before} ➡️ {teachers_after}\n🎓 Alunos: {students_before} ➡️ {students_after}\n📚 Cursos: {courses_before} ➡️ {courses_after}\n⏰ Agendamentos: {schedules_before} ➡️ {schedules_after}"
 CMD_SYNC_ERROR = "❌ Erro na sincronização: {error}"
+CMD_SYNC_UNLINKED_WARNING = "\n\n⚠️ *{count} aluno(s) ainda não receberão quizzes* porque não vincularam a conta no bot:\n{names}\n\nPeça para cada um abrir o bot, mandar uma mensagem e informar o telefone cadastrado."
 
 TEACHER_CHAT_REPLY = """Olá Professor! 👋 Sou o seu assistente. O que gostaria de fazer?
 

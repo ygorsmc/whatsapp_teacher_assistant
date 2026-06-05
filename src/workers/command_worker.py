@@ -5,7 +5,7 @@ from src.shared.telemetry import logger
 from src.db.database import AsyncSessionLocal
 from sqlalchemy import text
 from src.shared.constants.messages import (
-    CMD_SYNC_ALUNOS_START, CMD_SYNC_MATERIAIS_START, CMD_SYNC_MATERIAIS_SUCCESS, CMD_SYNC_SUCCESS, CMD_SYNC_ERROR
+    CMD_SYNC_ALUNOS_START, CMD_SYNC_MATERIAIS_START, CMD_SYNC_MATERIAIS_SUCCESS, CMD_SYNC_SUCCESS, CMD_SYNC_ERROR, CMD_SYNC_UNLINKED_WARNING
 )
 from src.shared.constants.commands import parse_command, CommandType
 
@@ -29,6 +29,12 @@ async def run_sync_alunos_command(channel, sender_id: str):
                 schedules_before=stats.get('schedules_before', 0),
                 schedules_after=stats.get('schedules_after', 0)
             )
+            # Avisa o professor sobre alunos com agendamento mas sem vínculo no canal
+            # (no Telegram: telegram_chat_id NULL) — esses NÃO recebem quizzes.
+            unlinked_names = stats.get('unlinked_names', [])
+            if unlinked_names:
+                names_str = "\n".join(f"• {n}" for n in unlinked_names)
+                msg += CMD_SYNC_UNLINKED_WARNING.format(count=len(unlinked_names), names=names_str)
             await channel.send_text(sender_id, msg)
     except Exception as e:
         await channel.send_text(sender_id, f"❌ Erro inesperado: {str(e)[:100]}")

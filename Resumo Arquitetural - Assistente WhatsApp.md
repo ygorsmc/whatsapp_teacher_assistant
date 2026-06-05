@@ -205,7 +205,7 @@ Nas instâncias Azure, a simples substituição da imagem por uma tag genérica 
 | Conversão Office→PDF | Gotenberg (LibreOffice headless em Docker) |
 | Fila de mensagens | Azure Service Bus (Standard — obrigatório para sessões FIFO) |
 | Cache + memória | Container App Interno (`redis:7-alpine` Serverless) |
-| Banco relacional | Azure SQL Database (tipo `DATETIME` via string ISO adaptada `%Y-%m-%dT%H:%M:%S`) |
+| Banco relacional | PostgreSQL (Flexible Server / Cloud SQL / RDS) via `asyncpg` (objetos `datetime` nativos offset-naive) |
 | Armazenamento de arquivos | Google Drive (gerenciado pelo professor, estrutura hierárquica) |
 | Triggers agendados | Azure Functions (Timer Trigger) |
 | Segredos | Azure Key Vault |

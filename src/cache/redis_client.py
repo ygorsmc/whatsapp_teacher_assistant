@@ -145,6 +145,10 @@ async def get_redis():
         return _redis_client
 
     try:
+        from redis.asyncio.retry import Retry
+        from redis.backoff import ExponentialBackoff
+        from redis.exceptions import ConnectionError, TimeoutError
+
         client = redis.from_url(
             settings.REDIS_URL,
             encoding="utf-8",
@@ -152,6 +156,8 @@ async def get_redis():
             socket_timeout=5.0,
             socket_connect_timeout=5.0,
             retry_on_timeout=True,
+            retry_on_error=[ConnectionError, TimeoutError],
+            retry=Retry(ExponentialBackoff(cap=2, base=1), 3),
             health_check_interval=30
         )
         await client.ping()
