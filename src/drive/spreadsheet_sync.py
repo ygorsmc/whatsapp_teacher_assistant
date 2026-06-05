@@ -136,8 +136,9 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
             else:
                 await session.execute(
                     text("""
-                        INSERT OR IGNORE INTO "Teachers" (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
+                        INSERT INTO "Teachers" (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
                         VALUES (:id, 'Professor Default', 'Geral', '00000000', 'Seja prestativo.', 'Não sei.', true)
+                        ON CONFLICT DO NOTHING
                     """), {"id": default_teacher_id}
                 )
 
@@ -222,8 +223,9 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 else:
                     await session.execute(
                         text("""
-                            INSERT OR IGNORE INTO "Courses" (id, teacher_id, name, is_active)
+                            INSERT INTO "Courses" (id, teacher_id, name, is_active)
                             VALUES (:id, :tid, :name, true)
+                            ON CONFLICT DO NOTHING
                         """),
                         {"id": course_id, "tid": default_teacher_id, "name": course_name}
                     )
@@ -245,8 +247,9 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 else:
                     await session.execute(
                         text("""
-                            INSERT OR IGNORE INTO "Classes" (id, course_id, name, current_lesson_number)
+                            INSERT INTO "Classes" (id, course_id, name, current_lesson_number)
                             VALUES (:id, :cid, :name, 1)
+                            ON CONFLICT DO NOTHING
                         """),
                         {"id": class_id, "cid": course_id, "name": class_name}
                     )
@@ -367,8 +370,9 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                 else:
                     await session.execute(
                         text("""
-                            INSERT OR IGNORE INTO "Courses" (id, teacher_id, name, is_active)
+                            INSERT INTO "Courses" (id, teacher_id, name, is_active)
                             VALUES (:id, :tid, :name, true)
+                            ON CONFLICT DO NOTHING
                         """),
                         {"id": course_id, "tid": default_teacher_id, "name": course_name}
                     )
@@ -413,7 +417,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                             ON CONFLICT(id) DO UPDATE SET 
                                 start_date=excluded.start_date,
                                 schedule_map=excluded.schedule_map,
-                                current_lesson_number=CASE WHEN excluded.start_date > DATE('now', 'localtime') THEN 0 ELSE Classes.current_lesson_number END,
+                                current_lesson_number=CASE WHEN excluded.start_date > CURRENT_DATE THEN 0 ELSE "Classes".current_lesson_number END,
                                 updated_at=CURRENT_TIMESTAMP
                         """),
                         {
