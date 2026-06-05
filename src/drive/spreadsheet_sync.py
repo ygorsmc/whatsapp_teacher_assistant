@@ -130,14 +130,14 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                         USING (SELECT :id AS id) AS source
                         ON target.id = source.id
                         WHEN NOT MATCHED THEN INSERT (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
-                            VALUES (:id, 'Professor Default', 'Geral', '00000000', 'Seja prestativo.', 'Não sei.', 1);
+                            VALUES (:id, 'Professor Default', 'Geral', '00000000', 'Seja prestativo.', 'Não sei.', true);
                     """), {"id": default_teacher_id}
                 )
             else:
                 await session.execute(
                     text("""
                         INSERT OR IGNORE INTO "Teachers" (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
-                        VALUES (:id, 'Professor Default', 'Geral', '00000000', 'Seja prestativo.', 'Não sei.', 1)
+                        VALUES (:id, 'Professor Default', 'Geral', '00000000', 'Seja prestativo.', 'Não sei.', true)
                     """), {"id": default_teacher_id}
                 )
 
@@ -164,7 +164,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
             
             # Status: Coluna I(8)
             status_val = row[8].strip().lower() if len(row) > 8 else "ativo"
-            is_active = true if status_val in ("ativo", "active", "1", "true") else 0
+            is_active = True if status_val in ("ativo", "active", "1", "true") else False
 
             if role == "aluno" and phone:
                 student_id = generate_id("stu", phone)
