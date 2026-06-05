@@ -76,7 +76,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
             phone = clean_phone(row[1])
             role = str(row[2]).strip().lower()
             status_val = row[7].strip().lower() if len(row) > 7 else "ativo"
-            is_active = true if status_val in ("ativo", "active", "1", "true") else 0
+            is_active = True if status_val in ("ativo", "active", "1", "true") else False
 
             if role == "professor":
                 teacher_id = generate_id("tea", phone)
