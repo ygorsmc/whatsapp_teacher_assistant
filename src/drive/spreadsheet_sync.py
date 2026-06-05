@@ -75,7 +75,10 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
             name = row[0].strip()
             phone = clean_phone(row[1])
             role = str(row[2]).strip().lower()
-            status_val = row[7].strip().lower() if len(row) > 7 else "ativo"
+            # Status fica na coluna I (índice 8), igual aos alunos no Pass 2.
+            # Antes lia row[7] (Horário 3), que é vazio nas linhas de professor,
+            # marcando o professor como inativo a cada sync.
+            status_val = row[8].strip().lower() if len(row) > 8 else "ativo"
             is_active = True if status_val in ("ativo", "active", "1", "true") else False
 
             if role == "professor":

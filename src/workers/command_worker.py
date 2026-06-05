@@ -56,8 +56,20 @@ async def run_list_cursos_command(channel, sender_id: str):
     try:
         async with AsyncSessionLocal() as session:
             query_col = channel.get_user_query_column()
-            result = await session.execute(text(f'SELECT id FROM \"Teachers\" WHERE {query_col} = :sid'), {"sid": sender_id})
+            result = await session.execute(text(f'SELECT id FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
             teacher = result.fetchone()
+            
+            if not teacher:
+                res_stu = await session.execute(text(f'SELECT phone FROM "Students" WHERE {query_col} = :sid'), {"sid": sender_id})
+                stu_phone = res_stu.scalar_one_or_none()
+                if stu_phone:
+                    phone_suffix = stu_phone[-8:] if len(stu_phone) >= 8 else stu_phone
+                    res_tea = await session.execute(text('SELECT id FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
+                    teacher = res_tea.fetchone()
+                    if teacher:
+                        await session.execute(text(f'UPDATE "Teachers" SET {query_col} = :sid WHERE id = :tid'), {"sid": sender_id, "tid": teacher[0]})
+                        await session.commit()
+                        
             if not teacher:
                 await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
@@ -144,8 +156,21 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
             return
 
         async with AsyncSessionLocal() as session:
-            result = await session.execute(text('SELECT id FROM \"Teachers\" WHERE phone = :phone'), {"phone": sender_id})
+            query_col = channel.get_user_query_column()
+            result = await session.execute(text(f'SELECT id FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
             teacher = result.fetchone()
+            
+            if not teacher:
+                res_stu = await session.execute(text(f'SELECT phone FROM "Students" WHERE {query_col} = :sid'), {"sid": sender_id})
+                stu_phone = res_stu.scalar_one_or_none()
+                if stu_phone:
+                    phone_suffix = stu_phone[-8:] if len(stu_phone) >= 8 else stu_phone
+                    res_tea = await session.execute(text('SELECT id FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
+                    teacher = res_tea.fetchone()
+                    if teacher:
+                        await session.execute(text(f'UPDATE "Teachers" SET {query_col} = :sid WHERE id = :tid'), {"sid": sender_id, "tid": teacher[0]})
+                        await session.commit()
+                        
             if not teacher:
                 await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
@@ -154,7 +179,7 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
                 SELECT c.id, c.current_lesson_number 
                 FROM "Classes" c
                 JOIN "Courses" crs ON c.course_id = crs.id
-                WHERE c.name = :cname AND crs.teacher_id = :tid
+                WHERE c.name ILIKE '%' || :cname || '%' AND crs.teacher_id = :tid
             """)
             result = await session.execute(stmt, {"cname": class_name, "tid": teacher[0]})
             class_row = result.fetchone()
@@ -189,8 +214,20 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
         async with AsyncSessionLocal() as session:
             # 1. Fetch Teacher
             query_col = channel.get_user_query_column()
-            result = await session.execute(text(f'SELECT id FROM \"Teachers\" WHERE {query_col} = :sid'), {"sid": sender_id})
+            result = await session.execute(text(f'SELECT id FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
             teacher = result.fetchone()
+            
+            if not teacher:
+                res_stu = await session.execute(text(f'SELECT phone FROM "Students" WHERE {query_col} = :sid'), {"sid": sender_id})
+                stu_phone = res_stu.scalar_one_or_none()
+                if stu_phone:
+                    phone_suffix = stu_phone[-8:] if len(stu_phone) >= 8 else stu_phone
+                    res_tea = await session.execute(text('SELECT id FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
+                    teacher = res_tea.fetchone()
+                    if teacher:
+                        await session.execute(text(f'UPDATE "Teachers" SET {query_col} = :sid WHERE id = :tid'), {"sid": sender_id, "tid": teacher[0]})
+                        await session.commit()
+                        
             if not teacher:
                 await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
@@ -200,7 +237,7 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
                 SELECT c.id, c.current_lesson_number, crs.id as course_id, c.name
                 FROM "Classes" c
                 JOIN "Courses" crs ON c.course_id = crs.id
-                WHERE c.name = :cname AND crs.teacher_id = :tid
+                WHERE c.name ILIKE '%' || :cname || '%' AND crs.teacher_id = :tid
             """)
             result = await session.execute(stmt, {"cname": class_name, "tid": teacher[0]})
             class_row = result.fetchone()

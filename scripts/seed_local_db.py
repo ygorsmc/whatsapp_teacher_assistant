@@ -3,10 +3,40 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import text
 from src.db.database import init_db, AsyncSessionLocal
+from src.shared.config import settings
 import src.db.models  # Ensure models are registered with Base
 
 # BRT offset (UTC-3)
 BRT_OFFSET = timedelta(hours=-3)
+
+
+def _assert_local_db() -> None:
+    """Impede que este seed DESTRUTIVO rode contra um banco remoto (produção).
+
+    O script faz DELETE em todas as tabelas e insere dados fictícios
+    (ex.: 'Professor Teste', id 00000000-...-000000000001). Rodá-lo contra
+    o PostgreSQL de produção já apagou dados reais e injetou um professor de
+    teste cujo telegram_chat_id passou a "roubar" a identidade do professor
+    real, quebrando /quiz e /aula. Para popular produção use a sincronização
+    da planilha (/sinc_alunos), nunca este seed.
+
+    Permite apenas SQLite ou Postgres em localhost/127.0.0.1.
+    """
+    from urllib.parse import urlparse
+
+    url = settings.DATABASE_URL
+    if url.lower().startswith("sqlite"):
+        return
+    host = (urlparse(url.split("+", 1)[0] + "://" + url.split("://", 1)[1]).hostname
+            if "://" in url else None)
+    if host in ("localhost", "127.0.0.1", "::1", None, ""):
+        return
+    raise SystemExit(
+        f"❌ Seed recusado: DATABASE_URL aponta para host remoto '{host}'.\n"
+        "   Este script é destrutivo (apaga TODAS as tabelas) e só deve rodar localmente\n"
+        "   (SQLite ou Postgres em localhost).\n"
+        "   Para popular produção, use a sincronização da planilha (comando /sinc_alunos)."
+    )
 
 # Time slots for review messages
 REVIEW_TIME_SLOTS = ["07:00", "12:00", "18:00"]
@@ -24,6 +54,7 @@ def compute_next_trigger_utc(preferred_hour: str) -> datetime:
 
 
 async def seed():
+    _assert_local_db()
     # Ensure tables are empty before seeding to prevent crash loops
     async with AsyncSessionLocal() as session:
         await session.execute(text('DELETE FROM "StudentInteractions"'))
