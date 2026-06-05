@@ -85,17 +85,40 @@ async def handle_telegram_linking(chat_id: str, text: str) -> Response:
 
     # Tenta vincular
     async with AsyncSessionLocal() as session:
-        # Busca o estudante pelo telefone (usando LIKE nos ultimos 11 digitos)
-        result = await session.execute(
-            sql_text('SELECT id FROM \"Students\" WHERE phone LIKE :phone_like AND is_active = true'),
+        # Busca professor
+        result_teacher = await session.execute(
+            sql_text('SELECT id FROM "Teachers" WHERE phone LIKE :phone_like AND is_active = true'),
             {"phone_like": f"%{phone_digits}"}
         )
-        student_id = result.scalar_one_or_none()
+        teacher_id = result_teacher.scalar_one_or_none()
+
+        if teacher_id:
+            await session.execute(
+                sql_text('UPDATE "Teachers" SET telegram_chat_id = :chat_id WHERE id = :id'),
+                {"chat_id": chat_id, "id": teacher_id}
+            )
+            await session.commit()
+            
+            redis = await get_redis()
+            await redis.delete(f"role:{chat_id}")
+            
+            await telegram_channel.send_text(
+                chat_id,
+                "👨‍🏫 Conta de *Professor* vinculada com sucesso! Você já pode usar comandos como /sinc_alunos."
+            )
+            return Response(status_code=200)
+
+        # Busca estudante se não for professor
+        result_student = await session.execute(
+            sql_text('SELECT id FROM "Students" WHERE phone LIKE :phone_like AND is_active = true'),
+            {"phone_like": f"%{phone_digits}"}
+        )
+        student_id = result_student.scalar_one_or_none()
 
         if student_id:
             # Vincula!
             await session.execute(
-                sql_text('UPDATE \"Students\" SET telegram_chat_id = :chat_id WHERE id = :id'),
+                sql_text('UPDATE "Students" SET telegram_chat_id = :chat_id WHERE id = :id'),
                 {"chat_id": chat_id, "id": student_id}
             )
             await session.commit()
