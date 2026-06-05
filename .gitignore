@@ -71,3 +71,7 @@ azurite_data/
 .agent/
 _docs/
 
+
+.venv_migration/
+.venv_test/
+
