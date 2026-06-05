@@ -150,7 +150,9 @@ async def get_redis():
             encoding="utf-8",
             decode_responses=True,
             socket_timeout=5.0,
-            socket_connect_timeout=5.0
+            socket_connect_timeout=5.0,
+            retry_on_timeout=True,
+            health_check_interval=30
         )
         await client.ping()
         _redis_client = client
