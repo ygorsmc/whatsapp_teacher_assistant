@@ -10,7 +10,7 @@ from src.llm.factory import get_provider
 from src.rag.retriever import retrieve_context
 from src.rag.quiz_generator import QuizAlternative
 from src.shared.config import settings
-from typing import Optional
+from typing import Optional, cast
 import structlog
 import random
 from src.shared.constants.prompts import REVIEW_PROMPT_TEMPLATE, TOPIC_EXTRACTION_PROMPT
@@ -120,7 +120,7 @@ async def generate_review(
 
     # Single LLM call — generates summary + key_points + quiz together
     try:
-        review = await llm.agenerate_structured(prompt=prompt, schema=ReviewOutput)
+        review = cast(ReviewOutput, await llm.agenerate_structured(prompt=prompt, schema=ReviewOutput))
         
         # Algorithmic randomization to prevent LLM bias (always picking B)
         if review.quiz and review.quiz.alternatives:

@@ -6,6 +6,7 @@ Uses MERGE statements for MSSQL compatibility.
 import structlog
 import re
 import json
+from typing import cast
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import text
 from src.db.database import AsyncSessionLocal
@@ -98,7 +99,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                         {"id": teacher_id, "name": name, "phone": phone, "is_active": is_active}
                     )
                     res = await session.execute(text('SELECT id FROM \"Teachers\" WHERE phone = :phone'), {"phone": phone})
-                    teacher_id = res.scalar()
+                    teacher_id = cast(str, res.scalar())
                     if default_teacher_id == generate_id('tea', phone):
                         default_teacher_id = teacher_id
                 else:
@@ -114,7 +115,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                         """),
                         {"id": teacher_id, "name": name, "phone": phone, "is_active": is_active}
                     )
-                    teacher_id = res.scalar()
+                    teacher_id = cast(str, res.scalar())
                     if default_teacher_id == generate_id('tea', phone):
                         default_teacher_id = teacher_id
                 stats["teachers_upserted"] += 1
@@ -186,7 +187,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                         {"id": student_id, "name": name, "phone": phone, "is_active": is_active}
                     )
                     res = await session.execute(text('SELECT id FROM \"Students\" WHERE phone = :phone'), {"phone": phone})
-                    student_id = res.scalar()
+                    student_id = cast(str, res.scalar())
                 else:
                     res = await session.execute(
                         text("""
@@ -200,7 +201,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                         """),
                         {"id": student_id, "name": name, "phone": phone, "is_active": is_active}
                     )
-                    student_id = res.scalar()
+                    student_id = cast(str, res.scalar())
                 stats["students_upserted"] += 1
                 
                 if not course_name:
@@ -449,14 +450,14 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
         await session.commit()
         
         # Snapshot after
-        stats["teachers_before"] = teachers_before
-        stats["teachers_after"] = (await session.execute(text('SELECT count(*) FROM \"Teachers\"'))).scalar()
-        stats["students_before"] = students_before
-        stats["students_after"] = (await session.execute(text('SELECT count(*) FROM \"Students\"'))).scalar()
-        stats["courses_before"] = courses_before
-        stats["courses_after"] = (await session.execute(text('SELECT count(*) FROM \"Courses\"'))).scalar()
-        stats["schedules_before"] = schedules_before
-        stats["schedules_after"] = (await session.execute(text('SELECT count(*) FROM \"StudentSchedule\"'))).scalar()
+        stats["teachers_before"] = teachers_before or 0
+        stats["teachers_after"] = (await session.execute(text('SELECT count(*) FROM \"Teachers\"'))).scalar() or 0
+        stats["students_before"] = students_before or 0
+        stats["students_after"] = (await session.execute(text('SELECT count(*) FROM \"Students\"'))).scalar() or 0
+        stats["courses_before"] = courses_before or 0
+        stats["courses_after"] = (await session.execute(text('SELECT count(*) FROM \"Courses\"'))).scalar() or 0
+        stats["schedules_before"] = schedules_before or 0
+        stats["schedules_after"] = (await session.execute(text('SELECT count(*) FROM \"StudentSchedule\"'))).scalar() or 0
 
         logger.info("Spreadsheet sync completed", stats=stats)
         return stats

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 @dataclass
 class InboundMessage:
@@ -62,11 +62,11 @@ class IMessagingChannel(ABC):
         pass
 
     @abstractmethod
-    async def verify_signature(self, body: bytes, headers: dict) -> bool:
+    async def verify_signature(self, body: bytes, headers: Mapping[str, str]) -> bool:
         """Verifica se a requisição de entrada é autêntica e veio do provedor."""
         pass
 
     @abstractmethod
-    def build_verification_response(self, query_params: dict) -> Any:
+    def build_verification_response(self, query_params: Mapping[str, str]) -> Any:
         """Responde ao desafio de verificação do provedor (ex: hub.challenge do Meta)."""
         pass

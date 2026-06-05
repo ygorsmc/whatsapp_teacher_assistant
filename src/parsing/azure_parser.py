@@ -1,6 +1,6 @@
 import fitz  # PyMuPDF
 import structlog
-from typing import List
+from typing import List, Any
 from azure.ai.documentintelligence.aio import DocumentIntelligenceClient
 from src.parsing.interfaces import IDocumentParser
 
@@ -76,6 +76,7 @@ class AzureDocIntelParser(IDocumentParser):
                     batch_bytes = batch_doc.tobytes()
                     batch_doc.close()
 
+                    cred: Any
                     if key:
                         from azure.core.credentials import AzureKeyCredential
                         cred = AzureKeyCredential(key)

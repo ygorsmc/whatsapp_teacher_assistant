@@ -1,5 +1,5 @@
 import httpx
-from typing import Any
+from typing import Any, Mapping
 from fastapi import Response
 from src.shared.config import settings
 from src.channel.interfaces import IMessagingChannel, InboundMessage
@@ -164,7 +164,7 @@ class TelegramChannel(IMessagingChannel):
             return None
         return None
 
-    async def verify_signature(self, body: bytes, headers: dict) -> bool:
+    async def verify_signature(self, body: bytes, headers: Mapping[str, str]) -> bool:
         if settings.ENVIRONMENT in ["development", "dev"]:
             return True
             
@@ -175,6 +175,6 @@ class TelegramChannel(IMessagingChannel):
             
         return token == self.secret_token
 
-    def build_verification_response(self, query_params: dict) -> Any:
+    def build_verification_response(self, query_params: Mapping[str, str]) -> Any:
         # Telegram não faz challenge get, ele só manda os POSTs.
         return Response(status_code=200)

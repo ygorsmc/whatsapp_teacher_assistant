@@ -1,3 +1,4 @@
+from typing import cast
 from pydantic import BaseModel, Field
 from src.llm.factory import get_provider
 from src.shared.constants.prompts import QUIZ_GENERATION_PROMPT, TOPIC_EXTRACTION_PROMPT
@@ -60,7 +61,7 @@ async def generate_quiz(
         perspective=chosen_perspective,
     )
     
-    quiz = await llm.agenerate_structured(prompt, QuizOutput)
+    quiz = cast(QuizOutput, await llm.agenerate_structured(prompt, QuizOutput))
     
     # Algorithmic randomization
     if quiz.alternatives:

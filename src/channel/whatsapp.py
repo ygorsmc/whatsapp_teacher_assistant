@@ -2,7 +2,7 @@ import httpx
 import asyncio
 import hmac
 import hashlib
-from typing import Any
+from typing import Any, Mapping
 from fastapi import Response
 from src.shared.config import settings
 from src.channel.interfaces import IMessagingChannel, InboundMessage
@@ -210,7 +210,7 @@ class WhatsAppChannel(IMessagingChannel):
         except (KeyError, IndexError):
             return None
 
-    async def verify_signature(self, body: bytes, headers: dict) -> bool:
+    async def verify_signature(self, body: bytes, headers: Mapping[str, str]) -> bool:
         if settings.ENVIRONMENT in ["development", "dev"]:
             return True
             
@@ -226,7 +226,7 @@ class WhatsAppChannel(IMessagingChannel):
         
         return hmac.compare_digest(signature, expected)
 
-    def build_verification_response(self, query_params: dict) -> Any:
+    def build_verification_response(self, query_params: Mapping[str, str]) -> Any:
         # Responde ao hub.challenge
         if query_params.get("hub.verify_token") != self.verify_token:
             return Response(content="Verification failed", status_code=403)

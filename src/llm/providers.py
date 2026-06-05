@@ -4,7 +4,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 from langchain_core.messages import SystemMessage, HumanMessage, BaseMessage
 from src.shared.config import settings
 from typing import List, Optional, Any, Type
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 from src.shared.telemetry import track_event
 
 class BaseLangChainProvider(LLMProvider):
@@ -25,7 +25,7 @@ class BaseLangChainProvider(LLMProvider):
         Gera uma resposta estritamente tipada utilizando Function Calling (JSON Mode) da IA.
         O LangChain é utilizado aqui internamente apenas para envelopar a chamada.
         """
-        messages = []
+        messages: list[BaseMessage] = []
         if system_message:
             messages.append(SystemMessage(content=system_message))
         if history:
@@ -43,7 +43,7 @@ class BaseLangChainProvider(LLMProvider):
         Aplica o padrão Template Method chamando `self._track_usage()` para que as classes filhas
         possam contabilizar tokens (telemetria/FinOps) de maneira agnóstica sem repetir a lógica principal.
         """
-        messages = []
+        messages: list[BaseMessage] = []
         if system_message:
             messages.append(SystemMessage(content=system_message))
         if history:
@@ -82,7 +82,7 @@ class OpenAILLMProvider(BaseLangChainProvider):
         self.llm = ChatOpenAI(
             model=model_name, 
             temperature=settings.LLM_TEMPERATURE,
-            api_key=settings.OPENAI_API_KEY,
+            api_key=SecretStr(settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None,
             max_retries=settings.LLM_MAX_RETRIES
         )
 
@@ -103,7 +103,7 @@ class DeepSeekLLMProvider(BaseLangChainProvider):
         self.llm = ChatOpenAI(
             model=model_name, 
             temperature=settings.LLM_TEMPERATURE,
-            api_key=settings.DEEPSEEK_API_KEY,
+            api_key=SecretStr(settings.DEEPSEEK_API_KEY),
             base_url=settings.DEEPSEEK_BASE_URL,
             max_retries=settings.LLM_MAX_RETRIES
         )
@@ -123,7 +123,7 @@ class OpenAIEmbeddingProvider(EmbeddingProvider):
     def __init__(self, model_name: str = "text-embedding-3-small"):
         self.embeddings = OpenAIEmbeddings(
             model=model_name,
-            api_key=settings.OPENAI_API_KEY,
+            api_key=SecretStr(settings.OPENAI_API_KEY) if settings.OPENAI_API_KEY else None,
             max_retries=3
         )
 
@@ -177,7 +177,7 @@ class GeminiEmbeddingProvider(EmbeddingProvider):
             
         self.embeddings = GoogleGenerativeAIEmbeddings(
             model=model_name,
-            google_api_key=settings.GOOGLE_API_KEY
+            api_key=SecretStr(settings.GOOGLE_API_KEY)
         )
 
     def get_dimensions(self) -> int:
@@ -216,9 +216,9 @@ class AzureEmbeddingProvider(EmbeddingProvider):
             
         self.embeddings = AzureOpenAIEmbeddings(
             azure_deployment=deployment_name,
-            openai_api_version=settings.AZURE_OPENAI_API_VERSION,
+            api_version=settings.AZURE_OPENAI_API_VERSION,
             azure_endpoint=settings.AZURE_OPENAI_ENDPOINT,
-            api_key=settings.AZURE_OPENAI_API_KEY,
+            api_key=SecretStr(settings.AZURE_OPENAI_API_KEY),
         )
 
     def get_dimensions(self) -> int:

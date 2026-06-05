@@ -1,6 +1,7 @@
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import BaseMessage, messages_from_dict, message_to_dict
 from src.cache.redis_client import get_redis
+from typing import Sequence
 import json
 
 class OptimizedRedisChatMessageHistory(BaseChatMessageHistory):
@@ -25,6 +26,10 @@ class OptimizedRedisChatMessageHistory(BaseChatMessageHistory):
     def messages(self) -> list[BaseMessage]:
         raise NotImplementedError("Use await get_messages() instead. Sync execution is blocked.")
 
+    @messages.setter
+    def messages(self, value: list[BaseMessage]) -> None:
+        raise NotImplementedError("Use await aadd_messages() instead. Sync execution is blocked.")
+
     def add_message(self, message: BaseMessage) -> None:
         raise NotImplementedError("Use await aadd_message() instead. Sync execution is blocked.")
 
@@ -44,7 +49,7 @@ class OptimizedRedisChatMessageHistory(BaseChatMessageHistory):
                 
         return messages_from_dict(parsed_messages)
 
-    async def aadd_messages(self, messages: list[BaseMessage]) -> None:
+    async def aadd_messages(self, messages: Sequence[BaseMessage]) -> None:
         redis = await self._get_client()
         
         # Serialize messages
