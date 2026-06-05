@@ -215,7 +215,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                             USING (SELECT :id AS id) AS source
                             ON target.id = source.id
                             WHEN NOT MATCHED THEN INSERT (id, teacher_id, name, is_active)
-                                VALUES (:id, :tid, :name, 1);
+                                VALUES (:id, :tid, :name, true);
                         """),
                         {"id": course_id, "tid": default_teacher_id, "name": course_name}
                     )
@@ -223,7 +223,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                     await session.execute(
                         text("""
                             INSERT OR IGNORE INTO "Courses" (id, teacher_id, name, is_active)
-                            VALUES (:id, :tid, :name, 1)
+                            VALUES (:id, :tid, :name, true)
                         """),
                         {"id": course_id, "tid": default_teacher_id, "name": course_name}
                     )
@@ -360,7 +360,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                             USING (SELECT :id AS id) AS source
                             ON target.id = source.id
                             WHEN NOT MATCHED THEN INSERT (id, teacher_id, name, is_active)
-                                VALUES (:id, :tid, :name, 1);
+                                VALUES (:id, :tid, :name, true);
                         """),
                         {"id": course_id, "tid": default_teacher_id, "name": course_name}
                     )
@@ -368,7 +368,7 @@ async def sync_users_from_sheet(sheet_id: str = None) -> dict:
                     await session.execute(
                         text("""
                             INSERT OR IGNORE INTO "Courses" (id, teacher_id, name, is_active)
-                            VALUES (:id, :tid, :name, 1)
+                            VALUES (:id, :tid, :name, true)
                         """),
                         {"id": course_id, "tid": default_teacher_id, "name": course_name}
                     )
