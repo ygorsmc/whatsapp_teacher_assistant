@@ -16,14 +16,15 @@ async def get_topics():
         for key in keys:
             parts = key.split(":")
             course_id = parts[1]
-            lesson_num = parts[2]
+            subject_name = parts[2] if len(parts) > 3 else "default"
+            lesson_num = parts[3] if len(parts) > 3 else parts[2]
             
             res = await session.execute(text('SELECT name FROM "Courses" WHERE id = :cid'), {"cid": course_id})
             course_name = res.scalar() or "Curso Desconhecido"
             
             val = await r.get(key)
             topics = json.loads(val)
-            print(f"[{course_name}] Aula {lesson_num}:")
+            print(f"[{course_name} / {subject_name.replace('_', ' ').title()}] Aula {lesson_num}:")
             for t in topics:
                 print(f"  - {t}")
             print()
