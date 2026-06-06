@@ -261,9 +261,9 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
             course_id = class_row[2]
             c_name = class_row[3]
             
-            # 3. Fetch Enrolled Active Students
+            # 3. Fetch Enrolled Active Students (com endereços dos dois canais + canal preferido)
             stmt_students = text("""
-                SELECT s.id, s.phone, s.name 
+                SELECT s.id, s.phone, s.name, s.telegram_chat_id, s.preferred_channel
                 FROM "Students" s
                 JOIN "StudentEnrollment" se ON s.id = se.student_id
                 WHERE se.class_id = :cid AND s.is_active = true
@@ -306,17 +306,28 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
             await channel.send_text(sender_id, "❌ Falha ao gerar o quiz com a IA.")
             return
             
-        # 5. Broadcast quiz to all students
+        # 5. Broadcast quiz to all students — roteamento por aluno ("follow-the-user").
+        # O endereço de entrega depende do canal: telegram_chat_id (Telegram) ou phone (WhatsApp).
+        # Antes usava sempre s.phone, o que fazia o envio no Telegram falhar (chat_id inválido).
         from src.workers.micro_learning import send_quiz_to_student
+        default_ct = settings.CHANNEL_BACKEND.lower()
         success_count = 0
-        
+        skipped_count = 0
+
         for st in students:
+            ct = (st[4] or default_ct).lower()
+            addr = st[3] if ct == "telegram" else st[1]  # telegram_chat_id | phone
+            if not addr:
+                # Aluno sem endereço no canal preferido (ex.: não vinculou o Telegram). Não há como entregar.
+                skipped_count += 1
+                logger.info("quiz_skip_unlinked_student", student_id=st[0], student_name=st[2], channel=ct)
+                continue
             try:
                 await send_quiz_to_student(
-                    channel=channel,
+                    channel=get_channel(ct),
                     student={
                         "id": st[0],
-                        "sender_id": st[1],
+                        "sender_id": addr,
                         "course_id": course_id,
                         "lesson_pointer": str(current_lesson)
                     },
@@ -325,8 +336,11 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
                 success_count += 1
             except Exception as e:
                 logger.error("failed_to_send_quiz_to_student", student_id=st[0], error=str(e))
-                
-        await channel.send_text(sender_id, f"✅ Quiz enviado com sucesso para {success_count} aluno(s) da turma '{c_name}'!")
+
+        msg = f"✅ Quiz enviado com sucesso para {success_count} aluno(s) da turma '{c_name}'!"
+        if skipped_count:
+            msg += f"\n⚠️ {skipped_count} aluno(s) sem conta vinculada no bot foram pulados."
+        await channel.send_text(sender_id, msg)
         
     except Exception as e:
         await channel.send_text(sender_id, f"❌ Erro ao enviar quiz: {str(e)[:100]}")
