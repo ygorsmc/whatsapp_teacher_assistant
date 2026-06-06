@@ -16,6 +16,10 @@ class InboundMessage:
 class IMessagingChannel(ABC):
     """Interface agnóstica para canais de mensageria (WhatsApp, Telegram, etc.)."""
 
+    # Nome canônico do canal ('whatsapp' | 'telegram'). Usado no roteamento
+    # dinâmico (Students.preferred_channel). Sobrescrito por cada implementação.
+    channel_name: str = ""
+
     @abstractmethod
     def get_user_query_column(self) -> str:
         """

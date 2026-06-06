@@ -10,6 +10,8 @@ from src.channel.interfaces import IMessagingChannel, InboundMessage
 class WhatsAppChannel(IMessagingChannel):
     """Implementação de canal para WhatsApp Cloud API."""
 
+    channel_name = "whatsapp"
+
     def __init__(self):
         self.api_url = settings.WHATSAPP_API_URL
         self.phone_number_id = settings.PHONE_NUMBER_ID

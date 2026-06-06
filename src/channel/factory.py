@@ -1,17 +1,27 @@
 from src.shared.config import settings
 from src.channel.interfaces import IMessagingChannel
 
-_channel_instance: IMessagingChannel | None = None
+# Cache de instâncias por tipo de canal. Permite que WhatsApp e Telegram
+# coexistam no mesmo processo (necessário para o roteamento dinâmico do
+# scheduler — "follow-the-user").
+_channels: dict[str, IMessagingChannel] = {}
 
-def get_channel() -> IMessagingChannel:
-    global _channel_instance
-    if _channel_instance is None:
-        if settings.CHANNEL_BACKEND.lower() == "telegram":
+
+def get_channel(channel_type: str | None = None) -> IMessagingChannel:
+    """Retorna a instância do canal.
+
+    - `get_channel()` → usa o canal global (settings.CHANNEL_BACKEND).
+    - `get_channel("telegram")` / `get_channel("whatsapp")` → canal explícito,
+      usado para entregar a cada aluno no seu `preferred_channel`.
+    """
+    ct = (channel_type or settings.CHANNEL_BACKEND).lower()
+    if ct not in _channels:
+        if ct == "telegram":
             from src.channel.telegram import TelegramChannel
-            _channel_instance = TelegramChannel()
-        elif settings.CHANNEL_BACKEND.lower() == "whatsapp":
+            _channels[ct] = TelegramChannel()
+        elif ct == "whatsapp":
             from src.channel.whatsapp import WhatsAppChannel
-            _channel_instance = WhatsAppChannel()
+            _channels[ct] = WhatsAppChannel()
         else:
-            raise ValueError(f"Canal não suportado: {settings.CHANNEL_BACKEND}")
-    return _channel_instance
+            raise ValueError(f"Canal não suportado: {ct}")
+    return _channels[ct]

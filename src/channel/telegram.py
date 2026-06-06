@@ -8,6 +8,8 @@ from src.channel.interfaces import IMessagingChannel, InboundMessage
 class TelegramChannel(IMessagingChannel):
     """Implementação de canal para Telegram Bot API."""
 
+    channel_name = "telegram"
+
     def __init__(self):
         self.bot_token = settings.TELEGRAM_BOT_TOKEN
         self.api_url = f"https://api.telegram.org/bot{self.bot_token}"

@@ -183,6 +183,14 @@ async def _process_message(msg: InboundMessage, channel: IMessagingChannel):
         student_row = res.fetchone()
         if student_row:
             student_id = student_row[0]
+
+            # Roteamento dinâmico "follow-the-user": grava o canal onde o aluno
+            # mandou a última mensagem. O scheduler entrega o próximo quiz por aqui.
+            await session.execute(
+                sql_text('UPDATE "Students" SET preferred_channel = :ch WHERE id = :sid'),
+                {"ch": channel.channel_name, "sid": student_id}
+            )
+
             interaction_type = "message_received"
             if msg.message_type == "interactive" and msg.interactive_payload and msg.interactive_payload.get("id", "").startswith("quiz_"):
                 interaction_type = "quiz_answered"

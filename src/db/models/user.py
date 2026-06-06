@@ -21,11 +21,15 @@ class Teacher(Base):
 
 class Student(Base):
     __tablename__ = "Students"
-    
+
     id = Column(String(255), primary_key=True)
     name = Column(String(255), nullable=False)
     phone = Column(String(255), unique=True, nullable=False)
     telegram_chat_id = Column(String(255), unique=True, nullable=True)
+    # Roteamento dinâmico "follow-the-user": canal onde o aluno mandou a última
+    # mensagem ('whatsapp' | 'telegram'). O scheduler entrega o próximo quiz por
+    # aqui. NULL = usa o canal global (settings.CHANNEL_BACKEND).
+    preferred_channel = Column(String(50), nullable=True)
     is_active = Column(Boolean, default=True)
     
     created_at = Column(DateTime, server_default=func.now())

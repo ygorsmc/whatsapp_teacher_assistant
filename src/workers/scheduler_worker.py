@@ -90,15 +90,15 @@ async def process_pending_schedules():
     """Finds and processes all student schedules that are due."""
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
+    default_ct = settings.CHANNEL_BACKEND.lower()
     async with AsyncSessionLocal() as session:
-        # Fetch all due schedules with student and course info
-        channel = get_channel()
-        query_col = channel.get_user_query_column()
+        # Busca os agendamentos vencidos com os DOIS endereços do aluno + o canal preferido.
+        # O canal de entrega é resolvido por aluno (roteamento "follow-the-user").
         result = await session.execute(
-            text(f"""
+            text("""
                 SELECT ss.schedule_id, ss.student_id, ss.course_id, ss.template_name,
                        ss.preferred_hour, ss.content_type,
-                       s.name AS student_name, s.{query_col} AS sender_id,
+                       s.name AS student_name, s.phone, s.telegram_chat_id, s.preferred_channel,
                        c.name AS course_name
                 FROM "StudentSchedule" ss
                 JOIN "Students" s ON s.id = ss.student_id
@@ -120,26 +120,31 @@ async def process_pending_schedules():
         logger.info("scheduler_found_pending", count=len(pending))
 
         for row in pending:
-            sender_id = row.sender_id
             schedule_id = row.schedule_id
 
+            # Roteamento "follow-the-user": entrega no canal onde o aluno falou por
+            # último (preferred_channel); na ausência, usa o canal global.
+            ct = (row.preferred_channel or default_ct).lower()
+            channel = get_channel(ct)
+            sender_id = row.telegram_chat_id if ct == "telegram" else row.phone
+
             if not sender_id:
-                # Agendamento existe, mas o aluno não tem endereço de entrega no canal atual.
-                # No Telegram isso significa que o aluno ainda não vinculou a conta (telegram_chat_id NULL),
+                # Agendamento existe, mas o aluno não tem endereço no canal preferido.
+                # No Telegram isso significa que ainda não vinculou a conta (telegram_chat_id NULL),
                 # então o quiz NUNCA é disparado. Logamos em WARNING para não ficar invisível.
                 logger.warning(
                     "scheduler_skip_no_sender_id",
                     schedule_id=schedule_id,
                     student_id=row.student_id,
                     student_name=row.student_name,
-                    query_column=query_col,
+                    channel=ct,
                     preferred_hour=row.preferred_hour,
-                    hint="Aluno sem endereço no canal (ex.: telegram_chat_id NULL). Precisa vincular a conta no bot.",
+                    hint="Aluno sem endereço no canal preferido (ex.: telegram_chat_id NULL). Precisa vincular a conta no bot.",
                 )
                 track_event("scheduler_skip_no_sender_id", {
                     "schedule_id": schedule_id,
                     "student_id": row.student_id,
-                    "query_column": query_col,
+                    "channel": ct,
                 })
                 continue
 
@@ -213,7 +218,7 @@ async def process_pending_schedules():
                         )
                     else:
                         # Emula o template via botoes para canais que não têm templates estritos (ex: Telegram)
-                        text_body = REVIEW_INVITE_BODY.format(name=row.student_name, course=row.course_name)
+                        text_body = REVIEW_INVITE_BODY.format(student_name=row.student_name, course_name=row.course_name)
                         await channel.send_buttons(
                             user_id=sender_id,
                             body=text_body,
@@ -347,21 +352,32 @@ async def process_window_extensions():
     min_idle_time = timedelta(hours=23, minutes=30)
     max_idle_time = timedelta(hours=23, minutes=50)
 
+    default_ct = settings.CHANNEL_BACKEND.lower()
     async with AsyncSessionLocal() as session:
-        channel = get_channel()
-        query_col = channel.get_user_query_column()
-
-        # Busca todos os estudantes ativos
+        # Estudantes ativos com os dois endereços + canal preferido + um curso (p/ o botão).
+        # course_id vem da matrícula (a tabela Students não tem essa coluna).
         result = await session.execute(
-            text(f"""
-                SELECT id as student_id, {query_col} AS sender_id, course_id
-                FROM "Students"
-                WHERE is_active = true AND {query_col} IS NOT NULL
+            text("""
+                SELECT s.id as student_id, s.phone, s.telegram_chat_id, s.preferred_channel,
+                       (SELECT cl.course_id
+                          FROM "StudentEnrollment" se
+                          JOIN "Classes" cl ON cl.id = se.class_id
+                         WHERE se.student_id = s.id
+                         LIMIT 1) AS course_id
+                FROM "Students" s
+                WHERE s.is_active = true
             """)
         )
         students = result.fetchall()
 
         for student in students:
+            # Roteamento "follow-the-user": resolve canal + endereço do aluno.
+            ct = (student.preferred_channel or default_ct).lower()
+            sender_id = student.telegram_chat_id if ct == "telegram" else student.phone
+            if not sender_id or not student.course_id:
+                continue
+            channel = get_channel(ct)
+
             # Pega a última interação real do aluno
             res_last = await session.execute(
                 text("""
@@ -411,7 +427,7 @@ async def process_window_extensions():
                     # No Telegram, usamos list / buttons emulados
                     # No WhatsApp, max 3 botões usa send_buttons
                     await channel.send_buttons(
-                        user_id=student.sender_id,
+                        user_id=sender_id,
                         body=body_text,
                         buttons=buttons,
                         footer="Mantenha seus estudos em dia!"
