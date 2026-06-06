@@ -2,7 +2,7 @@ import asyncio
 import uuid
 from datetime import datetime, timezone, timedelta
 from sqlalchemy import text
-from src.db.database import init_db, AsyncSessionLocal
+from src.db.database import init_db, AsyncSessionLocal, ensure_bootstrap_admin, BOOTSTRAP_ADMIN_ID
 from src.shared.config import settings
 import src.db.models  # Ensure models are registered with Base
 
@@ -67,17 +67,12 @@ async def seed():
         await session.execute(text('DELETE FROM "Teachers"'))
         await session.commit()
     
+    # Professor admin de bootstrap — fonte única em src/db/database.py.
+    # Idempotente; é o mesmo admin (id 000…001, fone 5511000000000) garantido em prod.
+    await ensure_bootstrap_admin()
+    teacher_id = BOOTSTRAP_ADMIN_ID
+
     async with AsyncSessionLocal() as session:
-        # Create a fake teacher (Deterministic UUID for local dev)
-        teacher_id = "00000000-0000-0000-0000-000000000001"
-        await session.execute(
-            text("""
-                INSERT INTO "Teachers" (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
-                VALUES (:id, 'Professor Teste', 'Matemática', '5511000000000', 'Seja educado e prestativo', 'Isso está fora do escopo.', true)
-            """),
-            {"id": teacher_id}
-        )
-        
         # Create a fake course (Deterministic UUID for local dev)
         course_id = "00000000-0000-0000-0000-000000000002"
         await session.execute(
