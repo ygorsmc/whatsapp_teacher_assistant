@@ -1,9 +1,14 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
+import os
 import structlog
 from typing import Optional
 
 logger = structlog.get_logger(__name__)
+
+# Seletor de ambiente: ENV_FILE=.env.prod make ... carrega outro arquivo.
+# Default = .env (alternado por `make env-local` / `make env-prod`).
+ENV_FILE = os.getenv("ENV_FILE", ".env")
 
 class Settings(BaseSettings):
     # App
@@ -83,7 +88,7 @@ class Settings(BaseSettings):
     # Azure Key Vault (Security)
     AZURE_KEY_VAULT_URL: Optional[str] = Field(default=None)
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()
 

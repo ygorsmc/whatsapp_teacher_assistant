@@ -41,7 +41,7 @@ AWS_REGION        ?= sa-east-1
 AWS_ACCOUNT_ID    ?= $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null)
 AWS_ECR_REPO      ?= $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 
-.PHONY: help dev dev-api dev-seed db-upgrade db-reset test test-integration test-all start \
+.PHONY: help dev dev-api dev-seed env-local env-prod env-status db-upgrade db-reset test test-integration test-all start \
         ship deploy-webhook deploy-worker deploy-scheduler deploy-all deploy-infra destroy-cloud
 
 help:
@@ -51,6 +51,9 @@ help:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo ""
 	@echo "  🔧 LOCAL DEVELOPMENT"
+	@echo "  make env-local              - Switch .env to LOCAL profile (all local)"
+	@echo "  make env-prod               - Switch .env to PROD profile (Qdrant cloud)"
+	@echo "  make env-status             - Show the active environment profile"
 	@echo "  make dev                    - Start infrastructure (docker-compose)"
 	@echo "  make dev-api                - Start FastAPI server locally"
 	@echo "  make dev-worker-<name>      - Start a specific worker locally"
@@ -104,6 +107,24 @@ start:
 	make dev-worker-llm & \
 	make dev-worker-scheduler & \
 	wait
+
+# ── Troca de ambiente (perfis .env.local / .env.prod) ──────────────────────
+# Dois mecanismos:
+#   1) Persistente:  make env-local | make env-prod   (sobrescreve o .env ativo)
+#   2) Pontual:      ENV_FILE=.env.prod make <alvo>    (sem trocar o .env)
+# DB e Redis ficam SEMPRE locais; o que muda no modo prod é o Qdrant (cloud).
+env-local:
+	@cp .env.local .env
+	@echo "🟢 Ambiente ATIVO: LOCAL  (Postgres, Redis e Qdrant locais)"
+
+env-prod:
+	@cp .env.prod .env
+	@echo "🔴 Ambiente ATIVO: PROD  (Qdrant CLOUD — escritas afetam dados REAIS!)"
+	@echo "   DB/Redis seguem locais. Para operar o banco real de prod, use 'az containerapp exec'."
+
+env-status:
+	@printf "Ambiente atual (.env): "; (grep -m1 '^APP_ENV=' .env 2>/dev/null | cut -d= -f2) || echo "indefinido"
+	@grep -m1 '^QDRANT_URL=' .env 2>/dev/null | sed 's/^/  /'
 
 db-upgrade:
 	@echo "[INFO] Applying Alembic migrations (alembic upgrade head)..."
