@@ -20,7 +20,7 @@ fonte autoritativa (sobrescreve o que vier da aba "Alunos"). Divergências entre
 as abas (mesma turma com disciplinas diferentes) são reportadas em
 stats["disciplina_divergente"] — vale a disciplina da aba "Turmas".
 
-Compatível com PostgreSQL (produção) e SQLite (dev local) — ambos via ON CONFLICT.
+PostgreSQL em dev e produção (mesmo banco em todo lugar) — upserts via ON CONFLICT.
 """
 
 import structlog

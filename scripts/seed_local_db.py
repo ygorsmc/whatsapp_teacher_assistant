@@ -1,10 +1,15 @@
 import asyncio
+import os
+import sys
 import uuid
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import text
-from src.db.database import init_db, AsyncSessionLocal, ensure_bootstrap_admin, BOOTSTRAP_ADMIN_ID
-from src.shared.config import settings
-import src.db.models  # Ensure models are registered with Base
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from sqlalchemy import text  # noqa: E402
+from src.db.database import init_db, AsyncSessionLocal, ensure_bootstrap_admin, BOOTSTRAP_ADMIN_ID  # noqa: E402
+from src.shared.config import settings  # noqa: E402
+import src.db.models  # noqa: E402,F401  (efeito colateral: registra models no Base.metadata p/ create_all)
 
 # BRT offset (UTC-3)
 BRT_OFFSET = timedelta(hours=-3)
@@ -20,13 +25,11 @@ def _assert_local_db() -> None:
     real, quebrando /quiz e /aula. Para popular produção use a sincronização
     da planilha (/sinc_alunos), nunca este seed.
 
-    Permite apenas SQLite ou Postgres em localhost/127.0.0.1.
+    Permite apenas Postgres em localhost/127.0.0.1.
     """
     from urllib.parse import urlparse
 
     url = settings.DATABASE_URL
-    if url.lower().startswith("sqlite"):
-        return
     host = (urlparse(url.split("+", 1)[0] + "://" + url.split("://", 1)[1]).hostname
             if "://" in url else None)
     if host in ("localhost", "127.0.0.1", "::1", None, ""):
@@ -34,7 +37,7 @@ def _assert_local_db() -> None:
     raise SystemExit(
         f"❌ Seed recusado: DATABASE_URL aponta para host remoto '{host}'.\n"
         "   Este script é destrutivo (apaga TODAS as tabelas) e só deve rodar localmente\n"
-        "   (SQLite ou Postgres em localhost).\n"
+        "   (Postgres em localhost).\n"
         "   Para popular produção, use a sincronização da planilha (comando /sinc_alunos)."
     )
 
@@ -50,18 +53,23 @@ def compute_next_trigger_utc(preferred_hour: str) -> datetime:
     if target_brt <= now_brt:
         target_brt += timedelta(days=1)
     target_utc = target_brt - BRT_OFFSET
-    return target_utc.replace(tzinfo=None)  # SQLite doesn't handle tz-aware datetimes
+    # datetime naïve (sem tzinfo): casa com as colunas DateTime e o binding do asyncpg.
+    return target_utc.replace(tzinfo=None)
 
 
 async def seed():
     _assert_local_db()
-    # Ensure tables are empty before seeding to prevent crash loops
+    # Garante o schema (create_all é no-op se as tabelas já existem via alembic).
+    await init_db()
+    # Ensure tables are empty before seeding to prevent crash loops.
+    # Ordem respeita as FKs: filhas → pais (Classes antes de Subjects/Courses).
     async with AsyncSessionLocal() as session:
         await session.execute(text('DELETE FROM "StudentInteractions"'))
         await session.execute(text('DELETE FROM "StudentSchedule"'))
         await session.execute(text('DELETE FROM "MessageTemplates"'))
         await session.execute(text('DELETE FROM "StudentEnrollment"'))
         await session.execute(text('DELETE FROM "Classes"'))
+        await session.execute(text('DELETE FROM "Subjects"'))
         await session.execute(text('DELETE FROM "Students"'))
         await session.execute(text('DELETE FROM "Courses"'))
         await session.execute(text('DELETE FROM "Teachers"'))
@@ -82,7 +90,17 @@ async def seed():
             """),
             {"id": course_id, "teacher_id": teacher_id}
         )
-        
+
+        # Create a fake subject/discipline under the course (camada Disciplina)
+        subject_id = "00000000-0000-0000-0000-000000000005"
+        await session.execute(
+            text("""
+                INSERT INTO "Subjects" (id, course_id, name, is_active)
+                VALUES (:id, :course_id, 'Álgebra', true)
+            """),
+            {"id": subject_id, "course_id": course_id}
+        )
+
         # Create a real student for testing (Deterministic UUID)
         student_id = "00000000-0000-0000-0000-000000000003"
         phone = "5513991719595"
@@ -98,10 +116,10 @@ async def seed():
         class_id = "00000000-0000-0000-0000-000000000004"
         await session.execute(
             text("""
-                INSERT INTO "Classes" (id, course_id, teacher_id, name, current_lesson_number)
-                VALUES (:id, :course_id, :teacher_id, 'Turma Teste', 1)
+                INSERT INTO "Classes" (id, course_id, subject_id, teacher_id, name, current_lesson_number)
+                VALUES (:id, :course_id, :subject_id, :teacher_id, 'Turma Teste', 1)
             """),
-            {"id": class_id, "course_id": course_id, "teacher_id": teacher_id}
+            {"id": class_id, "course_id": course_id, "subject_id": subject_id, "teacher_id": teacher_id}
         )
         
         # Enroll the student
@@ -129,25 +147,25 @@ async def seed():
             await session.execute(
                 text("""
                     INSERT INTO "StudentSchedule"
-                        (schedule_id, student_id, course_id, template_name,
+                        (schedule_id, student_id, class_id, template_name,
                          preferred_hour, content_type, next_trigger_date,
                          is_active, status)
                     VALUES
-                        (:sid, :student_id, :course_id, 'daily_review',
+                        (:sid, :student_id, :class_id, 'daily_review',
                          :preferred_hour, 'review', :next_trigger,
                          true, 'scheduled')
                 """),
                 {
                     "sid": schedule_id,
                     "student_id": student_id,
-                    "course_id": course_id,
+                    "class_id": class_id,
                     "preferred_hour": slot,
                     "next_trigger": next_trigger,
                 }
             )
         
         await session.commit()
-        print(f"Database seeded successfully!")
+        print("Database seeded successfully!")
         print(f"Student Phone for Testing: {phone}")
         print(f"Teacher ID: {teacher_id}")
         print(f"Course ID: {course_id}")

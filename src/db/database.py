@@ -17,8 +17,8 @@ BOOTSTRAP_ADMIN_ID = "00000000-0000-0000-0000-000000000001"
 BOOTSTRAP_ADMIN_PHONE = "5511000000000"
 BOOTSTRAP_ADMIN_NAME = "Admin"
 
-# Used for local dev (SQLite) or production (PostgreSQL with asyncpg)
-# Production URL would look like: postgresql+asyncpg://<user>:<pwd>@<server>/<db>
+# PostgreSQL (asyncpg) em dev e produção — mesmo banco em todo lugar.
+# URL: postgresql+asyncpg://<user>:<pwd>@<server>/<db> (injetada via env var / .env).
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,

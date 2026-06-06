@@ -76,8 +76,9 @@ class Settings(BaseSettings):
     GOOGLE_DRIVE_FOLDER_ID: str = Field(default="")
     GOOGLE_SHEET_ID: str = Field(default="")
     
-    # Database
-    DATABASE_URL: str = Field(default="sqlite+aiosqlite:///./local_dev.db")
+    # Database — Postgres em todo lugar (dev e nuvem) para paridade de ambiente.
+    # Default = Postgres local do docker-compose; .env e a nuvem injetam via env var.
+    DATABASE_URL: str = Field(default="postgresql+asyncpg://whatsapp:whatsapp_dev_2026@localhost:5432/whatsapp_assistant")
 
     # Azure Key Vault (Security)
     AZURE_KEY_VAULT_URL: Optional[str] = Field(default=None)

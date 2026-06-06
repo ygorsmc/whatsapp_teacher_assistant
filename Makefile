@@ -41,7 +41,7 @@ AWS_REGION        ?= sa-east-1
 AWS_ACCOUNT_ID    ?= $(shell aws sts get-caller-identity --query Account --output text 2>/dev/null)
 AWS_ECR_REPO      ?= $(AWS_ACCOUNT_ID).dkr.ecr.$(AWS_REGION).amazonaws.com
 
-.PHONY: help dev dev-api dev-seed test test-integration test-all start \
+.PHONY: help dev dev-api dev-seed db-upgrade db-reset test test-integration test-all start \
         ship deploy-webhook deploy-worker deploy-scheduler deploy-all deploy-infra destroy-cloud
 
 help:
@@ -56,6 +56,8 @@ help:
 	@echo "  make dev-worker-<name>      - Start a specific worker locally"
 	@echo "                                Options: llm, ingestion, scheduler"
 	@echo "  make start                  - Start API, Workers (LLM & Scheduler), and Ngrok"
+	@echo "  make db-upgrade             - Apply Alembic migrations (alembic upgrade head)"
+	@echo "  make db-reset               - Drop & recreate local Postgres schema, then migrate"
 	@echo "  make dev-seed               - Seed local database with test data"
 	@echo ""
 	@echo "  🧪 TESTING"
@@ -102,6 +104,15 @@ start:
 	make dev-worker-llm & \
 	make dev-worker-scheduler & \
 	wait
+
+db-upgrade:
+	@echo "[INFO] Applying Alembic migrations (alembic upgrade head)..."
+	.venv/bin/alembic upgrade head
+
+db-reset:
+	@echo "[WARN] Dropping and recreating the local Postgres schema (public)..."
+	docker-compose exec -T postgres psql -U whatsapp -d whatsapp_assistant -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+	$(MAKE) db-upgrade
 
 dev-seed:
 	@echo "[INFO] Seeding local database..."
