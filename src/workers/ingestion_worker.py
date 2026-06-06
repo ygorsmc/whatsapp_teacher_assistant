@@ -33,8 +33,12 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
     # --- 2. ROTEADOR DE EXTRATORES ---
     is_office = "wordprocessingml" in mime_type.lower() or "presentationml" in mime_type.lower() or file_name.endswith(('.docx', '.pptx'))
     is_pdf = "pdf" in mime_type.lower() or file_name.endswith('.pdf')
+    is_text = "markdown" in mime_type.lower() or "text/plain" in mime_type.lower() or file_name.endswith(('.md', '.txt'))
 
-    if is_pdf or is_office:
+    if is_text:
+        # Markdown/TXT: leitura direta dos bytes (sem parser/Gotenberg).
+        full_text = file_bytes.decode("utf-8", errors="ignore")
+    elif is_pdf or is_office:
         pdf_bytes = file_bytes
 
         if is_office:
@@ -103,7 +107,12 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
     chunks = unique_chunks
 
     logger.info(f"Chunked document into {len(chunks)} chunks.")
-        
+
+    # Sem texto extraível: pula sem quebrar (upsert vazio dá erro no Qdrant).
+    if not chunks:
+        logger.warning(f"No extractable text in {file_name} — skipping (0 chunks).")
+        return False
+
     # 4. Generate embeddings with Gemini
     embedder = get_embedder(settings.DEFAULT_EMBEDDER_PROVIDER)
     embeddings = []
