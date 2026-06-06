@@ -18,7 +18,9 @@ class StudentSchedule(Base):
     
     schedule_id = Column(String(255), primary_key=True)
     student_id = Column(String(255), ForeignKey("Students.id"), nullable=False)
-    course_id = Column(String(255), ForeignKey("Courses.id"), nullable=False)
+    # Agendamento aponta para a TURMA/Disciplina exata (não mais só o curso): às
+    # 19h o scheduler precisa saber de qual Disciplina/Turma é aquele horário.
+    class_id = Column(String(255), ForeignKey("Classes.id"), nullable=False)
     template_name = Column(String(255), ForeignKey("MessageTemplates.template_name"), nullable=False)
     preferred_hour = Column(String(255), nullable=False)  # Time slot in Local TZ: "07:00", "12:00", "18:00"
     content_type = Column(String(255), nullable=False, default="review")  # 'review' | 'quiz' | 'preview'
@@ -31,7 +33,7 @@ class StudentSchedule(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
-        UniqueConstraint('student_id', 'course_id', 'content_type', 'preferred_hour', name='uq_student_course_content_hour'),
+        UniqueConstraint('student_id', 'class_id', 'content_type', 'preferred_hour', name='uq_student_class_content_hour'),
         Index('idx_schedule_trigger', 'next_trigger_date', 'status'),
     )
 

@@ -96,13 +96,14 @@ async def process_pending_schedules():
         # O canal de entrega é resolvido por aluno (roteamento "follow-the-user").
         result = await session.execute(
             text("""
-                SELECT ss.schedule_id, ss.student_id, ss.course_id, ss.template_name,
-                       ss.preferred_hour, ss.content_type,
+                SELECT ss.schedule_id, ss.student_id, ss.class_id, cl.course_id AS course_id,
+                       ss.template_name, ss.preferred_hour, ss.content_type,
                        s.name AS student_name, s.phone, s.telegram_chat_id, s.preferred_channel,
                        c.name AS course_name
                 FROM "StudentSchedule" ss
                 JOIN "Students" s ON s.id = ss.student_id
-                JOIN "Courses" c ON c.id = ss.course_id
+                JOIN "Classes" cl ON cl.id = ss.class_id
+                JOIN "Courses" c ON c.id = cl.course_id
                 WHERE ss.status = 'scheduled'
                   AND ss.next_trigger_date <= :now
                   AND ss.is_active = true
@@ -189,7 +190,7 @@ async def process_pending_schedules():
                     
                     interactive_payload = {
                         "type": "button_reply",
-                        "id": f"review_accept_{row.course_id}",
+                        "id": f"review_accept_{row.class_id}",
                         "title": accept_title[:20]
                     }
                     
@@ -223,8 +224,8 @@ async def process_pending_schedules():
                             user_id=sender_id,
                             body=text_body,
                             buttons=[
-                                {"id": f"review_accept_{row.course_id}", "title": accept_title[:20]},
-                                {"id": f"review_later_{row.course_id}", "title": later_title[:20]}
+                                {"id": f"review_accept_{row.class_id}", "title": accept_title[:20]},
+                                {"id": f"review_later_{row.class_id}", "title": later_title[:20]}
                             ],
                             footer=REVIEW_INVITE_FOOTER
                         )
@@ -359,11 +360,10 @@ async def process_window_extensions():
         result = await session.execute(
             text("""
                 SELECT s.id as student_id, s.phone, s.telegram_chat_id, s.preferred_channel,
-                       (SELECT cl.course_id
+                       (SELECT se.class_id
                           FROM "StudentEnrollment" se
-                          JOIN "Classes" cl ON cl.id = se.class_id
                          WHERE se.student_id = s.id
-                         LIMIT 1) AS course_id
+                         LIMIT 1) AS class_id
                 FROM "Students" s
                 WHERE s.is_active = true
             """)
@@ -374,7 +374,7 @@ async def process_window_extensions():
             # Roteamento "follow-the-user": resolve canal + endereço do aluno.
             ct = (student.preferred_channel or default_ct).lower()
             sender_id = student.telegram_chat_id if ct == "telegram" else student.phone
-            if not sender_id or not student.course_id:
+            if not sender_id or not student.class_id:
                 continue
             channel = get_channel(ct)
 
@@ -418,9 +418,9 @@ async def process_window_extensions():
                         "Quer aproveitar e responder um quiz rápido agora ou prefere deixar para o próximo agendamento?"
                     )
                     
-                    course_id = student.course_id
+                    class_id = student.class_id
                     buttons = [
-                        {"id": f"review_accept_{course_id}", "title": "Responder Quiz Agora"},
+                        {"id": f"review_accept_{class_id}", "title": "Responder Quiz Agora"},
                         {"id": "window_warning_later", "title": "Responder Depois"}
                     ]
                     

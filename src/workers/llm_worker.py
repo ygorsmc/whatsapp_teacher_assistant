@@ -37,13 +37,17 @@ async def run_rag_pipeline(student_context: dict, text: str) -> str:
     teacher = student_context["teacher"]
     student = student_context["student"]
     course = student_context["course"]
-    
+    subject = student_context.get("subject")
+    subject_name = subject.name if subject else None
+
     # 2. Retrieve Document Context from Qdrant
     # For now, we assume the student only has access to their current lesson pointer
-    
+    # O subject_name isola a busca na disciplina da turma do aluno.
+
     rag_context = await retrieve_context(
         teacher_id=teacher.id,
         course_id=course.id,
+        subject_name=subject_name,
         current_lesson_number=student_context["class_obj"].current_lesson_number,
         query=text
     )
@@ -85,59 +89,57 @@ async def run_rag_pipeline(student_context: dict, text: str) -> str:
     
     return response
 
-async def get_student_context(sender_id: str, query_column: str, course_id: str | None = None):
-    """Fetches real DB data: Student, Enrollment, CourseClass, Course, and Teacher.
-    
-    If course_id is provided, filters for the specific enrollment and returns a dict.
-    Otherwise returns a list of all active enrollments.
+async def get_student_context(sender_id: str, query_column: str, course_id: str | None = None, class_id: str | None = None):
+    """Fetches real DB data: Student, Enrollment, CourseClass, Subject, Course, and Teacher.
+
+    If class_id (preferido) or course_id is provided, filters for the specific
+    enrollment and returns a single dict. Otherwise returns a list of all active
+    enrollments. O "subject" pode ser None em turmas legadas sem disciplina.
     """
     from src.db.database import AsyncSessionLocal
     from src.db.models.user import Student, Teacher
-    from src.db.models.course import StudentEnrollment, CourseClass, Course
+    from src.db.models.course import StudentEnrollment, CourseClass, Course, Subject
     from sqlalchemy import select
-    
+
+    def _to_dict(r):
+        return {
+            "student": r[0],
+            "enrollment": r[1],
+            "class_obj": r[2],
+            "course": r[3],
+            "teacher": r[4],
+            "subject": r[5],  # Subject | None
+        }
+
     async with AsyncSessionLocal() as session:
         # Join tables to get the full context in one query
         # O professor do aluno é o da TURMA dele (posse por turma: CourseClass.teacher_id).
         # A migration faz backfill (turma herda o professor do curso), então nunca fica NULL.
+        # Subject é outerjoin: turma sem disciplina (legado) não pode sumir do contexto.
         stmt = (
-            select(Student, StudentEnrollment, CourseClass, Course, Teacher)
+            select(Student, StudentEnrollment, CourseClass, Course, Teacher, Subject)
             .join(StudentEnrollment, Student.id == StudentEnrollment.student_id)
             .join(CourseClass, StudentEnrollment.class_id == CourseClass.id)
             .join(Course, CourseClass.course_id == Course.id)
             .join(Teacher, CourseClass.teacher_id == Teacher.id)
+            .outerjoin(Subject, CourseClass.subject_id == Subject.id)
             .where(getattr(Student, query_column) == sender_id)
         )
-        
-        # Filter by specific course if provided (e.g., from review button)
-        if course_id:
-            stmt = stmt.where(Course.id == course_id)
+
+        # Filtro específico: por TURMA (botão de review) ou por curso (fallback legado).
+        if class_id or course_id:
+            stmt = stmt.where(CourseClass.id == class_id) if class_id else stmt.where(Course.id == course_id)
             result = await session.execute(stmt)
             row = result.first()
             if not row:
                 return None
-            return {
-                "student": row[0],
-                "enrollment": row[1],
-                "class_obj": row[2],
-                "course": row[3],
-                "teacher": row[4]
-            }
+            return _to_dict(row)
         else:
             result = await session.execute(stmt)
             rows = result.all()
             if not rows:
                 return []
-            return [
-                {
-                    "student": r[0],
-                    "enrollment": r[1],
-                    "class_obj": r[2],
-                    "course": r[3],
-                    "teacher": r[4]
-                }
-                for r in rows
-            ]
+            return [_to_dict(r) for r in rows]
 
 
 async def handle_quiz_response(
@@ -224,6 +226,8 @@ async def handle_review_request(channel, sender_id: str, student_context: dict) 
     teacher = student_context["teacher"]
     student = student_context["student"]
     course = student_context["course"]
+    subject = student_context.get("subject")
+    subject_name = subject.name if subject else None
     current_lesson = student_context["class_obj"].current_lesson_number
 
     from src.rag.prompt_builder import resolve_lesson_label
@@ -237,6 +241,7 @@ async def handle_review_request(channel, sender_id: str, student_context: dict) 
         student_name=student.name,
         course_id=course.id,
         course_name=course.name,
+        subject_name=subject_name,
         current_lesson_number=current_lesson,
         lesson_label=lesson_label,
     )
@@ -353,14 +358,17 @@ async def process_inbound(event: dict, ctx: MessageContext):
             # Fast-path: aluno aceita a revisão diária
             if reply_id.startswith("review_accept_"):
                 try:
-                    # Extract course_id from the button payload (review_accept_{course_id})
-                    review_course_id = reply_id.replace("review_accept_", "", 1)
-                    
-                    logger.info(f"DEBUG_ROUTING: Extracted review_course_id: {review_course_id}")
-                    
-                    # Re-fetch context for the SPECIFIC course from the button
-                    review_context = await get_student_context(sender_id, query_column, course_id=review_course_id)
-                    
+                    # Extrai o class_id do botão (review_accept_{class_id}). Agendamentos
+                    # apontam para a TURMA/Disciplina exata. Botões legados carregavam
+                    # course_id → o get_student_context(class_id=...) não acha e cai no
+                    # fallback (primeira matrícula), preservando compat na transição.
+                    review_class_id = reply_id.replace("review_accept_", "", 1)
+
+                    logger.info(f"DEBUG_ROUTING: Extracted review_class_id: {review_class_id}")
+
+                    # Re-fetch context for the SPECIFIC class from the button
+                    review_context = await get_student_context(sender_id, query_column, class_id=review_class_id)
+
                     if not review_context:
                         logger.info("DEBUG_ROUTING: review_context was None! Falling back to default.")
                         review_context = student_context  # fallback to default

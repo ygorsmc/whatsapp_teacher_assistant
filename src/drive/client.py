@@ -55,8 +55,9 @@ class GoogleDriveClient:
     async def list_course_files(self, folder_id: str):
         """
         Lists multiformat files (PDF, DOCX, PPTX, TXT, MD) following the hierarchy:
-        Root -> CourseFolder -> LessonFolder -> Files
-        Returns a list of dicts with id, name, mimeType, modifiedTime, course_name, and lesson_number.
+        Root -> CourseFolder -> SubjectFolder -> LessonFolder -> Files
+        Returns a list of dicts with id, name, mimeType, modifiedTime, course_name,
+        subject_name, and lesson_number.
         """
         if not self.service:
             raise ValueError("Google Drive Service is not initialized.")
@@ -87,29 +88,39 @@ class GoogleDriveClient:
             for course in courses:
                 c_name = course['name']
                 c_id = course['id']
-                
-                # 2. Fetch Lesson Folders inside each Course Folder
-                l_query = f"'{c_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
-                l_result = self.service.files().list(q=l_query, fields="files(id, name)", spaces='drive').execute()
-                lessons = l_result.get('files', [])
-                
-                for lesson in lessons:
-                    l_name = lesson['name']
-                    l_id = lesson['id']
-                    
-                    # Extract lesson number from folder name (ex: "1 - Introdução")
-                    match = re.match(r"^(\d+)\s*-", l_name)
-                    lesson_num = int(match.group(1)) if match else 1
-                    
-                    # 3. Fetch allowed files inside each Lesson Folder
-                    f_query = f"'{l_id}' in parents and ({mime_query}) and trashed=false"
-                    f_result = self.service.files().list(q=f_query, fields="files(id, name, mimeType, modifiedTime)", spaces='drive').execute()
-                    
-                    for f in f_result.get('files', []):
-                        f['course_name'] = c_name
-                        f['lesson_number'] = lesson_num
-                        all_files.append(f)
-                        
+
+                # 2. Fetch Subject Folders (Disciplinas) inside each Course Folder
+                s_query = f"'{c_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+                s_result = self.service.files().list(q=s_query, fields="files(id, name)", spaces='drive').execute()
+                subjects = s_result.get('files', [])
+
+                for subject in subjects:
+                    s_name = subject['name']
+                    s_id = subject['id']
+
+                    # 3. Fetch Lesson Folders inside each Subject Folder
+                    l_query = f"'{s_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+                    l_result = self.service.files().list(q=l_query, fields="files(id, name)", spaces='drive').execute()
+                    lessons = l_result.get('files', [])
+
+                    for lesson in lessons:
+                        l_name = lesson['name']
+                        l_id = lesson['id']
+
+                        # Extract lesson number from folder name (ex: "1 - Introdução")
+                        match = re.match(r"^(\d+)\s*-", l_name)
+                        lesson_num = int(match.group(1)) if match else 1
+
+                        # 4. Fetch allowed files inside each Lesson Folder
+                        f_query = f"'{l_id}' in parents and ({mime_query}) and trashed=false"
+                        f_result = self.service.files().list(q=f_query, fields="files(id, name, mimeType, modifiedTime)", spaces='drive').execute()
+
+                        for f in f_result.get('files', []):
+                            f['course_name'] = c_name
+                            f['subject_name'] = s_name
+                            f['lesson_number'] = lesson_num
+                            all_files.append(f)
+
             return all_files
             
         files = await loop.run_in_executor(None, _fetch)

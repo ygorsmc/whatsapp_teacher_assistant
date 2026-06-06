@@ -57,6 +57,7 @@ async def generate_review(
     student_name: str,
     course_id: str,
     course_name: str,
+    subject_name: str | None,
     current_lesson_number: int,
     lesson_label: str,
 ) -> Optional[ReviewOutput]:
@@ -71,6 +72,7 @@ async def generate_review(
     lesson_content = await retrieve_context(
         teacher_id=teacher_id,
         course_id=course_id,
+        subject_name=subject_name,
         current_lesson_number=current_lesson_number,
         query=f"resumo principal da aula {current_lesson_number}",
         top_k=settings.RAG_TOP_K * 2,  # More chunks for comprehensive review

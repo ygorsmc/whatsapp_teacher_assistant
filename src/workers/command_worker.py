@@ -6,7 +6,7 @@ from src.db.database import AsyncSessionLocal
 from sqlalchemy import text
 from src.shared.constants.messages import (
     CMD_SYNC_ALUNOS_START, CMD_SYNC_MATERIAIS_START, CMD_SYNC_MATERIAIS_SUCCESS, CMD_SYNC_SUCCESS, CMD_SYNC_ERROR,
-    CMD_SYNC_UNLINKED_WARNING, CMD_SYNC_NO_TEACHER_WARNING
+    CMD_SYNC_UNLINKED_WARNING, CMD_SYNC_NO_TEACHER_WARNING, CMD_SYNC_DISCIPLINA_WARNING
 )
 from src.shared.constants.commands import parse_command, CommandType
 
@@ -27,6 +27,8 @@ async def run_sync_alunos_command(channel, sender_id: str):
                 students_after=stats.get('students_after', 0),
                 courses_before=stats.get('courses_before', 0),
                 courses_after=stats.get('courses_after', 0),
+                subjects_before=stats.get('subjects_before', 0),
+                subjects_after=stats.get('subjects_after', 0),
                 schedules_before=stats.get('schedules_before', 0),
                 schedules_after=stats.get('schedules_after', 0)
             )
@@ -42,6 +44,12 @@ async def run_sync_alunos_command(channel, sender_id: str):
             if no_teacher:
                 names_str = "\n".join(f"• {n}" for n in no_teacher)
                 msg += CMD_SYNC_NO_TEACHER_WARNING.format(count=len(no_teacher), names=names_str)
+            # Avisa sobre turmas com disciplina divergente entre as abas Alunos e Turmas
+            # (vale a da aba Turmas) — uma turma deve ter UMA disciplina.
+            divergente = stats.get('disciplina_divergente', [])
+            if divergente:
+                names_str = "\n".join(f"• {n}" for n in divergente)
+                msg += CMD_SYNC_DISCIPLINA_WARNING.format(count=len(divergente), names=names_str)
             await channel.send_text(sender_id, msg)
     except Exception as e:
         await channel.send_text(sender_id, f"❌ Erro inesperado: {str(e)[:100]}")
@@ -243,23 +251,25 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
                 await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
                 
-            # 2. Fetch Class & Course (posse por turma: c.teacher_id)
+            # 2. Fetch Class & Course & Subject (posse por turma: c.teacher_id)
             stmt = text("""
-                SELECT c.id, c.current_lesson_number, c.course_id, c.name
+                SELECT c.id, c.current_lesson_number, c.course_id, c.name, sub.name AS subject_name
                 FROM "Classes" c
+                LEFT JOIN "Subjects" sub ON sub.id = c.subject_id
                 WHERE c.name ILIKE '%' || :cname || '%' AND c.teacher_id = :tid
             """)
             result = await session.execute(stmt, {"cname": class_name, "tid": teacher[0]})
             class_row = result.fetchone()
-            
+
             if not class_row:
                 await channel.send_text(sender_id, f"❌ Turma '{class_name}' não encontrada.")
                 return
-                
+
             class_id = class_row[0]
             current_lesson = class_row[1]
             course_id = class_row[2]
             c_name = class_row[3]
+            subject_name = class_row[4]  # disciplina da turma (pode ser None em legado)
             
             # 3. Fetch Enrolled Active Students (com endereços dos dois canais + canal preferido)
             stmt_students = text("""
@@ -292,6 +302,7 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
             student_name="Turma",  # Mensagem generalizada para a turma
             course_id=course_id,
             course_name=c_name,
+            subject_name=subject_name,
             current_lesson_number=current_lesson,
             lesson_label=lesson_label,
         )

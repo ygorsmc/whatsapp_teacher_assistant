@@ -1,19 +1,24 @@
 """
 Spreadsheet Sync Module — Sincroniza o Google Sheet com o banco.
 
-Layout (abas separadas):
-  - "Professores": Nome | Telefone | Curso (Pasta) | Turma
+Layout (abas separadas) — camada Disciplina entre Curso e Turma:
+  - "Professores": Nome | Telefone | Curso (Pasta) | Disciplina | Turma | Status
         → tabela Teachers + mapa de posse por turma
-  - "Alunos":      Nome | Telefone | Papel | Curso | Turma | H1 | H2 | H3 | Status
-        → Students / Courses / Classes / StudentEnrollment / StudentSchedule
-  - "Turmas":      Turma | Curso | Data Início | Seg..Dom
-        → calendário das Classes (start_date + schedule_map)
+  - "Alunos":      Nome | Telefone | Curso | Disciplina | Turma | H1 | H2 | H3 | Status
+        → Students / Courses / Subjects / Classes / StudentEnrollment / StudentSchedule
+  - "Turmas":      Turma | Disciplina | Curso | Data Início | Seg..Dom
+        → calendário das Classes (start_date + schedule_map) + disciplina AUTORITATIVA
   - "Lista_Pastas": nomes das pastas/cursos (não consumida aqui)
 
 Posse por turma: cada linha de "Professores" define o dono de uma (Curso, Turma)
 → Classes.teacher_id. Courses.teacher_id recebe o primeiro professor visto para o
 curso (FK + fallback para o contexto do aluno). Turmas sem professor explícito
 caem no Admin de bootstrap e são reportadas em stats["classes_sem_professor"].
+
+Disciplina (Subject): uma Turma pertence a UMA disciplina. A aba "Turmas" é a
+fonte autoritativa (sobrescreve o que vier da aba "Alunos"). Divergências entre
+as abas (mesma turma com disciplinas diferentes) são reportadas em
+stats["disciplina_divergente"] — vale a disciplina da aba "Turmas".
 
 Compatível com PostgreSQL (produção) e SQLite (dev local) — ambos via ON CONFLICT.
 """
@@ -81,7 +86,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
 
     # --- Leitura das abas ---
     try:
-        prof_rows = await drive_client.get_spreadsheet_data(sheet_id, "Professores!A2:D1000")
+        prof_rows = await drive_client.get_spreadsheet_data(sheet_id, "Professores!A2:F1000")
     except Exception as e:
         prof_rows = []
         logger.warning("Aba 'Professores' não encontrada ou ilegível", error=str(e)[:200])
@@ -98,11 +103,35 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
     # Importa lazy para evitar import circular (scheduler_worker importa esta sync).
     from src.workers.scheduler_worker import compute_next_trigger
 
-    stats = {"teachers_upserted": 0, "students_upserted": 0, "courses_upserted": 0, "schedules_upserted": 0}
+    # Valores heterogêneos (ints de contagem + listas de avisos), daí dict[str, object].
+    stats: dict[str, object] = {"teachers_upserted": 0, "students_upserted": 0, "courses_upserted": 0,
+                                "subjects_upserted": 0, "schedules_upserted": 0}
     course_owner: dict[str, str] = {}                 # course_name -> teacher_id (dono do curso)
     class_owner: dict[tuple[str, str], str] = {}      # (course_name, class_name) -> teacher_id
     classes_sem_professor: set[str] = set()
+    disciplina_divergente: set[str] = set()
     upserted_teacher_ids: set[str] = set()
+    upserted_subject_ids: set[str] = set()
+    # Disciplina por turma vinda de cada aba (p/ detectar divergência Alunos×Turmas).
+    alunos_subject: dict[tuple[str, str], set[str]] = defaultdict(set)  # (curso,turma) -> {disciplinas vistas na aba Alunos}
+    turmas_subject: dict[tuple[str, str], str] = {}                     # (curso,turma) -> disciplina (autoritativa)
+
+    async def upsert_subject(session, course_id: str, subject_name: str) -> str:
+        """Cria/atualiza a Disciplina e retorna o subject_id determinístico."""
+        subject_id = generate_id("sub", f"{course_id}_{subject_name}")
+        await session.execute(
+            text("""
+                INSERT INTO "Subjects" (id, course_id, name, is_active)
+                VALUES (:id, :cid, :name, true)
+                ON CONFLICT(id) DO UPDATE SET
+                    name = excluded.name,
+                    is_active = true,
+                    updated_at = CURRENT_TIMESTAMP
+            """),
+            {"id": subject_id, "cid": course_id, "name": subject_name},
+        )
+        upserted_subject_ids.add(subject_id)
+        return subject_id
 
     def resolve_class_teacher(course_name: str, class_name: str) -> str:
         """Dono da turma: específico (Professores) > dono do curso > Admin."""
@@ -119,6 +148,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
         teachers_before = (await session.execute(text('SELECT count(*) FROM "Teachers"'))).scalar()
         students_before = (await session.execute(text('SELECT count(*) FROM "Students"'))).scalar()
         courses_before = (await session.execute(text('SELECT count(*) FROM "Courses"'))).scalar()
+        subjects_before = (await session.execute(text('SELECT count(*) FROM "Subjects"'))).scalar()
         schedules_before = (await session.execute(text('SELECT count(*) FROM "StudentSchedule"'))).scalar()
 
         # ===== Pass 0: Professores → Teachers + mapas de posse =====
@@ -126,7 +156,8 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
             name = _cell(row, 0)
             phone = clean_phone(_cell(row, 1))
             course_name = _cell(row, 2)
-            class_name = _cell(row, 3)
+            # col 3 = Disciplina (não afeta a posse, que é por Curso+Turma); col 4 = Turma.
+            class_name = _cell(row, 4)
             if not name or not phone:
                 continue
 
@@ -160,16 +191,14 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
         for row in alunos_rows:
             name = _cell(row, 0)
             phone = clean_phone(_cell(row, 1))
-            role = _cell(row, 2).lower()
-            course_name = _cell(row, 3)
+            # Layout novo (sem coluna "Papel"): Nome | Tel | Curso | Disciplina | Turma | H1 | H2 | H3 | Status
+            course_name = _cell(row, 2)
+            subject_name = _cell(row, 3)
             class_name = _cell(row, 4) or "Turma Única"
             hours = [_cell(row, i) for i in (5, 6, 7) if _cell(row, i)]
             status_val = (_cell(row, 8) or "ativo").lower()
             is_active = status_val in ACTIVE_VALUES
 
-            # A aba "Alunos" deve conter só alunos; ignora qualquer linha marcada como professor.
-            if role and role != "aluno":
-                continue
             if not phone:
                 continue
 
@@ -188,7 +217,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 {"id": student_id, "name": name, "phone": phone, "is_active": is_active},
             )
             student_id = cast(str, res.scalar())
-            stats["students_upserted"] += 1
+            stats["students_upserted"] = cast(int, stats["students_upserted"]) + 1
 
             if not course_name:
                 continue  # aluno sem curso atribuído
@@ -208,23 +237,31 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 """),
                 {"id": course_id, "tid": owner_tid, "name": course_name},
             )
-            stats["courses_upserted"] += 1
+            stats["courses_upserted"] = cast(int, stats["courses_upserted"]) + 1
 
-            # 2.5 Upsert Class (dono por turma)
+            # 2.2 Upsert Subject (Disciplina). A aba Turmas é autoritativa e
+            # sobrescreve depois; aqui é best-effort para turmas sem linha em Turmas.
+            subject_id = None
+            if subject_name:
+                subject_id = await upsert_subject(session, course_id, subject_name)
+                alunos_subject[(course_name, class_name)].add(subject_name)
+
+            # 2.5 Upsert Class (dono por turma + disciplina)
             class_tid = resolve_class_teacher(course_name, class_name)
             if (course_name, class_name) not in class_owner:
                 classes_sem_professor.add(f"{course_name} / {class_name}")
             class_id = generate_id("cls", f"{course_id}_{class_name}")
             await session.execute(
                 text("""
-                    INSERT INTO "Classes" (id, course_id, teacher_id, name, current_lesson_number)
-                    VALUES (:id, :cid, :tid, :name, 1)
+                    INSERT INTO "Classes" (id, course_id, subject_id, teacher_id, name, current_lesson_number)
+                    VALUES (:id, :cid, :sid, :tid, :name, 1)
                     ON CONFLICT(id) DO UPDATE SET
                         teacher_id = excluded.teacher_id,
+                        subject_id = COALESCE(excluded.subject_id, "Classes".subject_id),
                         name = excluded.name,
                         updated_at = CURRENT_TIMESTAMP
                 """),
-                {"id": class_id, "cid": course_id, "tid": class_tid, "name": class_name},
+                {"id": class_id, "cid": course_id, "sid": subject_id, "tid": class_tid, "name": class_name},
             )
 
             # 3. Upsert Enrollment
@@ -246,45 +283,47 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 try:
                     h_clean = h[:5]
                     next_trigger = compute_next_trigger(h_clean)
-                    sched_id = generate_id("sch", f"{student_id}_{course_id}_{h_clean}")
+                    sched_id = generate_id("sch", f"{student_id}_{class_id}_{h_clean}")
                     await session.execute(
                         text("""
                             INSERT INTO "StudentSchedule"
-                                (schedule_id, student_id, course_id, template_name, preferred_hour, content_type, next_trigger_date, is_active, status)
+                                (schedule_id, student_id, class_id, template_name, preferred_hour, content_type, next_trigger_date, is_active, status)
                             VALUES (:id, :sid, :cid, 'daily_review', :hr, 'review', :nt, :is_active, 'scheduled')
-                            ON CONFLICT(student_id, course_id, content_type, preferred_hour) DO UPDATE SET
+                            ON CONFLICT(student_id, class_id, content_type, preferred_hour) DO UPDATE SET
                                 is_active = excluded.is_active,
                                 status = 'scheduled',
                                 updated_at = CURRENT_TIMESTAMP
                         """),
-                        {"id": sched_id, "sid": student_id, "cid": course_id, "hr": h_clean, "nt": next_trigger, "is_active": is_active},
+                        {"id": sched_id, "sid": student_id, "cid": class_id, "hr": h_clean, "nt": next_trigger, "is_active": is_active},
                     )
-                    stats["schedules_upserted"] += 1
+                    stats["schedules_upserted"] = cast(int, stats["schedules_upserted"]) + 1
                     student_active_schedules[student_id].add(sched_id)
                 except Exception as e:
                     logger.warning(f"Horário inválido '{h}' para o aluno {name}: {e}")
 
-        # ===== Pass 2: Turmas → calendário das Classes =====
+        # ===== Pass 2: Turmas → calendário das Classes + Disciplina AUTORITATIVA =====
         try:
-            turmas_rows = await drive_client.get_spreadsheet_data(sheet_id, "Turmas!A2:J1000")
+            turmas_rows = await drive_client.get_spreadsheet_data(sheet_id, "Turmas!A2:K1000")
         except Exception as e:
             turmas_rows = []
             logger.warning("Aba 'Turmas' não encontrada", error=str(e)[:200])
 
         for row in turmas_rows:
+            # Layout novo: Turma | Disciplina | Curso | Data Início | Seg..Dom
             class_name = _cell(row, 0)
-            course_name = _cell(row, 1)
+            subject_name = _cell(row, 1)
+            course_name = _cell(row, 2)
             if not class_name or not course_name:
                 continue
 
-            start_date_str = _cell(row, 2)
+            start_date_str = _cell(row, 3)
             start_date_obj = _parse_date(start_date_str) if start_date_str else None
             if start_date_str and start_date_obj is None:
                 logger.warning(f"Data inválida na turma {class_name}: {start_date_str}")
 
             schedule_map = {}
             for i in range(7):
-                val = _cell(row, 3 + i)
+                val = _cell(row, 4 + i)
                 if val and val.lower() not in ("sem aula", "-"):
                     schedule_map[str(i)] = val
             schedule_map_json = json.dumps(schedule_map) if schedule_map else None
@@ -304,6 +343,12 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 {"id": course_id, "tid": owner_tid, "name": course_name},
             )
 
+            # Disciplina autoritativa da turma (sobrescreve a vinda da aba Alunos).
+            subject_id = None
+            if subject_name:
+                subject_id = await upsert_subject(session, course_id, subject_name)
+                turmas_subject[(course_name, class_name)] = subject_name
+
             class_tid = resolve_class_teacher(course_name, class_name)
             if (course_name, class_name) not in class_owner:
                 classes_sem_professor.add(f"{course_name} / {class_name}")
@@ -317,10 +362,11 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
 
             await session.execute(
                 text("""
-                    INSERT INTO "Classes" (id, course_id, teacher_id, name, current_lesson_number, start_date, schedule_map)
-                    VALUES (:id, :cid, :tid, :name, :lesson, :start_date, :sched_map)
+                    INSERT INTO "Classes" (id, course_id, subject_id, teacher_id, name, current_lesson_number, start_date, schedule_map)
+                    VALUES (:id, :cid, :sid, :tid, :name, :lesson, :start_date, :sched_map)
                     ON CONFLICT(id) DO UPDATE SET
                         teacher_id = excluded.teacher_id,
+                        subject_id = COALESCE(excluded.subject_id, "Classes".subject_id),
                         start_date = excluded.start_date,
                         schedule_map = excluded.schedule_map,
                         current_lesson_number = CASE WHEN excluded.start_date > CURRENT_DATE THEN 0 ELSE "Classes".current_lesson_number END,
@@ -329,6 +375,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 {
                     "id": class_id,
                     "cid": course_id,
+                    "sid": subject_id,
                     "tid": class_tid,
                     "name": class_name,
                     "lesson": current_lesson,
@@ -336,6 +383,24 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                     "sched_map": schedule_map_json,
                 },
             )
+
+        # ===== Detecção de divergência de Disciplina (Alunos × Turmas) =====
+        # Uma turma pertence a UMA disciplina; a aba Turmas é autoritativa. Reporta
+        # turmas cuja disciplina na aba Alunos diverge (ou tem mais de uma).
+        for (course_name, class_name), alunos_names in alunos_subject.items():
+            authoritative = turmas_subject.get((course_name, class_name))
+            # Divergência = a aba Alunos lista disciplina(s) diferente(s) da turma.
+            # Se a turma não tem linha em Turmas, só conflita quando há +1 disciplina.
+            if authoritative is not None:
+                divergent = alunos_names != {authoritative}
+            else:
+                divergent = len(alunos_names) > 1
+            if divergent:
+                alunos_str = ", ".join(sorted(alunos_names))
+                turmas_str = authoritative or "—"
+                disciplina_divergente.add(
+                    f"{course_name} / {class_name} (Alunos: {alunos_str} | Turmas: {turmas_str})"
+                )
 
         # ===== Pass 3: Limpeza de matrículas/agendamentos órfãos (alunos sincronizados) =====
         for sid, class_ids in student_active_classes.items():
@@ -361,11 +426,16 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
         stats["students_after"] = (await session.execute(text('SELECT count(*) FROM "Students"'))).scalar() or 0
         stats["courses_before"] = courses_before or 0
         stats["courses_after"] = (await session.execute(text('SELECT count(*) FROM "Courses"'))).scalar() or 0
+        stats["subjects_upserted"] = len(upserted_subject_ids)
+        stats["subjects_before"] = subjects_before or 0
+        stats["subjects_after"] = (await session.execute(text('SELECT count(*) FROM "Subjects"'))).scalar() or 0
         stats["schedules_before"] = schedules_before or 0
         stats["schedules_after"] = (await session.execute(text('SELECT count(*) FROM "StudentSchedule"'))).scalar() or 0
 
         # Turmas que não têm professor explícito na aba "Professores" (caíram no Admin).
         stats["classes_sem_professor"] = sorted(classes_sem_professor)
+        # Turmas com disciplina divergente entre as abas Alunos e Turmas (vale a de Turmas).
+        stats["disciplina_divergente"] = sorted(disciplina_divergente)
 
         # Alunos com agendamento ativo mas SEM endereço de entrega no canal atual.
         # No Telegram (query_column = telegram_chat_id) isso quer dizer que o aluno ainda
@@ -383,8 +453,9 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 ORDER BY s.name
             """)
         )).fetchall()
-        stats["unlinked_names"] = [r[0] for r in unlinked_rows]
-        stats["students_unlinked"] = len(stats["unlinked_names"])
+        unlinked_names = [r[0] for r in unlinked_rows]
+        stats["unlinked_names"] = unlinked_names
+        stats["students_unlinked"] = len(unlinked_names)
 
         logger.info("Spreadsheet sync completed", stats=stats)
         return stats

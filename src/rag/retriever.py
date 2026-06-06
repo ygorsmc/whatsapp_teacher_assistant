@@ -36,6 +36,7 @@ def _extract_lesson_hint(query: str) -> Optional[int]:
 async def retrieve_context(
     teacher_id: str,
     course_id: str,
+    subject_name: str | None,
     current_lesson_number: int,
     query: str,
     top_k: int | None = None,
@@ -74,10 +75,17 @@ async def retrieve_context(
         current_lesson=current_lesson_number
     )
     
+    # Condições base de isolamento (sempre teacher + curso; disciplina quando houver).
+    # O filtro por subject_name isola o RAG na disciplina correta dentro do curso.
+    base_conditions = [
+        FieldCondition(key="teacher_id", match=MatchValue(value=teacher_id)),
+        FieldCondition(key="course_id",  match=MatchValue(value=course_id)),
+    ]
+    if subject_name:
+        base_conditions.append(FieldCondition(key="subject_name", match=MatchValue(value=subject_name)))
+
     pinpoint_filter = Filter(
-        must=[
-            FieldCondition(key="teacher_id", match=MatchValue(value=teacher_id)),
-            FieldCondition(key="course_id",  match=MatchValue(value=course_id)),
+        must=base_conditions + [
             FieldCondition(key="lesson_number", match=MatchValue(value=target_lesson)),
         ]
     )
@@ -96,9 +104,7 @@ async def retrieve_context(
     if len(results) < 3:
         logger.info("Not enough pinpointed results. Falling back to broad search.")
         broad_filter = Filter(
-            must=[
-                FieldCondition(key="teacher_id", match=MatchValue(value=teacher_id)),
-                FieldCondition(key="course_id",  match=MatchValue(value=course_id)),
+            must=base_conditions + [
                 FieldCondition(
                     key="lesson_number",
                     range=Range(lte=current_lesson_number)

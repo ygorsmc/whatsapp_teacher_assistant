@@ -4,14 +4,37 @@ from src.db.database import Base
 
 class Course(Base):
     __tablename__ = "Courses"
-    
+
     id = Column(String(255), primary_key=True)
     teacher_id = Column(String(255), ForeignKey("Teachers.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False)
     is_active = Column(Boolean, default=True)
-    
+
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+class Subject(Base):
+    """Disciplina — camada intermediária entre Curso e Turma.
+
+    Um Curso (ex.: "Inteligência Artificial") contém várias Disciplinas
+    (ex.: "Design Thinking", "PIBEP"). A posse do material e o RAG passam a
+    ser isolados por Disciplina: cada Turma pertence a exatamente uma Subject
+    (fonte autoritativa: aba "Turmas" da planilha).
+    """
+    __tablename__ = "Subjects"
+
+    id = Column(String(255), primary_key=True)
+    course_id = Column(String(255), ForeignKey("Courses.id"), nullable=False, index=True)
+    name = Column(String(255), nullable=False)
+    is_active = Column(Boolean, default=True)
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint('course_id', 'name', name='uq_subject_course_name'),
+    )
 
 
 class CourseClass(Base):
@@ -19,6 +42,9 @@ class CourseClass(Base):
 
     id = Column(String(255), primary_key=True)
     course_id = Column(String(255), ForeignKey("Courses.id"), nullable=False)
+    # Disciplina da turma. Uma turma pertence a UMA disciplina (chave única por
+    # turma). Nullable para tolerar legado/transição antes do backfill da sync.
+    subject_id = Column(String(255), ForeignKey("Subjects.id"), nullable=True, index=True)
     # Dono da turma. A posse passou a ser por TURMA (não mais só por curso):
     # um mesmo curso pode ter turmas de professores diferentes. Preenchido pela
     # sync a partir da aba "Professores" (Curso + Turma). Nullable para tolerar

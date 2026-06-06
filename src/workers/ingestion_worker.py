@@ -12,7 +12,7 @@ from qdrant_client.models import PointStruct
 
 logger = structlog.get_logger(__name__)
 
-async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id: str, course_id: str, lesson_number: int):
+async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id: str, course_id: str, subject_name: str, lesson_number: int):
     """
     Downloads a file from Google Drive, parses it (via factory parsers), 
     embeds chunks with Gemini, and upserts to Qdrant.
@@ -129,6 +129,7 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
                 payload={
                     "teacher_id": teacher_id,
                     "course_id": course_id,
+                    "subject_name": subject_name,
                     "lesson_number": lesson_number,
                     "content": chunk,
                     "source": file_name,
@@ -170,9 +171,13 @@ async def sync_google_drive():
             file_name = f['name']
             mime_type = f.get('mimeType', '')
             course_name = f.get('course_name')
+            subject_name = f.get('subject_name')
             lesson_number = f.get('lesson_number', 1)
-            
+
             if not course_name:
+                continue
+            if not subject_name:
+                logger.warning(f"File '{file_name}' fora de uma pasta de Disciplina (Curso > Disciplina > Aula). Pulando.")
                 continue
                 
             result = await session.execute(
@@ -209,7 +214,7 @@ async def sync_google_drive():
             )
             await session.commit()
             
-            success = await process_file(file_id, file_name, mime_type, teacher_id, course_id, lesson_number)
+            success = await process_file(file_id, file_name, mime_type, teacher_id, course_id, subject_name, lesson_number)
             
             new_status = 'concluído' if success else 'falhou'
             await session.execute(
