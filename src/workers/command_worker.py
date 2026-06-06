@@ -225,7 +225,7 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
         async with AsyncSessionLocal() as session:
             # 1. Fetch Teacher
             query_col = channel.get_user_query_column()
-            result = await session.execute(text(f'SELECT id FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
+            result = await session.execute(text(f'SELECT id, name, subject FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
             teacher = result.fetchone()
             
             if not teacher:
@@ -233,7 +233,7 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
                 stu_phone = res_stu.scalar_one_or_none()
                 if stu_phone:
                     phone_suffix = stu_phone[-8:] if len(stu_phone) >= 8 else stu_phone
-                    res_tea = await session.execute(text('SELECT id FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
+                    res_tea = await session.execute(text('SELECT id, name, subject FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
                     teacher = res_tea.fetchone()
                     if teacher:
                         await session.execute(text(f'UPDATE "Teachers" SET {query_col} = :sid WHERE id = :tid'), {"sid": sender_id, "tid": teacher[0]})
@@ -278,33 +278,47 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
         # Send a loading message to teacher
         await channel.send_text(sender_id, f"⏳ Gerando quiz para a aula {current_lesson} da turma {c_name}...\nIsso pode levar alguns segundos.")
         
-        # 4. Generate Quiz
-        from src.rag.retriever import retrieve_context
-        from src.rag.quiz_generator import generate_quiz
+        # 4. Generate Review & Quiz
+        from src.rag.review_generator import generate_review
+        from src.rag.prompt_builder import resolve_lesson_label
+        from src.rag.quiz_generator import QuizOutput, QuizAlternative
         
-        lesson_content = await retrieve_context(
+        lesson_label = await resolve_lesson_label(course_id, str(current_lesson))
+        
+        review = await generate_review(
             teacher_id=teacher[0],
+            teacher_name=teacher[1],
+            teacher_subject=teacher[2],
+            student_name="Turma",  # Mensagem generalizada para a turma
             course_id=course_id,
+            course_name=c_name,
             current_lesson_number=current_lesson,
-            query=f"resumo principal da aula {current_lesson}",
-            top_k=5,
-            score_threshold=0.3
+            lesson_label=lesson_label,
         )
         
-        if not lesson_content:
+        if not review:
             await channel.send_text(sender_id, f"❌ Nenhum material encontrado no banco de dados para a aula {current_lesson}.")
             return
             
-        quiz = await generate_quiz(
-            course_id=course_id,
-            lesson_number=current_lesson,
-            lesson_content=lesson_content,
-            num_alternatives=3
+        # Format the summary message to be broadcasted before the quiz
+        key_points_text = "\n".join(f"  • {kp}" for kp in review.key_points)
+        summary_message = (
+            f"📖 *Revisão — {c_name}*\n"
+            f"📍 {lesson_label}\n\n"
+            f"{review.summary}\n\n"
+            f"🔑 *Pontos-chave:*\n{key_points_text}\n\n"
+            f"_Leia com atenção — o quiz a seguir é baseado neste resumo!_ 👇"
         )
         
-        if not quiz:
-            await channel.send_text(sender_id, "❌ Falha ao gerar o quiz com a IA.")
-            return
+        quiz_output = QuizOutput(
+            question=review.quiz.question,
+            alternatives=[
+                QuizAlternative(id=alt.id, text=alt.text)
+                for alt in review.quiz.alternatives
+            ],
+            correct_answer=review.quiz.correct_answer,
+            explanation=review.quiz.explanation,
+        )
             
         # 5. Broadcast quiz to all students — roteamento por aluno ("follow-the-user").
         # O endereço de entrega depende do canal: telegram_chat_id (Telegram) ou phone (WhatsApp).
@@ -323,15 +337,19 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
                 logger.info("quiz_skip_unlinked_student", student_id=st[0], student_name=st[2], channel=ct)
                 continue
             try:
+                c = get_channel(ct)
+                # Envia o resumo antes do quiz
+                await c.send_text(addr, summary_message)
+                # Envia o quiz interativo
                 await send_quiz_to_student(
-                    channel=get_channel(ct),
+                    channel=c,
                     student={
                         "id": st[0],
                         "sender_id": addr,
                         "course_id": course_id,
                         "lesson_pointer": str(current_lesson)
                     },
-                    quiz=quiz
+                    quiz=quiz_output
                 )
                 success_count += 1
             except Exception as e:

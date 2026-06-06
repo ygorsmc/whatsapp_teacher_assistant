@@ -17,5 +17,5 @@ COPY . .
 
 # O Worker é headless (não expõe porta) e roda scripts python em background
 # O WORKER_TYPE é injetado como variável de ambiente no Azure Container Apps
-# Pode ser: 'llm', 'scheduler', 'ingestion', 'deletion'
+# Pode ser: 'llm', 'scheduler', 'ingestion', 'command'
 CMD ["sh", "-c", "python -m src.workers.${WORKER_TYPE}_worker"]
