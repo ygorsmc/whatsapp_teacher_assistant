@@ -94,14 +94,14 @@ async def seed():
             {"id": student_id, "phone": phone}
         )
         
-        # Create a fake class
+        # Create a fake class (teacher_id = admin: posse por turma, igual à sync)
         class_id = "00000000-0000-0000-0000-000000000004"
         await session.execute(
             text("""
-                INSERT INTO "Classes" (id, course_id, name, current_lesson_number)
-                VALUES (:id, :course_id, 'Turma Teste', 1)
+                INSERT INTO "Classes" (id, course_id, teacher_id, name, current_lesson_number)
+                VALUES (:id, :course_id, :teacher_id, 'Turma Teste', 1)
             """),
-            {"id": class_id, "course_id": course_id}
+            {"id": class_id, "course_id": course_id, "teacher_id": teacher_id}
         )
         
         # Enroll the student

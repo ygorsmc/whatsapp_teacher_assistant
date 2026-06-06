@@ -1,19 +1,39 @@
 """
-Spreadsheet Sync Module - Synchronizes Google Sheets rows into the Azure SQL Database.
-Uses MERGE statements for MSSQL compatibility.
+Spreadsheet Sync Module — Sincroniza o Google Sheet com o banco.
+
+Layout (abas separadas):
+  - "Professores": Nome | Telefone | Curso (Pasta) | Turma
+        → tabela Teachers + mapa de posse por turma
+  - "Alunos":      Nome | Telefone | Papel | Curso | Turma | H1 | H2 | H3 | Status
+        → Students / Courses / Classes / StudentEnrollment / StudentSchedule
+  - "Turmas":      Turma | Curso | Data Início | Seg..Dom
+        → calendário das Classes (start_date + schedule_map)
+  - "Lista_Pastas": nomes das pastas/cursos (não consumida aqui)
+
+Posse por turma: cada linha de "Professores" define o dono de uma (Curso, Turma)
+→ Classes.teacher_id. Courses.teacher_id recebe o primeiro professor visto para o
+curso (FK + fallback para o contexto do aluno). Turmas sem professor explícito
+caem no Admin de bootstrap e são reportadas em stats["classes_sem_professor"].
+
+Compatível com PostgreSQL (produção) e SQLite (dev local) — ambos via ON CONFLICT.
 """
 
 import structlog
 import re
 import json
 from typing import cast
-from datetime import datetime, timezone, timedelta
+from collections import defaultdict
+from datetime import datetime, timezone, timedelta, date
 from sqlalchemy import text
-from src.db.database import AsyncSessionLocal
+from src.db.database import AsyncSessionLocal, BOOTSTRAP_ADMIN_ID
 from src.drive.client import drive_client
 from src.shared.config import settings
 
 logger = structlog.get_logger(__name__)
+
+ACTIVE_VALUES = ("ativo", "active", "1", "true")
+_DATE_FORMATS = ("%d/%m/%Y", "%Y-%m-%d", "%Y-%m-%d %H:%M:%S", "%d/%m/%Y %H:%M:%S")
+
 
 def clean_phone(phone: str) -> str:
     """Removes non-numeric characters from the phone number."""
@@ -24,6 +44,7 @@ def clean_phone(phone: str) -> str:
         digits = "55" + digits
     return digits
 
+
 def generate_id(prefix: str, seed: str) -> str:
     """Generates a deterministic ID based on a string seed."""
     import hashlib
@@ -31,436 +52,320 @@ def generate_id(prefix: str, seed: str) -> str:
     return f"{prefix}_{h}"
 
 
-def _is_mssql(url: str) -> bool:
-    """Check if the database URL points to MSSQL."""
-    return "mssql" in url.lower() or "aioodbc" in url.lower()
+def _cell(row, idx: int, default: str = "") -> str:
+    """Lê a célula `idx` como string limpa, tolerando linhas curtas/None."""
+    if idx < len(row) and row[idx] is not None:
+        return str(row[idx]).strip()
+    return default
+
+
+def _parse_date(value: str) -> date | None:
+    """Tenta parsear a data em formatos comuns (BR e ISO)."""
+    for fmt in _DATE_FORMATS:
+        try:
+            return datetime.strptime(value, fmt).date()
+        except ValueError:
+            continue
+    return None
 
 
 async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
     """
-    Reads the Google Sheet and synchronizes Students, Teachers, Courses, and Schedules.
-    Returns a summary of operations.
+    Lê o Google Sheet (abas Professores/Alunos/Turmas) e sincroniza o banco.
+    Retorna um resumo das operações.
     """
     sheet_id = sheet_id or settings.GOOGLE_SHEET_ID
     if not sheet_id:
         logger.error("No GOOGLE_SHEET_ID configured.")
         return {"error": "Missing GOOGLE_SHEET_ID"}
-        
+
+    # --- Leitura das abas ---
     try:
-        # Read from the first sheet instead of forcing a specific sheet name
-        rows = await drive_client.get_spreadsheet_data(sheet_id, "A2:J1000")
+        prof_rows = await drive_client.get_spreadsheet_data(sheet_id, "Professores!A2:D1000")
     except Exception as e:
-        logger.error("Failed to read Google Sheet", error=str(e))
-        return {"error": f"Drive API Error: {str(e)}"}
+        prof_rows = []
+        logger.warning("Aba 'Professores' não encontrada ou ilegível", error=str(e)[:200])
 
-    if not rows:
-        return {"error": "No data found or sheet 'Alunos' doesn't exist."}
+    try:
+        alunos_rows = await drive_client.get_spreadsheet_data(sheet_id, "Alunos!A2:I1000")
+    except Exception as e:
+        logger.error("Falha ao ler a aba 'Alunos'", error=str(e))
+        return {"error": f"Drive API Error (Alunos): {str(e)}"}
 
-    use_mssql = _is_mssql(settings.DATABASE_URL)
+    if not alunos_rows and not prof_rows:
+        return {"error": "Nenhum dado encontrado nas abas 'Alunos'/'Professores'."}
+
+    # Importa lazy para evitar import circular (scheduler_worker importa esta sync).
+    from src.workers.scheduler_worker import compute_next_trigger
+
     stats = {"teachers_upserted": 0, "students_upserted": 0, "courses_upserted": 0, "schedules_upserted": 0}
-    default_teacher_id = None
+    course_owner: dict[str, str] = {}                 # course_name -> teacher_id (dono do curso)
+    class_owner: dict[tuple[str, str], str] = {}      # (course_name, class_name) -> teacher_id
+    classes_sem_professor: set[str] = set()
+    upserted_teacher_ids: set[str] = set()
+
+    def resolve_class_teacher(course_name: str, class_name: str) -> str:
+        """Dono da turma: específico (Professores) > dono do curso > Admin."""
+        tid = class_owner.get((course_name, class_name))
+        if tid:
+            return tid
+        tid = course_owner.get(course_name)
+        if tid:
+            return tid
+        return BOOTSTRAP_ADMIN_ID
 
     async with AsyncSessionLocal() as session:
-        # Snapshot before
-        teachers_before = (await session.execute(text('SELECT count(*) FROM \"Teachers\"'))).scalar()
-        students_before = (await session.execute(text('SELECT count(*) FROM \"Students\"'))).scalar()
-        courses_before = (await session.execute(text('SELECT count(*) FROM \"Courses\"'))).scalar()
-        schedules_before = (await session.execute(text('SELECT count(*) FROM \"StudentSchedule\"'))).scalar()
+        # Snapshot antes
+        teachers_before = (await session.execute(text('SELECT count(*) FROM "Teachers"'))).scalar()
+        students_before = (await session.execute(text('SELECT count(*) FROM "Students"'))).scalar()
+        courses_before = (await session.execute(text('SELECT count(*) FROM "Courses"'))).scalar()
+        schedules_before = (await session.execute(text('SELECT count(*) FROM "StudentSchedule"'))).scalar()
 
-        # Pass 1: Upsert Teachers first (so Courses have an owner)
-        for row in rows:
-            if len(row) < 3:
+        # ===== Pass 0: Professores → Teachers + mapas de posse =====
+        for row in prof_rows:
+            name = _cell(row, 0)
+            phone = clean_phone(_cell(row, 1))
+            course_name = _cell(row, 2)
+            class_name = _cell(row, 3)
+            if not name or not phone:
                 continue
-                
-            name = row[0].strip()
-            phone = clean_phone(row[1])
-            role = str(row[2]).strip().lower()
-            # Status fica na coluna I (índice 8), igual aos alunos no Pass 2.
-            # Antes lia row[7] (Horário 3), que é vazio nas linhas de professor,
-            # marcando o professor como inativo a cada sync.
-            status_val = row[8].strip().lower() if len(row) > 8 else "ativo"
-            is_active = True if status_val in ("ativo", "active", "1", "true") else False
 
-            if role == "professor":
-                teacher_id = generate_id("tea", phone)
-                if not default_teacher_id:
-                    default_teacher_id = teacher_id
+            teacher_id = generate_id("tea", phone)
+            res = await session.execute(
+                text("""
+                    INSERT INTO "Teachers" (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
+                    VALUES (:id, :name, 'Diversos', :phone, 'Seja amigável e direto.', 'Fora do escopo.', true)
+                    ON CONFLICT(phone) DO UPDATE SET
+                        name = excluded.name,
+                        is_active = true,
+                        updated_at = CURRENT_TIMESTAMP
+                    RETURNING id
+                """),
+                {"id": teacher_id, "name": name, "phone": phone},
+            )
+            teacher_id = cast(str, res.scalar())
+            upserted_teacher_ids.add(teacher_id)
 
-                if use_mssql:
-                    await session.execute(
-                        text("""
-                            MERGE INTO "Teachers" AS target
-                            USING (SELECT :phone AS phone) AS source
-                            ON target.phone = source.phone
-                            WHEN MATCHED THEN UPDATE SET
-                                name = :name,
-                                is_active = :is_active,
-                                updated_at = GETUTCDATE()
-                            WHEN NOT MATCHED THEN INSERT (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
-                                VALUES (:id, :name, 'Diversos', :phone, 'Seja amigável e direto.', 'Fora do escopo.', :is_active);
-                        """),
-                        {"id": teacher_id, "name": name, "phone": phone, "is_active": is_active}
-                    )
-                    res = await session.execute(text('SELECT id FROM \"Teachers\" WHERE phone = :phone'), {"phone": phone})
-                    teacher_id = cast(str, res.scalar())
-                    if default_teacher_id == generate_id('tea', phone):
-                        default_teacher_id = teacher_id
-                else:
-                    res = await session.execute(
-                        text("""
-                            INSERT INTO "Teachers" (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
-                            VALUES (:id, :name, 'Diversos', :phone, 'Seja amigável e direto.', 'Fora do escopo.', :is_active)
-                            ON CONFLICT(phone) DO UPDATE SET 
-                                name=excluded.name, 
-                                is_active=excluded.is_active,
-                                updated_at=CURRENT_TIMESTAMP
-                            RETURNING id
-                        """),
-                        {"id": teacher_id, "name": name, "phone": phone, "is_active": is_active}
-                    )
-                    teacher_id = cast(str, res.scalar())
-                    if default_teacher_id == generate_id('tea', phone):
-                        default_teacher_id = teacher_id
-                stats["teachers_upserted"] += 1
-                
-        # Fallback if no teacher defined in sheet (needed for course foreign key)
-        if not default_teacher_id:
-            default_teacher_id = "tea_default"
-            if use_mssql:
-                await session.execute(
-                    text("""
-                        MERGE INTO "Teachers" AS target
-                        USING (SELECT :id AS id) AS source
-                        ON target.id = source.id
-                        WHEN NOT MATCHED THEN INSERT (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
-                            VALUES (:id, 'Professor Default', 'Geral', '00000000', 'Seja prestativo.', 'Não sei.', true);
-                    """), {"id": default_teacher_id}
-                )
-            else:
-                await session.execute(
-                    text("""
-                        INSERT INTO "Teachers" (id, name, subject, phone, assistant_persona, out_of_scope_message, is_active)
-                        VALUES (:id, 'Professor Default', 'Geral', '00000000', 'Seja prestativo.', 'Não sei.', true)
-                        ON CONFLICT DO NOTHING
-                    """), {"id": default_teacher_id}
-                )
+            if course_name:
+                course_owner.setdefault(course_name, teacher_id)
+                if class_name:
+                    class_owner[(course_name, class_name)] = teacher_id
 
-        # Pass 2: Upsert Students, Courses, Enrollments, and Schedules
-        from collections import defaultdict
-        student_active_courses = defaultdict(set)
+        stats["teachers_upserted"] = len(upserted_teacher_ids)
+
+        # ===== Pass 1: Alunos → Students/Courses/Classes/Enrollments/Schedules =====
+        student_active_classes = defaultdict(set)
         student_active_schedules = defaultdict(set)
-        
-        for row in rows:
-            if len(row) < 3:
-                continue
-                
-            name = row[0].strip()
-            phone = clean_phone(row[1])
-            role = str(row[2]).strip().lower()
-            course_name = row[3].strip() if len(row) > 3 else ""
-            class_name = row[4].strip() if len(row) > 4 else "Turma Única"
-            
-            # Horários: Colunas F(5), G(6), H(7)
-            hours = []
-            for idx in [5, 6, 7]:
-                if len(row) > idx and row[idx].strip():
-                    hours.append(row[idx].strip())
-            
-            # Status: Coluna I(8)
-            status_val = row[8].strip().lower() if len(row) > 8 else "ativo"
-            is_active = True if status_val in ("ativo", "active", "1", "true") else False
 
-            if role == "aluno" and phone:
-                student_id = generate_id("stu", phone)
-                
-                # 1. Upsert Student
-                if use_mssql:
+        for row in alunos_rows:
+            name = _cell(row, 0)
+            phone = clean_phone(_cell(row, 1))
+            role = _cell(row, 2).lower()
+            course_name = _cell(row, 3)
+            class_name = _cell(row, 4) or "Turma Única"
+            hours = [_cell(row, i) for i in (5, 6, 7) if _cell(row, i)]
+            status_val = (_cell(row, 8) or "ativo").lower()
+            is_active = status_val in ACTIVE_VALUES
+
+            # A aba "Alunos" deve conter só alunos; ignora qualquer linha marcada como professor.
+            if role and role != "aluno":
+                continue
+            if not phone:
+                continue
+
+            # 1. Upsert Student
+            student_id = generate_id("stu", phone)
+            res = await session.execute(
+                text("""
+                    INSERT INTO "Students" (id, name, phone, is_active)
+                    VALUES (:id, :name, :phone, :is_active)
+                    ON CONFLICT(phone) DO UPDATE SET
+                        name = excluded.name,
+                        is_active = excluded.is_active,
+                        updated_at = CURRENT_TIMESTAMP
+                    RETURNING id
+                """),
+                {"id": student_id, "name": name, "phone": phone, "is_active": is_active},
+            )
+            student_id = cast(str, res.scalar())
+            stats["students_upserted"] += 1
+
+            if not course_name:
+                continue  # aluno sem curso atribuído
+
+            # 2. Upsert Course (dono = primeiro professor do curso, ou Admin)
+            course_id = generate_id("crs", course_name)
+            owner_tid = course_owner.get(course_name, BOOTSTRAP_ADMIN_ID)
+            await session.execute(
+                text("""
+                    INSERT INTO "Courses" (id, teacher_id, name, is_active)
+                    VALUES (:id, :tid, :name, true)
+                    ON CONFLICT(id) DO UPDATE SET
+                        teacher_id = excluded.teacher_id,
+                        name = excluded.name,
+                        is_active = true,
+                        updated_at = CURRENT_TIMESTAMP
+                """),
+                {"id": course_id, "tid": owner_tid, "name": course_name},
+            )
+            stats["courses_upserted"] += 1
+
+            # 2.5 Upsert Class (dono por turma)
+            class_tid = resolve_class_teacher(course_name, class_name)
+            if (course_name, class_name) not in class_owner:
+                classes_sem_professor.add(f"{course_name} / {class_name}")
+            class_id = generate_id("cls", f"{course_id}_{class_name}")
+            await session.execute(
+                text("""
+                    INSERT INTO "Classes" (id, course_id, teacher_id, name, current_lesson_number)
+                    VALUES (:id, :cid, :tid, :name, 1)
+                    ON CONFLICT(id) DO UPDATE SET
+                        teacher_id = excluded.teacher_id,
+                        name = excluded.name,
+                        updated_at = CURRENT_TIMESTAMP
+                """),
+                {"id": class_id, "cid": course_id, "tid": class_tid, "name": class_name},
+            )
+
+            # 3. Upsert Enrollment
+            enroll_id = generate_id("enr", f"{student_id}_{class_id}")
+            await session.execute(
+                text("""
+                    INSERT INTO "StudentEnrollment" (enrollment_id, student_id, class_id)
+                    VALUES (:id, :sid, :cid)
+                    ON CONFLICT(student_id, class_id) DO NOTHING
+                """),
+                {"id": enroll_id, "sid": student_id, "cid": class_id},
+            )
+            student_active_classes[student_id].add(class_id)
+
+            # 4. Upsert Schedules (horários de revisão)
+            for h in hours:
+                if ":" not in h:
+                    continue
+                try:
+                    h_clean = h[:5]
+                    next_trigger = compute_next_trigger(h_clean)
+                    sched_id = generate_id("sch", f"{student_id}_{course_id}_{h_clean}")
                     await session.execute(
                         text("""
-                            MERGE INTO "Students" AS target
-                            USING (SELECT :phone AS phone) AS source
-                            ON target.phone = source.phone
-                            WHEN MATCHED THEN UPDATE SET
-                                name = :name,
-                                is_active = :is_active,
-                                updated_at = GETUTCDATE()
-                            WHEN NOT MATCHED THEN INSERT (id, name, phone, is_active)
-                                VALUES (:id, :name, :phone, :is_active);
+                            INSERT INTO "StudentSchedule"
+                                (schedule_id, student_id, course_id, template_name, preferred_hour, content_type, next_trigger_date, is_active, status)
+                            VALUES (:id, :sid, :cid, 'daily_review', :hr, 'review', :nt, :is_active, 'scheduled')
+                            ON CONFLICT(student_id, course_id, content_type, preferred_hour) DO UPDATE SET
+                                is_active = excluded.is_active,
+                                status = 'scheduled',
+                                updated_at = CURRENT_TIMESTAMP
                         """),
-                        {"id": student_id, "name": name, "phone": phone, "is_active": is_active}
+                        {"id": sched_id, "sid": student_id, "cid": course_id, "hr": h_clean, "nt": next_trigger, "is_active": is_active},
                     )
-                    res = await session.execute(text('SELECT id FROM \"Students\" WHERE phone = :phone'), {"phone": phone})
-                    student_id = cast(str, res.scalar())
-                else:
-                    res = await session.execute(
-                        text("""
-                            INSERT INTO "Students" (id, name, phone, is_active)
-                            VALUES (:id, :name, :phone, :is_active)
-                            ON CONFLICT(phone) DO UPDATE SET 
-                                name=excluded.name, 
-                                is_active=excluded.is_active,
-                                updated_at=CURRENT_TIMESTAMP
-                            RETURNING id
-                        """),
-                        {"id": student_id, "name": name, "phone": phone, "is_active": is_active}
-                    )
-                    student_id = cast(str, res.scalar())
-                stats["students_upserted"] += 1
-                
-                if not course_name:
-                    continue # Student has no course assigned
-                    
-                # 2. Upsert Course
-                course_id = generate_id("crs", course_name)
-                if use_mssql:
-                    await session.execute(
-                        text("""
-                            MERGE INTO "Courses" AS target
-                            USING (SELECT :id AS id) AS source
-                            ON target.id = source.id
-                            WHEN NOT MATCHED THEN INSERT (id, teacher_id, name, is_active)
-                                VALUES (:id, :tid, :name, true);
-                        """),
-                        {"id": course_id, "tid": default_teacher_id, "name": course_name}
-                    )
-                else:
-                    await session.execute(
-                        text("""
-                            INSERT INTO "Courses" (id, teacher_id, name, is_active)
-                            VALUES (:id, :tid, :name, true)
-                            ON CONFLICT DO NOTHING
-                        """),
-                        {"id": course_id, "tid": default_teacher_id, "name": course_name}
-                    )
-                stats["courses_upserted"] += 1
-                
-                # 2.5 Upsert Class
-                class_id = generate_id("cls", f"{course_id}_{class_name}")
-                if use_mssql:
-                    await session.execute(
-                        text("""
-                            MERGE INTO "Classes" AS target
-                            USING (SELECT :id AS id) AS source
-                            ON target.id = source.id
-                            WHEN NOT MATCHED THEN INSERT (id, course_id, name, current_lesson_number)
-                                VALUES (:id, :cid, :name, 1);
-                        """),
-                        {"id": class_id, "cid": course_id, "name": class_name}
-                    )
-                else:
-                    await session.execute(
-                        text("""
-                            INSERT INTO "Classes" (id, course_id, name, current_lesson_number)
-                            VALUES (:id, :cid, :name, 1)
-                            ON CONFLICT DO NOTHING
-                        """),
-                        {"id": class_id, "cid": course_id, "name": class_name}
-                    )
-                
-                # 3. Upsert Enrollment
-                enroll_id = generate_id("enr", f"{student_id}_{class_id}")
-                if use_mssql:
-                    await session.execute(
-                        text("""
-                            MERGE INTO "StudentEnrollment" AS target
-                            USING (SELECT :sid AS student_id, :cid AS class_id) AS source
-                            ON target.student_id = source.student_id AND target.class_id = source.class_id
-                            WHEN NOT MATCHED THEN INSERT (enrollment_id, student_id, class_id)
-                                VALUES (:id, :sid, :cid);
-                        """),
-                        {"id": enroll_id, "sid": student_id, "cid": class_id}
-                    )
-                else:
-                    await session.execute(
-                        text("""
-                            INSERT INTO "StudentEnrollment" (enrollment_id, student_id, class_id)
-                            VALUES (:id, :sid, :cid)
-                            ON CONFLICT(student_id, class_id) DO NOTHING
-                        """),
-                        {"id": enroll_id, "sid": student_id, "cid": class_id}
-                    )
-                student_active_courses[student_id].add(class_id)
-                
-                # 4. Upsert Schedules
-                from src.workers.scheduler_worker import compute_next_trigger
-                for h in hours:
-                    if not h or ":" not in h:
-                        continue # Empty or invalid hour format
-                        
-                    try:
-                        # Extract "HH:MM" 
-                        h_clean = h[:5]
-                        next_trigger = compute_next_trigger(h_clean)
-                        
-                        sched_id = generate_id("sch", f"{student_id}_{course_id}_{h_clean}")
-                        if use_mssql:
-                            await session.execute(
-                                text("""
-                                    MERGE INTO "StudentSchedule" AS target
-                                    USING (SELECT :sid AS student_id, :cid AS course_id, :ct AS content_type, :hr AS preferred_hour) AS source
-                                    ON target.student_id = source.student_id 
-                                       AND target.course_id = source.course_id 
-                                       AND target.content_type = source.content_type 
-                                       AND target.preferred_hour = source.preferred_hour
-                                    WHEN MATCHED THEN UPDATE SET
-                                        is_active = :is_active,
-                                        status = 'scheduled',
-                                        updated_at = GETUTCDATE()
-                                    WHEN NOT MATCHED THEN INSERT 
-                                        (schedule_id, student_id, course_id, template_name, preferred_hour, content_type, next_trigger_date, is_active, status)
-                                        VALUES (:id, :sid, :cid, 'daily_review', :hr, :ct, :nt, :is_active, 'scheduled');
-                                """),
-                                {"id": sched_id, "sid": student_id, "cid": course_id, "hr": h_clean, "ct": "review", "nt": next_trigger, "is_active": is_active}
-                            )
-                        else:
-                            await session.execute(
-                                text("""
-                                    INSERT INTO "StudentSchedule" 
-                                    (schedule_id, student_id, course_id, template_name, preferred_hour, content_type, next_trigger_date, is_active, status)
-                                    VALUES (:id, :sid, :cid, 'daily_review', :hr, 'review', :nt, :is_active, 'scheduled')
-                                    ON CONFLICT(student_id, course_id, content_type, preferred_hour) DO UPDATE SET
-                                        is_active=excluded.is_active,
-                                        status='scheduled',
-                                        updated_at=CURRENT_TIMESTAMP
-                                """),
-                                {"id": sched_id, "sid": student_id, "cid": course_id, "hr": h_clean, "nt": next_trigger, "is_active": is_active}
-                            )
-                        stats["schedules_upserted"] += 1
-                        student_active_schedules[student_id].add(sched_id)
-                    except Exception as e:
-                        logger.warning(f"Invalid hour format '{h}' for student {name}: {e}")
-                        
-        # Pass 1.5: Sync Calendar (Turmas Tab)
+                    stats["schedules_upserted"] += 1
+                    student_active_schedules[student_id].add(sched_id)
+                except Exception as e:
+                    logger.warning(f"Horário inválido '{h}' para o aluno {name}: {e}")
+
+        # ===== Pass 2: Turmas → calendário das Classes =====
         try:
             turmas_rows = await drive_client.get_spreadsheet_data(sheet_id, "Turmas!A2:J1000")
-            for row in turmas_rows:
-                if len(row) < 2:
-                    continue
-                
-                class_name = row[0].strip()
-                course_name = row[1].strip()
-                start_date_str = row[2].strip() if len(row) > 2 else ""
-                
-                start_date_obj = None
-                if start_date_str:
-                    try:
-                        start_date_obj = datetime.strptime(start_date_str, "%d/%m/%Y").date()
-                    except ValueError:
-                        logger.warning(f"Invalid date format for class {class_name}: {start_date_str}")
-                        
-                schedule_map = {}
-                for i in range(7):
-                    idx = 3 + i
-                    val = row[idx].strip() if len(row) > idx else ""
-                    if val and val.lower() != "sem aula":
-                        schedule_map[str(i)] = val
-                        
-                schedule_map_json = json.dumps(schedule_map) if schedule_map else None
-                
-                course_id = generate_id("crs", course_name)
-
-                if use_mssql:
-                    await session.execute(
-                        text("""
-                            MERGE INTO "Courses" AS target
-                            USING (SELECT :id AS id) AS source
-                            ON target.id = source.id
-                            WHEN NOT MATCHED THEN INSERT (id, teacher_id, name, is_active)
-                                VALUES (:id, :tid, :name, true);
-                        """),
-                        {"id": course_id, "tid": default_teacher_id, "name": course_name}
-                    )
-                else:
-                    await session.execute(
-                        text("""
-                            INSERT INTO "Courses" (id, teacher_id, name, is_active)
-                            VALUES (:id, :tid, :name, true)
-                            ON CONFLICT DO NOTHING
-                        """),
-                        {"id": course_id, "tid": default_teacher_id, "name": course_name}
-                    )
-
-                class_id = generate_id("cls", f"{course_id}_{class_name}")
-                
-                current_lesson = 1
-                if start_date_obj:
-                    local_tz = timezone(timedelta(hours=settings.TIMEZONE_OFFSET_HOURS))
-                    hoje = datetime.now(local_tz).date()
-                    if start_date_obj > hoje:
-                        current_lesson = 0
-
-                if use_mssql:
-                    await session.execute(
-                        text("""
-                            MERGE INTO "Classes" AS target
-                            USING (SELECT :id AS id) AS source
-                            ON target.id = source.id
-                            WHEN MATCHED THEN UPDATE SET
-                                start_date = :start_date,
-                                schedule_map = :sched_map,
-                                current_lesson_number = CASE WHEN :start_date > CAST(GETUTCDATE() AS DATE) THEN 0 ELSE target.current_lesson_number END,
-                                updated_at = GETUTCDATE()
-                            WHEN NOT MATCHED THEN INSERT (id, course_id, name, current_lesson_number, start_date, schedule_map)
-                                VALUES (:id, :cid, :name, :lesson, :start_date, :sched_map);
-                        """),
-                        {
-                            "id": class_id, 
-                            "cid": course_id, 
-                            "name": class_name, 
-                            "lesson": current_lesson,
-                            "start_date": start_date_obj if start_date_obj else None,
-                            "sched_map": schedule_map_json
-                        }
-                    )
-                else:
-                    await session.execute(
-                        text("""
-                            INSERT INTO "Classes" (id, course_id, name, current_lesson_number, start_date, schedule_map)
-                            VALUES (:id, :cid, :name, :lesson, :start_date, :sched_map)
-                            ON CONFLICT(id) DO UPDATE SET 
-                                start_date=excluded.start_date,
-                                schedule_map=excluded.schedule_map,
-                                current_lesson_number=CASE WHEN excluded.start_date > CURRENT_DATE THEN 0 ELSE "Classes".current_lesson_number END,
-                                updated_at=CURRENT_TIMESTAMP
-                        """),
-                        {
-                            "id": class_id, 
-                            "cid": course_id, 
-                            "name": class_name, 
-                            "lesson": current_lesson,
-                            "start_date": start_date_obj if start_date_obj else None,
-                            "sched_map": schedule_map_json
-                        }
-                    )
         except Exception as e:
-            logger.warning("Failed to read Turmas sheet, maybe it doesn't exist yet", error=str(e))
+            turmas_rows = []
+            logger.warning("Aba 'Turmas' não encontrada", error=str(e)[:200])
 
-        # Pass 3: Cleanup orphaned enrollments and schedules for the synced students
-        for sid, class_ids in student_active_courses.items():
+        for row in turmas_rows:
+            class_name = _cell(row, 0)
+            course_name = _cell(row, 1)
+            if not class_name or not course_name:
+                continue
+
+            start_date_str = _cell(row, 2)
+            start_date_obj = _parse_date(start_date_str) if start_date_str else None
+            if start_date_str and start_date_obj is None:
+                logger.warning(f"Data inválida na turma {class_name}: {start_date_str}")
+
+            schedule_map = {}
+            for i in range(7):
+                val = _cell(row, 3 + i)
+                if val and val.lower() not in ("sem aula", "-"):
+                    schedule_map[str(i)] = val
+            schedule_map_json = json.dumps(schedule_map) if schedule_map else None
+
+            course_id = generate_id("crs", course_name)
+            owner_tid = course_owner.get(course_name, BOOTSTRAP_ADMIN_ID)
+            await session.execute(
+                text("""
+                    INSERT INTO "Courses" (id, teacher_id, name, is_active)
+                    VALUES (:id, :tid, :name, true)
+                    ON CONFLICT(id) DO UPDATE SET
+                        teacher_id = excluded.teacher_id,
+                        name = excluded.name,
+                        is_active = true,
+                        updated_at = CURRENT_TIMESTAMP
+                """),
+                {"id": course_id, "tid": owner_tid, "name": course_name},
+            )
+
+            class_tid = resolve_class_teacher(course_name, class_name)
+            if (course_name, class_name) not in class_owner:
+                classes_sem_professor.add(f"{course_name} / {class_name}")
+
+            class_id = generate_id("cls", f"{course_id}_{class_name}")
+            current_lesson = 1
+            if start_date_obj:
+                local_tz = timezone(timedelta(hours=settings.TIMEZONE_OFFSET_HOURS))
+                if start_date_obj > datetime.now(local_tz).date():
+                    current_lesson = 0
+
+            await session.execute(
+                text("""
+                    INSERT INTO "Classes" (id, course_id, teacher_id, name, current_lesson_number, start_date, schedule_map)
+                    VALUES (:id, :cid, :tid, :name, :lesson, :start_date, :sched_map)
+                    ON CONFLICT(id) DO UPDATE SET
+                        teacher_id = excluded.teacher_id,
+                        start_date = excluded.start_date,
+                        schedule_map = excluded.schedule_map,
+                        current_lesson_number = CASE WHEN excluded.start_date > CURRENT_DATE THEN 0 ELSE "Classes".current_lesson_number END,
+                        updated_at = CURRENT_TIMESTAMP
+                """),
+                {
+                    "id": class_id,
+                    "cid": course_id,
+                    "tid": class_tid,
+                    "name": class_name,
+                    "lesson": current_lesson,
+                    "start_date": start_date_obj,
+                    "sched_map": schedule_map_json,
+                },
+            )
+
+        # ===== Pass 3: Limpeza de matrículas/agendamentos órfãos (alunos sincronizados) =====
+        for sid, class_ids in student_active_classes.items():
             if class_ids:
-                placeholders = ','.join(f"'{cid}'" for cid in class_ids)
+                placeholders = ",".join(f"'{cid}'" for cid in class_ids)
                 await session.execute(text(f"DELETE FROM \"StudentEnrollment\" WHERE student_id = '{sid}' AND class_id NOT IN ({placeholders})"))
             else:
                 await session.execute(text(f"DELETE FROM \"StudentEnrollment\" WHERE student_id = '{sid}'"))
-                
+
         for sid, sched_ids in student_active_schedules.items():
             if sched_ids:
-                placeholders = ','.join(f"'{sch}'" for sch in sched_ids)
+                placeholders = ",".join(f"'{sch}'" for sch in sched_ids)
                 await session.execute(text(f"DELETE FROM \"StudentSchedule\" WHERE student_id = '{sid}' AND schedule_id NOT IN ({placeholders})"))
             else:
                 await session.execute(text(f"DELETE FROM \"StudentSchedule\" WHERE student_id = '{sid}'"))
 
         await session.commit()
-        
-        # Snapshot after
+
+        # Snapshot depois
         stats["teachers_before"] = teachers_before or 0
-        stats["teachers_after"] = (await session.execute(text('SELECT count(*) FROM \"Teachers\"'))).scalar() or 0
+        stats["teachers_after"] = (await session.execute(text('SELECT count(*) FROM "Teachers"'))).scalar() or 0
         stats["students_before"] = students_before or 0
-        stats["students_after"] = (await session.execute(text('SELECT count(*) FROM \"Students\"'))).scalar() or 0
+        stats["students_after"] = (await session.execute(text('SELECT count(*) FROM "Students"'))).scalar() or 0
         stats["courses_before"] = courses_before or 0
-        stats["courses_after"] = (await session.execute(text('SELECT count(*) FROM \"Courses\"'))).scalar() or 0
+        stats["courses_after"] = (await session.execute(text('SELECT count(*) FROM "Courses"'))).scalar() or 0
         stats["schedules_before"] = schedules_before or 0
-        stats["schedules_after"] = (await session.execute(text('SELECT count(*) FROM \"StudentSchedule\"'))).scalar() or 0
+        stats["schedules_after"] = (await session.execute(text('SELECT count(*) FROM "StudentSchedule"'))).scalar() or 0
+
+        # Turmas que não têm professor explícito na aba "Professores" (caíram no Admin).
+        stats["classes_sem_professor"] = sorted(classes_sem_professor)
 
         # Alunos com agendamento ativo mas SEM endereço de entrega no canal atual.
         # No Telegram (query_column = telegram_chat_id) isso quer dizer que o aluno ainda

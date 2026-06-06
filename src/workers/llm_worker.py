@@ -98,12 +98,14 @@ async def get_student_context(sender_id: str, query_column: str, course_id: str 
     
     async with AsyncSessionLocal() as session:
         # Join tables to get the full context in one query
+        # O professor do aluno é o da TURMA dele (posse por turma: CourseClass.teacher_id).
+        # A migration faz backfill (turma herda o professor do curso), então nunca fica NULL.
         stmt = (
             select(Student, StudentEnrollment, CourseClass, Course, Teacher)
             .join(StudentEnrollment, Student.id == StudentEnrollment.student_id)
             .join(CourseClass, StudentEnrollment.class_id == CourseClass.id)
             .join(Course, CourseClass.course_id == Course.id)
-            .join(Teacher, Course.teacher_id == Teacher.id)
+            .join(Teacher, CourseClass.teacher_id == Teacher.id)
             .where(getattr(Student, query_column) == sender_id)
         )
         

@@ -5,7 +5,8 @@ from src.shared.telemetry import logger
 from src.db.database import AsyncSessionLocal
 from sqlalchemy import text
 from src.shared.constants.messages import (
-    CMD_SYNC_ALUNOS_START, CMD_SYNC_MATERIAIS_START, CMD_SYNC_MATERIAIS_SUCCESS, CMD_SYNC_SUCCESS, CMD_SYNC_ERROR, CMD_SYNC_UNLINKED_WARNING
+    CMD_SYNC_ALUNOS_START, CMD_SYNC_MATERIAIS_START, CMD_SYNC_MATERIAIS_SUCCESS, CMD_SYNC_SUCCESS, CMD_SYNC_ERROR,
+    CMD_SYNC_UNLINKED_WARNING, CMD_SYNC_NO_TEACHER_WARNING
 )
 from src.shared.constants.commands import parse_command, CommandType
 
@@ -35,6 +36,12 @@ async def run_sync_alunos_command(channel, sender_id: str):
             if unlinked_names:
                 names_str = "\n".join(f"• {n}" for n in unlinked_names)
                 msg += CMD_SYNC_UNLINKED_WARNING.format(count=len(unlinked_names), names=names_str)
+            # Avisa o professor sobre turmas sem dono explícito na aba "Professores"
+            # (caíram no Admin) — /quiz e /aula não vão achá-las pelo professor real.
+            no_teacher = stats.get('classes_sem_professor', [])
+            if no_teacher:
+                names_str = "\n".join(f"• {n}" for n in no_teacher)
+                msg += CMD_SYNC_NO_TEACHER_WARNING.format(count=len(no_teacher), names=names_str)
             await channel.send_text(sender_id, msg)
     except Exception as e:
         await channel.send_text(sender_id, f"❌ Erro inesperado: {str(e)[:100]}")
@@ -74,8 +81,12 @@ async def run_list_cursos_command(channel, sender_id: str):
                 await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
             
+            # Posse por turma: lista cursos em que o professor é dono de pelo menos uma turma.
             result = await session.execute(
-                text('SELECT name, id FROM \"Courses\" WHERE teacher_id = :tid AND is_active = true'),
+                text('''SELECT DISTINCT crs.name, crs.id
+                        FROM "Courses" crs
+                        JOIN "Classes" cl ON cl.course_id = crs.id
+                        WHERE cl.teacher_id = :tid AND crs.is_active = true'''),
                 {"tid": teacher[0]}
             )
             courses = result.fetchall()
@@ -175,11 +186,11 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
                 await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
             
+            # Posse por turma: a turma precisa pertencer a este professor (c.teacher_id).
             stmt = text("""
-                SELECT c.id, c.current_lesson_number 
+                SELECT c.id, c.current_lesson_number
                 FROM "Classes" c
-                JOIN "Courses" crs ON c.course_id = crs.id
-                WHERE c.name ILIKE '%' || :cname || '%' AND crs.teacher_id = :tid
+                WHERE c.name ILIKE '%' || :cname || '%' AND c.teacher_id = :tid
             """)
             result = await session.execute(stmt, {"cname": class_name, "tid": teacher[0]})
             class_row = result.fetchone()
@@ -232,12 +243,11 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
                 await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
                 
-            # 2. Fetch Class & Course
+            # 2. Fetch Class & Course (posse por turma: c.teacher_id)
             stmt = text("""
-                SELECT c.id, c.current_lesson_number, crs.id as course_id, c.name
+                SELECT c.id, c.current_lesson_number, c.course_id, c.name
                 FROM "Classes" c
-                JOIN "Courses" crs ON c.course_id = crs.id
-                WHERE c.name ILIKE '%' || :cname || '%' AND crs.teacher_id = :tid
+                WHERE c.name ILIKE '%' || :cname || '%' AND c.teacher_id = :tid
             """)
             result = await session.execute(stmt, {"cname": class_name, "tid": teacher[0]})
             class_row = result.fetchone()

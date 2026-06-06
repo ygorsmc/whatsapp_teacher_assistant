@@ -16,9 +16,14 @@ class Course(Base):
 
 class CourseClass(Base):
     __tablename__ = "Classes"
-    
+
     id = Column(String(255), primary_key=True)
     course_id = Column(String(255), ForeignKey("Courses.id"), nullable=False)
+    # Dono da turma. A posse passou a ser por TURMA (não mais só por curso):
+    # um mesmo curso pode ter turmas de professores diferentes. Preenchido pela
+    # sync a partir da aba "Professores" (Curso + Turma). Nullable para tolerar
+    # turmas legadas antes do backfill da migration.
+    teacher_id = Column(String(255), ForeignKey("Teachers.id"), nullable=True, index=True)
     name = Column(String(255), nullable=False)
     current_lesson_number = Column(Integer, default=1, nullable=False)
     
