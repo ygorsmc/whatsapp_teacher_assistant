@@ -339,7 +339,7 @@ async def advance_classes_pointer():
                     SET current_lesson_number = :num, last_advanced_date = :hoje, updated_at = CURRENT_TIMESTAMP
                     WHERE id = :cid
                 """),
-                {"num": new_lesson, "hoje": hoje_str, "cid": class_id}
+                {"num": new_lesson, "hoje": hoje, "cid": class_id}
             )
             advanced_count += 1
             logger.info("class_pointer_advanced_auto", class_id=class_id, old_lesson=current_lesson, new_lesson=new_lesson)

@@ -115,7 +115,10 @@ class RedisStreamsQueue(IMessageQueue):
                             # Depending on config, you could auto dead-letter here
                             
             except Exception as e:
-                logger.error("redis_consume_error", error=str(e)[:500])
+                err_str = str(e)
+                if "Timeout" in err_str:
+                    continue
+                logger.error("redis_consume_error", error=err_str[:500])
                 await asyncio.sleep(5)
 
     async def close(self):

@@ -11,6 +11,7 @@ class Teacher(Base):
     phone = Column(String(255), unique=True, nullable=False)
     telegram_chat_id = Column(String(255), unique=True, nullable=True)
     is_active = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False, server_default="false", nullable=False)
     
     assistant_persona = Column(Text, nullable=False)
     out_of_scope_message = Column(Text, nullable=False)

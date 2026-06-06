@@ -71,7 +71,7 @@ async def run_list_cursos_command(channel, sender_id: str):
     try:
         async with AsyncSessionLocal() as session:
             query_col = channel.get_user_query_column()
-            result = await session.execute(text(f'SELECT id FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
+            result = await session.execute(text(f'SELECT id, is_admin FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
             teacher = result.fetchone()
             
             if not teacher:
@@ -79,7 +79,7 @@ async def run_list_cursos_command(channel, sender_id: str):
                 stu_phone = res_stu.scalar_one_or_none()
                 if stu_phone:
                     phone_suffix = stu_phone[-8:] if len(stu_phone) >= 8 else stu_phone
-                    res_tea = await session.execute(text('SELECT id FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
+                    res_tea = await session.execute(text('SELECT id, is_admin FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
                     teacher = res_tea.fetchone()
                     if teacher:
                         await session.execute(text(f'UPDATE "Teachers" SET {query_col} = :sid WHERE id = :tid'), {"sid": sender_id, "tid": teacher[0]})
@@ -89,14 +89,26 @@ async def run_list_cursos_command(channel, sender_id: str):
                 await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
             
-            # Posse por turma: lista cursos em que o professor é dono de pelo menos uma turma.
-            result = await session.execute(
-                text('''SELECT DISTINCT crs.name, crs.id
-                        FROM "Courses" crs
-                        JOIN "Classes" cl ON cl.course_id = crs.id
-                        WHERE cl.teacher_id = :tid AND crs.is_active = true'''),
-                {"tid": teacher[0]}
-            )
+            teacher_id = teacher[0]
+            is_admin = teacher[1]
+            
+            # Posse por turma: lista cursos em que o professor é dono de pelo menos uma turma,
+            # exceto se for admin (lista tudo).
+            if is_admin:
+                result = await session.execute(
+                    text('''SELECT DISTINCT crs.name, crs.id
+                            FROM "Courses" crs
+                            JOIN "Classes" cl ON cl.course_id = crs.id
+                            WHERE crs.is_active = true''')
+                )
+            else:
+                result = await session.execute(
+                    text('''SELECT DISTINCT crs.name, crs.id
+                            FROM "Courses" crs
+                            JOIN "Classes" cl ON cl.course_id = crs.id
+                            WHERE cl.teacher_id = :tid AND crs.is_active = true'''),
+                    {"tid": teacher_id}
+                )
             courses = result.fetchall()
             
             if not courses:
@@ -176,7 +188,7 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
 
         async with AsyncSessionLocal() as session:
             query_col = channel.get_user_query_column()
-            result = await session.execute(text(f'SELECT id FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
+            result = await session.execute(text(f'SELECT id, is_admin FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
             teacher = result.fetchone()
             
             if not teacher:
@@ -184,7 +196,7 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
                 stu_phone = res_stu.scalar_one_or_none()
                 if stu_phone:
                     phone_suffix = stu_phone[-8:] if len(stu_phone) >= 8 else stu_phone
-                    res_tea = await session.execute(text('SELECT id FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
+                    res_tea = await session.execute(text('SELECT id, is_admin FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
                     teacher = res_tea.fetchone()
                     if teacher:
                         await session.execute(text(f'UPDATE "Teachers" SET {query_col} = :sid WHERE id = :tid'), {"sid": sender_id, "tid": teacher[0]})
@@ -194,13 +206,25 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
                 await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
             
-            # Posse por turma: a turma precisa pertencer a este professor (c.teacher_id).
-            stmt = text("""
-                SELECT c.id, c.current_lesson_number
-                FROM "Classes" c
-                WHERE c.name ILIKE '%' || :cname || '%' AND c.teacher_id = :tid
-            """)
-            result = await session.execute(stmt, {"cname": class_name, "tid": teacher[0]})
+            teacher_id = teacher[0]
+            is_admin = teacher[1]
+            
+            # Posse por turma: a turma precisa pertencer a este professor, a menos que seja admin
+            if is_admin:
+                stmt = text("""
+                    SELECT c.id, c.current_lesson_number
+                    FROM "Classes" c
+                    WHERE c.name ILIKE '%' || :cname || '%'
+                """)
+                result = await session.execute(stmt, {"cname": class_name})
+            else:
+                stmt = text("""
+                    SELECT c.id, c.current_lesson_number
+                    FROM "Classes" c
+                    WHERE c.name ILIKE '%' || :cname || '%' AND c.teacher_id = :tid
+                """)
+                result = await session.execute(stmt, {"cname": class_name, "tid": teacher_id})
+                
             class_row = result.fetchone()
             
             if not class_row:
@@ -233,7 +257,7 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
         async with AsyncSessionLocal() as session:
             # 1. Fetch Teacher
             query_col = channel.get_user_query_column()
-            result = await session.execute(text(f'SELECT id, name, subject FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
+            result = await session.execute(text(f'SELECT id, name, subject, is_admin FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
             teacher = result.fetchone()
             
             if not teacher:
@@ -241,7 +265,7 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
                 stu_phone = res_stu.scalar_one_or_none()
                 if stu_phone:
                     phone_suffix = stu_phone[-8:] if len(stu_phone) >= 8 else stu_phone
-                    res_tea = await session.execute(text('SELECT id, name, subject FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
+                    res_tea = await session.execute(text('SELECT id, name, subject, is_admin FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
                     teacher = res_tea.fetchone()
                     if teacher:
                         await session.execute(text(f'UPDATE "Teachers" SET {query_col} = :sid WHERE id = :tid'), {"sid": sender_id, "tid": teacher[0]})
@@ -251,14 +275,27 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
                 await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
                 return
                 
-            # 2. Fetch Class & Course & Subject (posse por turma: c.teacher_id)
-            stmt = text("""
-                SELECT c.id, c.current_lesson_number, c.course_id, c.name, sub.name AS subject_name
-                FROM "Classes" c
-                LEFT JOIN "Subjects" sub ON sub.id = c.subject_id
-                WHERE c.name ILIKE '%' || :cname || '%' AND c.teacher_id = :tid
-            """)
-            result = await session.execute(stmt, {"cname": class_name, "tid": teacher[0]})
+            # 2. Fetch Class & Course & Subject (posse por turma: c.teacher_id, a menos que seja admin)
+            teacher_id = teacher[0]
+            is_admin = teacher[3]
+            
+            if is_admin:
+                stmt = text("""
+                    SELECT c.id, c.current_lesson_number, c.course_id, c.name, sub.name AS subject_name
+                    FROM "Classes" c
+                    LEFT JOIN "Subjects" sub ON sub.id = c.subject_id
+                    WHERE c.name ILIKE '%' || :cname || '%'
+                """)
+                result = await session.execute(stmt, {"cname": class_name})
+            else:
+                stmt = text("""
+                    SELECT c.id, c.current_lesson_number, c.course_id, c.name, sub.name AS subject_name
+                    FROM "Classes" c
+                    LEFT JOIN "Subjects" sub ON sub.id = c.subject_id
+                    WHERE c.name ILIKE '%' || :cname || '%' AND c.teacher_id = :tid
+                """)
+                result = await session.execute(stmt, {"cname": class_name, "tid": teacher_id})
+                
             class_row = result.fetchone()
 
             if not class_row:

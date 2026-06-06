@@ -93,7 +93,7 @@ async def generate_review(
     from src.cache.topic_cache import get_cached_topics, set_cached_topics
 
     # 2. Etapa 1: Extração de tópicos com Cache (Two-Step Variance)
-    topics = await get_cached_topics(course_id, current_lesson_number)
+    topics = await get_cached_topics(course_id, current_lesson_number, subject_name)
     
     if not topics:
         topic_prompt = TOPIC_EXTRACTION_PROMPT.format(context=lesson_content)
@@ -103,7 +103,7 @@ async def generate_review(
         if not topics:
             topics = ["Conceito Geral da Aula"]
             
-        await set_cached_topics(course_id, current_lesson_number, topics)
+        await set_cached_topics(course_id, current_lesson_number, topics, subject_name)
         
     chosen_topic = random.choice(topics)
     chosen_perspective = random.choice(REVIEW_PERSPECTIVES)

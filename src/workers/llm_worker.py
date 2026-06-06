@@ -58,7 +58,8 @@ async def run_rag_pipeline(student_context: dict, text: str) -> str:
         student=student,
         course_id=course.id,
         course_name=course.name,
-        current_lesson_id=str(student_context["class_obj"].current_lesson_number)
+        current_lesson_id=str(student_context["class_obj"].current_lesson_number),
+        subject_name=subject_name
     )
     
     # Append the RAG Context to the System Message
@@ -431,17 +432,22 @@ async def process_inbound(event: dict, ctx: MessageContext):
         if message_type == "text" and len(student_contexts) > 1:
             from src.llm.classifier import classify_course_intent
             
-            enrolled_courses = [
-                {"id": s_ctx["course"].id, "name": s_ctx["course"].name}
-                for s_ctx in student_contexts
-            ]
+            enrolled_courses = []
+            for s_ctx in student_contexts:
+                c_name = s_ctx["course"].name
+                if s_ctx.get("subject"):
+                    c_name += f" - {s_ctx['subject'].name}"
+                enrolled_courses.append({
+                    "id": s_ctx["class_obj"].id,
+                    "name": c_name
+                })
             
-            classified_course_id = await classify_course_intent(combined, enrolled_courses)
+            classified_class_id = await classify_course_intent(combined, enrolled_courses)
             
-            if classified_course_id:
+            if classified_class_id:
                 # Override the default context with the classified one
                 for s_ctx in student_contexts:
-                    if s_ctx["course"].id == classified_course_id:
+                    if s_ctx["class_obj"].id == classified_class_id:
                         student_context = s_ctx
                         break
             else:
@@ -449,8 +455,8 @@ async def process_inbound(event: dict, ctx: MessageContext):
                 course_list_str = "\n".join(f"- {c['name']}" for c in enrolled_courses)
                 ambiguous_msg = (
                     "🤔 Pareceu que você fez uma pergunta genérica, mas eu vi que você está "
-                    f"matriculado(a) em mais de um curso comigo:\n\n{course_list_str}\n\n"
-                    "Por favor, reformule sua pergunta informando o **nome do curso** que deseja consultar! 👇"
+                    f"matriculado(a) em mais de uma disciplina comigo:\n\n{course_list_str}\n\n"
+                    "Por favor, reformule sua pergunta informando sobre qual **disciplina** você deseja consultar! 👇"
                 )
                 await channel.send_text(sender_id, ambiguous_msg, reply_to=message_id)
                 await ctx.complete()
