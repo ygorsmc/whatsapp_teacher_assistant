@@ -30,6 +30,7 @@ param googleApiKey string
 // --- Nomes dos recursos com sufixo único ---
 var pgServerName = '${baseName}-pg-${uniqueString(resourceGroup().id)}'
 var pgDbName = 'whatsapp_assistant'
+var redisName = '${baseName}-redis-${uniqueString(resourceGroup().id)}'
 var keyVaultName = 'kv-wa-${substring(uniqueString(resourceGroup().id), 0, 10)}'
 var registryName = replace('${baseName}acr${uniqueString(resourceGroup().id)}', '-', '')
 
@@ -80,13 +81,24 @@ resource pgFirewall 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@202
 }
 
 // ============================================
-// 2. Redis — self-hosted (Container App), NÃO mais Azure Cache gerenciado.
-// O Azure Cache for Redis Basic C0 foi REMOVIDO (FinOps: ~R$32/mês ocioso).
-// O Redis passou a ser um Container App self-hosted, e o REDIS_URL é definido
-// diretamente nas apps (deploy_app.sh / make ship). A regra de autoescala KEDA
-// (--scale-rule-auth "address=redis-url") precisa de um secret 'redis-url'
-// apontando para esse Redis self-hosted.
+// 2. Azure Cache for Redis (Basic C0 — FinOps)
 // ============================================
+resource redis 'Microsoft.Cache/redis@2023-08-01' = {
+  name: redisName
+  location: location
+  properties: {
+    sku: {
+      name: 'Basic'
+      family: 'C'
+      capacity: 0 // C0 = 250 MB, suficiente para filas + cache
+    }
+    enableNonSslPort: false
+    minimumTlsVersion: '1.2'
+    redisConfiguration: {
+      'maxmemory-policy': 'allkeys-lru'
+    }
+  }
+}
 
 // ============================================
 // 3. Azure Container Registry (ACR Basic)
@@ -155,9 +167,15 @@ resource secretDbUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   properties: { value: pgConnectionString }
 }
 
-// Redis URL: NÃO é mais provisionado aqui (Azure Cache C0 removido). O Redis é um
-// Container App self-hosted; defina o secret 'REDIS-URL'/env REDIS_URL apontando
-// para ele no deploy das apps (deploy_app.sh / make ship).
+// Redis connection string (rediss:// = TLS, porta SSL 6380)
+var redisKey = redis.listKeys().primaryKey
+var redisConnectionString = '${redis.properties.hostName}:${redis.properties.sslPort}'
+
+resource secretRedisUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: keyVault
+  name: 'REDIS-URL'
+  properties: { value: 'rediss://:${redisKey}@${redisConnectionString}' }
+}
 
 // ============================================
 // Outputs
@@ -166,3 +184,4 @@ output acrLoginServer string = acr.properties.loginServer
 output acrName string = acr.name
 output keyVaultUri string = keyVault.properties.vaultUri
 output pgServerFqdn string = pgServer.properties.fullyQualifiedDomainName
+output redisHostname string = redis.properties.hostName
