@@ -239,6 +239,7 @@ async def handle_review_request(channel, sender_id: str, student_context: dict) 
         teacher_id=teacher.id,
         teacher_name=teacher.name,
         teacher_subject=teacher.subject,
+        student_id=student.id,
         student_name=student.name,
         course_id=course.id,
         course_name=course.name,

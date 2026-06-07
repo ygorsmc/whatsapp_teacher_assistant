@@ -54,6 +54,7 @@ async def generate_review(
     teacher_id: str,
     teacher_name: str,
     teacher_subject: str,
+    student_id: str,
     student_name: str,
     course_id: str,
     course_name: str,
@@ -90,9 +91,9 @@ async def generate_review(
 
     llm = get_provider(settings.DEFAULT_LLM_PROVIDER)
     
-    from src.cache.topic_cache import get_cached_topics, set_cached_topics
+    from src.cache.topic_cache import get_cached_topics, set_cached_topics, get_student_used_topics, add_student_used_topic, clear_student_used_topics
 
-    # 2. Etapa 1: Extração de tópicos com Cache (Two-Step Variance)
+    # 2. Etapa 1: Extração de tópicos com Cache Global da Aula
     topics = await get_cached_topics(course_id, current_lesson_number, subject_name)
     
     if not topics:
@@ -105,10 +106,23 @@ async def generate_review(
             
         await set_cached_topics(course_id, current_lesson_number, topics, subject_name)
         
-    chosen_topic = random.choice(topics)
+    # 3. Restrição por Aluno (Evitar repetição)
+    used_topics = await get_student_used_topics(student_id, course_id, current_lesson_number, subject_name)
+    available_topics = [t for t in topics if t not in used_topics]
+    
+    # Se o aluno já respondeu a TODOS os tópicos desta aula, resetamos a lista dele!
+    if not available_topics:
+        logger.info("Aluno exauriu os tópicos desta aula. Resetando ciclo.", student_id=student_id, lesson_number=current_lesson_number)
+        await clear_student_used_topics(student_id, course_id, current_lesson_number, subject_name)
+        available_topics = topics # Restaura tudo
+        
+    chosen_topic = random.choice(available_topics)
     chosen_perspective = random.choice(REVIEW_PERSPECTIVES)
+    
+    # Grava o tópico recém-sorteado no cache do aluno para ele não recebê-lo de novo
+    await add_student_used_topic(student_id, course_id, current_lesson_number, chosen_topic, subject_name)
 
-    # 3. Etapa 2: Build the focused prompt
+    # 4. Etapa 2: Geração do Resumo e Quiz (Em 1 só chamada usando Structured Outputs)
     prompt = REVIEW_PROMPT_TEMPLATE.format(
         teacher_name=teacher_name,
         teacher_subject=teacher_subject,
