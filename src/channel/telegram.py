@@ -30,14 +30,15 @@ class TelegramChannel(IMessagingChannel):
             return response.json()
 
     async def send_text(self, user_id: str, text: str, reply_to: str | None = None) -> dict:
-        # Ignoramos intencionalmente o parâmetro `reply_to` no Telegram.
-        # Enviar `reply_to_message_id` faz com que o cliente do Telegram agrupe
-        # as mensagens em "Threads/Respostas", o que confunde a UX num chat 1-a-1.
         payload = {
             "chat_id": user_id,
             "text": text,
             "parse_mode": "Markdown",  # Suporta *bold*, _italic_, etc.
         }
+        
+        if reply_to:
+            payload["reply_to_message_id"] = int(reply_to) if str(reply_to).isdigit() else reply_to
+
 
         try:
             return await self._send_request("sendMessage", payload)

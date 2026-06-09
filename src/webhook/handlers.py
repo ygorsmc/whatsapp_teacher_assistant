@@ -216,9 +216,10 @@ async def _process_message(msg: InboundMessage, channel: IMessagingChannel):
             return Response(status_code=200)
             
         await get_queue().enqueue("command_messages", {
-            "sender_id": sender_id, # Usamos sender_id genericamente agora
+            "sender_id": sender_id,
             "text": msg.text,
-            "message_id": msg.message_id
+            "message_id": msg.message_id,
+            "channel": channel.channel_name
         })
         return Response(status_code=200)
 
@@ -232,7 +233,8 @@ async def _process_message(msg: InboundMessage, channel: IMessagingChannel):
             "message_type": msg.message_type,
             "interactive_payload": msg.interactive_payload,
             "correlation_id": correlation_id,
-            "message_id": msg.message_id
+            "message_id": msg.message_id,
+            "channel": channel.channel_name
         },
         session_id=sender_id # Garantia FIFO local por chat
     )

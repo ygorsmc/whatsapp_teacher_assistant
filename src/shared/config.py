@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = Field(default="YOUR_TELEGRAM_TOKEN")
     TELEGRAM_WEBHOOK_SECRET: str = Field(default="YOUR_TELEGRAM_SECRET")
     SCHEDULER_MODE: str = Field(default="template") # "template" (WhatsApp) ou "buttons" (Telegram)
+    BOT: str = Field(default="@pibep_bot")
     
     # Redis
     REDIS_URL: str = Field(default="redis://localhost:6379/0")

@@ -167,14 +167,16 @@ resource secretDbUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   properties: { value: pgConnectionString }
 }
 
-// Redis connection string (rediss:// = TLS, porta SSL 6380)
+// Redis connection string (rediss:// = TLS, porta SSL 6380).
+// IMPORTANTE: o username 'default' é obrigatório — o Azure Cache rejeita o AUTH
+// sem username (WRONGPASS). E o /0 (db index) evita normalização inconsistente.
 var redisKey = redis.listKeys().primaryKey
 var redisConnectionString = '${redis.properties.hostName}:${redis.properties.sslPort}'
 
 resource secretRedisUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: keyVault
   name: 'REDIS-URL'
-  properties: { value: 'rediss://:${redisKey}@${redisConnectionString}' }
+  properties: { value: 'rediss://default:${redisKey}@${redisConnectionString}/0' }
 }
 
 // ============================================

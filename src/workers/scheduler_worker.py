@@ -207,10 +207,12 @@ async def process_pending_schedules():
                         session_id=sender_id
                     )
                 else:
-                    logger.info("scheduler_window_closed_sending_invite", sender_id=sender_id, schedule_id=schedule_id)
-                    # Window is closed. Send the review invitation via interactive buttons (Template)
-                    # This opens the 24h service window when the student responds
+                    logger.info("scheduler_window_closed_skipping", sender_id=sender_id, schedule_id=schedule_id)
+                    # A pedido do professor: O envio de mensagens via template (fora da janela de 24h) 
+                    # foi DESATIVADO temporariamente para evitar risco de banimento por SPAM pela Meta.
+                    # O sistema apenas re-agendará o quiz para o dia seguinte sem enviar nada.
                     
+                    """
                     if settings.SCHEDULER_MODE == "template":
                         await channel.send_template(
                             user_id=sender_id,
@@ -229,6 +231,8 @@ async def process_pending_schedules():
                             ],
                             footer=REVIEW_INVITE_FOOTER
                         )
+                    """
+                    pass
 
                 # Mark as sent and compute next trigger
                 next_trigger = compute_next_trigger(row.preferred_hour)

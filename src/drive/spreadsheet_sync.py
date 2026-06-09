@@ -145,9 +145,9 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
 
     async with AsyncSessionLocal() as session:
         # Snapshot antes
-        teachers_before = (await session.execute(text('SELECT count(*) FROM "Teachers"'))).scalar()
-        students_before = (await session.execute(text('SELECT count(*) FROM "Students"'))).scalar()
-        courses_before = (await session.execute(text('SELECT count(*) FROM "Courses"'))).scalar()
+        teachers_before = (await session.execute(text('SELECT count(*) FROM "Teachers" WHERE is_active = true'))).scalar()
+        students_before = (await session.execute(text('SELECT count(*) FROM "Students" WHERE is_active = true'))).scalar()
+        courses_before = (await session.execute(text('SELECT count(*) FROM "Courses" WHERE is_active = true'))).scalar()
         subjects_before = (await session.execute(text('SELECT count(*) FROM "Subjects"'))).scalar()
         schedules_before = (await session.execute(text('SELECT count(*) FROM "StudentSchedule"'))).scalar()
 
@@ -421,11 +421,11 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
 
         # Snapshot depois
         stats["teachers_before"] = teachers_before or 0
-        stats["teachers_after"] = (await session.execute(text('SELECT count(*) FROM "Teachers"'))).scalar() or 0
+        stats["teachers_after"] = (await session.execute(text('SELECT count(*) FROM "Teachers" WHERE is_active = true'))).scalar() or 0
         stats["students_before"] = students_before or 0
-        stats["students_after"] = (await session.execute(text('SELECT count(*) FROM "Students"'))).scalar() or 0
+        stats["students_after"] = (await session.execute(text('SELECT count(*) FROM "Students" WHERE is_active = true'))).scalar() or 0
         stats["courses_before"] = courses_before or 0
-        stats["courses_after"] = (await session.execute(text('SELECT count(*) FROM "Courses"'))).scalar() or 0
+        stats["courses_after"] = (await session.execute(text('SELECT count(*) FROM "Courses" WHERE is_active = true'))).scalar() or 0
         stats["subjects_upserted"] = len(upserted_subject_ids)
         stats["subjects_before"] = subjects_before or 0
         stats["subjects_after"] = (await session.execute(text('SELECT count(*) FROM "Subjects"'))).scalar() or 0

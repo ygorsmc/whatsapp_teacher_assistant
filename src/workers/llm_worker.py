@@ -328,8 +328,9 @@ async def process_inbound(event: dict, ctx: MessageContext):
     interactive_payload = event.get("interactive_payload")
     correlation_id = event.get("correlation_id", "unknown")
     message_id = event.get("message_id")
+    channel_type = event.get("channel")
     
-    channel = get_channel()
+    channel = get_channel(channel_type)
     query_column = channel.get_user_query_column()
     
     with structlog.contextvars.bound_contextvars(correlation_id=correlation_id, sender_id=sender_id):

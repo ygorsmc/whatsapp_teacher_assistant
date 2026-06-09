@@ -1,4 +1,5 @@
 from src.queue.interfaces import MessageContext
+from datetime import datetime, timezone, timedelta
 from src.shared.config import settings
 from src.channel.factory import get_channel
 from src.shared.telemetry import logger
@@ -37,7 +38,7 @@ async def run_sync_alunos_command(channel, sender_id: str):
             unlinked_names = stats.get('unlinked_names', [])
             if unlinked_names:
                 names_str = "\n".join(f"• {n}" for n in unlinked_names)
-                msg += CMD_SYNC_UNLINKED_WARNING.format(count=len(unlinked_names), names=names_str)
+                msg += CMD_SYNC_UNLINKED_WARNING.format(count=len(unlinked_names), names=names_str, bot=settings.BOT)
             # Avisa o professor sobre turmas sem dono explícito na aba "Professores"
             # (caíram no Admin) — /quiz e /aula não vão achá-las pelo professor real.
             no_teacher = stats.get('classes_sem_professor', [])
@@ -309,8 +310,14 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
             subject_name = class_row[4]  # disciplina da turma (pode ser None em legado)
             
             # 3. Fetch Enrolled Active Students (com endereços dos dois canais + canal preferido)
+            # Adiciona a data da última interação para validação da janela de 24h
             stmt_students = text("""
-                SELECT s.id, s.phone, s.name, s.telegram_chat_id, s.preferred_channel
+                SELECT s.id, s.phone, s.name, s.telegram_chat_id, s.preferred_channel,
+                       (SELECT MAX(timestamp) 
+                        FROM "StudentInteractions" 
+                        WHERE student_id = s.id 
+                          AND interaction_type IN ('message_received', 'quiz_answered')
+                       ) as last_interaction
                 FROM "Students" s
                 JOIN "StudentEnrollment" se ON s.id = se.student_id
                 WHERE se.class_id = :cid AND s.is_active = true
@@ -336,6 +343,7 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
             teacher_id=teacher[0],
             teacher_name=teacher[1],
             teacher_subject=teacher[2],
+            student_id="broadcast",
             student_name="Turma",  # Mensagem generalizada para a turma
             course_id=course_id,
             course_name=c_name,
@@ -374,16 +382,35 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
         from src.workers.micro_learning import send_quiz_to_student
         default_ct = settings.CHANNEL_BACKEND.lower()
         success_count = 0
-        skipped_count = 0
+        skipped_unlinked = 0
+        skipped_window_names = []
+        twenty_four_hours_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
 
         for st in students:
             ct = (st[4] or default_ct).lower()
             addr = st[3] if ct == "telegram" else st[1]  # telegram_chat_id | phone
             if not addr:
                 # Aluno sem endereço no canal preferido (ex.: não vinculou o Telegram). Não há como entregar.
-                skipped_count += 1
+                skipped_unlinked += 1
                 logger.info("quiz_skip_unlinked_student", student_id=st[0], student_name=st[2], channel=ct)
                 continue
+                
+            # Checa a janela de 24h
+            last_int = st[5]
+            window_active = False
+            if last_int:
+                if isinstance(last_int, str):
+                    last_int = datetime.fromisoformat(last_int)
+                if last_int.tzinfo is not None:
+                    last_int = last_int.replace(tzinfo=None)
+                if last_int > twenty_four_hours_ago:
+                    window_active = True
+                    
+            if not window_active:
+                skipped_window_names.append(st[2])
+                logger.info("quiz_skip_window_closed", student_id=st[0], student_name=st[2], channel=ct)
+                continue
+
             try:
                 c = get_channel(ct)
                 # Envia o resumo antes do quiz
@@ -404,8 +431,11 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
                 logger.error("failed_to_send_quiz_to_student", student_id=st[0], error=str(e))
 
         msg = f"✅ Quiz enviado com sucesso para {success_count} aluno(s) da turma '{c_name}'!"
-        if skipped_count:
-            msg += f"\n⚠️ {skipped_count} aluno(s) sem conta vinculada no bot foram pulados."
+        if skipped_unlinked:
+            msg += f"\n⚠️ {skipped_unlinked} aluno(s) sem conta vinculada no bot foram pulados."
+        if skipped_window_names:
+            names_str = "\n".join(f"• {name}" for name in skipped_window_names)
+            msg += f"\n\n⚠️ Aluno(s) que não receberam porque estão inativos há mais de 24 horas:\n{names_str}"
         await channel.send_text(sender_id, msg)
         
     except Exception as e:
@@ -414,7 +444,8 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
 async def process_command_message(message_body: dict):
     sender_id = str(message_body.get("sender_id", message_body.get("phone", "")))
     text_content = message_body.get("text", "")
-    channel = get_channel()
+    channel_type = message_body.get("channel")
+    channel = get_channel(channel_type)
     
     command, args = parse_command(text_content)
     logger.info("process_command_message", sender_id=sender_id, command=command, args=args)
