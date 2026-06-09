@@ -358,9 +358,12 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
             
         # Format the summary message to be broadcasted before the quiz
         key_points_text = "\n".join(f"  • {kp}" for kp in review.key_points)
+        display_subject = subject_name if subject_name else c_name
+        display_topic = review.topic if review.topic else lesson_label
+        
         summary_message = (
-            f"📖 *Revisão — {c_name}*\n"
-            f"📍 {lesson_label}\n\n"
+            f"📖 *Revisão — {display_subject}*\n"
+            f"📍 {display_topic}\n\n"
             f"{review.summary}\n\n"
             f"🔑 *Pontos-chave:*\n{key_points_text}\n\n"
             f"_Leia com atenção — o quiz a seguir é baseado neste resumo!_ 👇"

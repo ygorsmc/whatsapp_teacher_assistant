@@ -39,6 +39,7 @@ class ReviewOutput(BaseModel):
     quiz: ReviewQuiz = Field(
         description="Quiz de múltipla escolha baseado no resumo (3 alternativas)"
     )
+    topic: Optional[str] = None
 
 
 
@@ -137,6 +138,7 @@ async def generate_review(
     # Single LLM call — generates summary + key_points + quiz together
     try:
         review = cast(ReviewOutput, await llm.agenerate_structured(prompt=prompt, schema=ReviewOutput))
+        review.topic = chosen_topic
         
         # Algorithmic randomization to prevent LLM bias (always picking B)
         if review.quiz and review.quiz.alternatives:

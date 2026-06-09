@@ -255,13 +255,12 @@ async def handle_review_request(channel, sender_id: str, student_context: dict) 
     # Format and send the summary
     key_points_text = "\n".join(f"  • {kp}" for kp in review.key_points)
     
-    display_label = lesson_label.replace("Aula atual", "Aula")
-    if subject_name:
-        display_label = f"{subject_name} — {display_label}"
+    display_subject = subject_name if subject_name else course.name
+    display_topic = review.topic if review.topic else lesson_label.replace("Aula atual", "Aula")
         
     summary_message = (
-        f"📖 *Revisão — {course.name}*\n"
-        f"📍 {display_label}\n\n"
+        f"📖 *Revisão — {display_subject}*\n"
+        f"📍 {display_topic}\n\n"
         f"{review.summary}\n\n"
         f"🔑 *Pontos-chave:*\n{key_points_text}\n\n"
         f"_Leia com atenção — o quiz a seguir é baseado neste resumo!_ 👇"
