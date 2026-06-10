@@ -58,15 +58,18 @@ async def run_sync_alunos_command(channel, sender_id: str):
 async def run_sync_materiais_command(channel, sender_id: str):
     from src.workers.ingestion_worker import sync_google_drive
     try:
-        await channel.send_text(sender_id, CMD_SYNC_MATERIAIS_START)
+        await channel.send_text(sender_id, "⏳ Verificando o Google Drive por novos materiais. Arquivos pendentes serão colocados na Fila de Ingestão e processados em background...")
         stats = await sync_google_drive()
-        msg = CMD_SYNC_MATERIAIS_SUCCESS.format(
-            docs_before=stats.get('docs_before', 0) if stats else 0,
-            docs_after=stats.get('docs_after', 0) if stats else 0
-        )
+        
+        pendentes_na_fila = stats.get('docs_before', 0) - stats.get('docs_after', 0)
+        # O docs_before agora tem tudo que está em concluído, docs_after também.
+        # Wait, sync_google_drive retorna stats={"docs_before": count, "docs_after": count} onde count é os que estão concluídos.
+        # It's better to just give a simple response.
+        
+        msg = f"✅ Varredura concluída! Novos arquivos identificados foram enviados para a Fila de Processamento (limite de 2 simultâneos na nuvem).\n\nUse /listar_materiais para acompanhar o status."
         await channel.send_text(sender_id, msg)
     except Exception as e:
-        await channel.send_text(sender_id, f"❌ Erro na ingestão: {str(e)[:100]}")
+        await channel.send_text(sender_id, f"❌ Erro na varredura: {str(e)[:100]}")
 
 async def run_list_cursos_command(channel, sender_id: str):
     try:

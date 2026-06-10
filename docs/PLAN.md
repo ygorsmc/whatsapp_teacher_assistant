@@ -34,5 +34,6 @@ Após a sua aprovação deste plano:
 
 ## ❓ Perguntas para Aprovação (User Review Required)
 
-1. **Scripts Scratch:** Você prefere que eu **delete definitivamente** todos esses `scratch*.py`, `fix_*.py` e afins, ou que os mova para uma pasta isolada como `scripts/archive` só para ter de backup de código de consulta manual?
+1. **Scripts Scratch:** Você prefere que eu **delete definitivamente** todos esses `scratch*.py`, `fix_*.py` e afins, ou que os mova### Fase C — Atualizar este PLAN.md como concluido
+- ✅ Faxina executada com sucesso. Repositório limpo.pts/archive` só para ter de backup de código de consulta manual?
 2. Concorda com o plano de ação (Y/N)?

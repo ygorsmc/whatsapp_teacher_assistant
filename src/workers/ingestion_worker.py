@@ -2,6 +2,7 @@ import asyncio
 import uuid
 import structlog
 from sqlalchemy import text
+from tenacity import retry, wait_exponential, stop_after_attempt
 from src.shared.config import settings
 from src.db.database import AsyncSessionLocal
 from src.drive.client import drive_client
@@ -19,12 +20,16 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
     """
     logger.info(f"Starting ingestion for file: {file_name} ({mime_type})")
     
-    # 1. Download from Google Drive
+    # 1. Download from Google Drive (com retry para proteger contra SSL cold-start)
     try:
-        file_bytes = await drive_client.download_file(file_id)
+        @retry(wait=wait_exponential(multiplier=2, min=3, max=30), stop=stop_after_attempt(3), reraise=True)
+        async def _download_with_retry():
+            return await drive_client.download_file(file_id)
+        
+        file_bytes = await _download_with_retry()
         logger.info(f"Downloaded {len(file_bytes)} bytes from Drive.")
     except Exception as e:
-        logger.error("Failed to download from Drive", error=str(e))
+        logger.error("Failed to download from Drive after 3 retries", error=str(e))
         return False
 
     full_text = ""
@@ -128,12 +133,27 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
 
     # 5. Upsert to Qdrant
     qdrant = await get_qdrant()
+    
+    # 5.1 Remove vetores antigos para este arquivo (evita lixo se o novo PDF for menor que o antigo)
+    try:
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        await qdrant.delete(
+            collection_name="documents",
+            points_selector=Filter(
+                must=[FieldCondition(key="source", match=MatchValue(value=file_name))]
+            )
+        )
+    except Exception as e:
+        logger.warning(f"Could not delete old vectors for {file_name}", error=str(e))
+        
     points = []
 
     for idx, (chunk, vector) in enumerate(zip(chunks, embeddings)):
+        # Usa uuid5 determinístico para garantir idempotência exata
+        vector_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"whatsapp-bot://{file_id}/{idx}"))
         points.append(
             PointStruct(
-                id=str(uuid.uuid4()),
+                id=vector_id,
                 vector=vector,
                 payload={
                     "teacher_id": teacher_id,
@@ -164,17 +184,26 @@ async def sync_google_drive():
         return
         
     logger.info(f"Checking Google Drive folder: {folder_id}")
-    files = await drive_client.list_course_files(folder_id)
+    try:
+        files = await drive_client.list_course_files(folder_id)
+    except Exception as e:
+        logger.error("Failed to list Google Drive files", error=str(e))
+        return
     
     if not files:
         logger.info("No files found in the folder.")
         return
+    
+    logger.info(f"Found {len(files)} files in Google Drive.")
         
     await init_qdrant_collection("documents")
     
     async with AsyncSessionLocal() as session:
         docs_before = (await session.execute(text("SELECT count(*) FROM file_sync_state WHERE status='concluído'"))).scalar()
 
+        enqueued_count = 0
+        skipped_count = 0
+        
         for f in files:
             file_id = f['id']
             file_name = f['name']
@@ -184,6 +213,7 @@ async def sync_google_drive():
             lesson_number = f.get('lesson_number', 1)
 
             if not course_name:
+                logger.debug(f"Skipping '{file_name}': no course_name")
                 continue
             if not subject_name:
                 logger.warning(f"File '{file_name}' fora de uma pasta de Disciplina (Curso > Disciplina > Aula). Pulando.")
@@ -210,41 +240,89 @@ async def sync_google_drive():
             row = result.fetchone()
             
             if row and row[0] == 'concluído':
+                skipped_count += 1
                 continue
+            
+            logger.info(f"Enqueuing file '{file_name}' (current status: {row[0] if row else 'new'})")
                 
-            # Upsert state as 'processando'
+            # Upsert state as 'na_fila'
             await session.execute(
                 text("""
                     INSERT INTO file_sync_state (file_id, teacher_id, status, processing_started_at)
-                    VALUES (:fid, :tid, 'processando', CURRENT_TIMESTAMP)
-                    ON CONFLICT(file_id) DO UPDATE SET status='processando', processing_started_at=CURRENT_TIMESTAMP
+                    VALUES (:fid, :tid, 'na_fila', CURRENT_TIMESTAMP)
+                    ON CONFLICT(file_id) DO UPDATE SET status='na_fila', processing_started_at=CURRENT_TIMESTAMP
                 """),
                 {"fid": file_id, "tid": teacher_id}
             )
             await session.commit()
             
-            success = await process_file(file_id, file_name, mime_type, teacher_id, course_id, subject_name, lesson_number)
-            
-            new_status = 'concluído' if success else 'falhou'
-            await session.execute(
-                text("UPDATE file_sync_state SET status = :status, last_synced = CURRENT_TIMESTAMP WHERE file_id = :fid"),
-                {"status": new_status, "fid": file_id}
+            # Enqueue task
+            from src.queue.factory import get_queue
+            await get_queue().enqueue(
+                queue="ingestion_queue",
+                payload={
+                    "file_id": file_id,
+                    "file_name": file_name,
+                    "mime_type": mime_type,
+                    "teacher_id": teacher_id,
+                    "course_id": course_id,
+                    "subject_name": subject_name,
+                    "lesson_number": lesson_number
+                }
             )
-            await session.commit()
-            
+            enqueued_count += 1
+        
+        logger.info(f"Sync complete: {enqueued_count} enqueued, {skipped_count} skipped (already concluído)")
         docs_after = (await session.execute(text("SELECT count(*) FROM file_sync_state WHERE status='concluído'"))).scalar()
         return {"docs_before": docs_before, "docs_after": docs_after}
 
-async def worker_loop():
-    logger.info("Starting Ingestion Worker loop...")
+async def handle_ingestion_message(payload: dict, context):
+    """Consumes an ingestion task from the queue."""
+    file_id = payload.get("file_id")
+    file_name = payload.get("file_name")
+    mime_type = payload.get("mime_type")
+    teacher_id = payload.get("teacher_id")
+    course_id = payload.get("course_id")
+    subject_name = payload.get("subject_name")
+    lesson_number = payload.get("lesson_number")
+
+    async with AsyncSessionLocal() as session:
+        # Mark as processing
+        await session.execute(
+            text("UPDATE file_sync_state SET status = 'processando', processing_started_at = CURRENT_TIMESTAMP WHERE file_id = :fid"),
+            {"fid": file_id}
+        )
+        await session.commit()
+        
+        success = await process_file(file_id, file_name, mime_type, teacher_id, course_id, subject_name, lesson_number)
+        
+        new_status = 'concluído' if success else 'falhou'
+        await session.execute(
+            text("UPDATE file_sync_state SET status = :status, last_synced = CURRENT_TIMESTAMP WHERE file_id = :fid"),
+            {"status": new_status, "fid": file_id}
+        )
+        await session.commit()
+        
+    await context.complete()
+
+async def drive_polling_loop():
+    logger.info("Starting Google Drive polling loop...")
     while True:
         try:
             await sync_google_drive()
         except Exception as e:
             logger.error("Error in ingestion sync loop", error=str(e))
-            
-        # Poll every 5 minutes (300 seconds)
         await asyncio.sleep(300)
+
+async def worker_loop():
+    logger.info("Starting Ingestion Worker loop (Queue Consumer)...")
+    
+    # Start the background polling task
+    asyncio.create_task(drive_polling_loop())
+    
+    from src.queue.factory import get_queue
+    queue = get_queue()
+    await queue.consume_loop("ingestion_queue", handle_ingestion_message)
 
 if __name__ == "__main__":
     asyncio.run(worker_loop())

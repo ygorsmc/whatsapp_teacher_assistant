@@ -100,3 +100,4 @@ emulator_config.json
 
 # Volumes Docker Locais
 data/
+azure_secrets.json

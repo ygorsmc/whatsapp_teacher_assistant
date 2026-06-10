@@ -515,12 +515,18 @@ async def llm_loop():
 
 async def main_worker():
     from src.workers.command_worker import command_loop
+    from src.workers.ingestion_worker import handle_ingestion_message, drive_polling_loop
+    from src.queue.factory import get_queue
     import asyncio
     
-    logger.info("starting_unified_workers")
+    logger.info("starting_unified_workers (LLM, Command, Ingestion)")
+    queue = get_queue()
+    
     await asyncio.gather(
         llm_loop(),
-        command_loop()
+        command_loop(),
+        queue.consume_loop("ingestion_queue", handle_ingestion_message),
+        drive_polling_loop()
     )
 
 if __name__ == "__main__":

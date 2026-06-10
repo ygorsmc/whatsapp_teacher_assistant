@@ -181,10 +181,11 @@ async def process_pending_schedules():
                 accept_title = f"{REVIEW_ACCEPT_TITLE} {course_short}"
                 later_title = f"{REVIEW_LATER_TITLE} {course_short}"
 
-                if window_active:
-                    logger.info("scheduler_window_active_direct_send", sender_id=sender_id, schedule_id=schedule_id)
-                    # Window is already open! Skip the Meta Template and simulate the user clicking "Sim, vamos lá!"
-                    # This triggers the fast-path directly and sends the review + quiz for free.
+                if ct == "telegram" or window_active:
+                    logger.info("scheduler_window_active_direct_send", sender_id=sender_id, schedule_id=schedule_id, channel=ct)
+                    # A pedido do professor: nas ocasiões normais (janela ativa ou telegram), 
+                    # a revisão deve ser enviada de forma DIRETA, pulando os botões de "você tem 5 minutinhos".
+                    # Simulamos o clique no botão para o llm_worker gerar e entregar a aula imediatamente.
                     from src.queue.factory import get_queue
                     import uuid
                     
@@ -202,7 +203,8 @@ async def process_pending_schedules():
                             "message_type": "interactive",
                             "interactive_payload": interactive_payload,
                             "correlation_id": str(uuid.uuid4()),
-                            "message_id": f"auto_{schedule_id}_{int(now_utc.timestamp())}"
+                            "message_id": f"auto_{schedule_id}_{int(now_utc.timestamp())}",
+                            "channel": ct
                         },
                         session_id=sender_id
                     )
@@ -210,28 +212,6 @@ async def process_pending_schedules():
                     logger.info("scheduler_window_closed_skipping", sender_id=sender_id, schedule_id=schedule_id)
                     # A pedido do professor: O envio de mensagens via template (fora da janela de 24h) 
                     # foi DESATIVADO temporariamente para evitar risco de banimento por SPAM pela Meta.
-                    # O sistema apenas re-agendará o quiz para o dia seguinte sem enviar nada.
-                    
-                    """
-                    if settings.SCHEDULER_MODE == "template":
-                        await channel.send_template(
-                            user_id=sender_id,
-                            template_name=settings.META_TEMPLATE_REVIEW,
-                            params=[row.student_name, row.course_name]
-                        )
-                    else:
-                        # Emula o template via botoes para canais que não têm templates estritos (ex: Telegram)
-                        text_body = REVIEW_INVITE_BODY.format(student_name=row.student_name, course_name=row.course_name)
-                        await channel.send_buttons(
-                            user_id=sender_id,
-                            body=text_body,
-                            buttons=[
-                                {"id": f"review_accept_{row.class_id}", "title": accept_title[:20]},
-                                {"id": f"review_later_{row.class_id}", "title": later_title[:20]}
-                            ],
-                            footer=REVIEW_INVITE_FOOTER
-                        )
-                    """
                     pass
 
                 # Mark as sent and compute next trigger
