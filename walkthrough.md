@@ -1,5 +1,12 @@
-# Walkthrough — Addon de Livros + Horizontes H1-H3 + RAG de Alta Precisão
+# Walkthrough — Addon de Livros + Horizontes H1-H3 + RAG de Alta Precisão + Vertical de Idiomas
 
+> **Atualização 2026-06-14:** a "Vertical de Ensino de Idiomas"
+> (`_docs/prompt_execucao_idiomas.md`) foi implementada de ponta a ponta (F0-F9
+> + perfil de idioma por turma/revisão por nível) — ver a seção "Vertical de
+> Idiomas (F0-F9)" no final. Tudo atrás de flags OFF (mestre
+> `LANGUAGE_MODE_ENABLED`); manual de operações dedicado em
+> `_docs/docs/IDIOMAS_OPERATIONS.md`.
+>
 > **Atualização 2026-06-12 (2):** o roteiro "RAG de Alta Precisão"
 > (`_docs/prompt_execucao_rag_preciso.md`) foi implementado — ver a seção
 > "RAG de Alta Precisão (F0-F8)" no final. Tudo atrás de flags OFF.
@@ -449,3 +456,141 @@ como Plano B) → payload com `content` cru + `context_prefix` + `section_title`
 **Verificação (RAG Preciso):** `pytest` 199/199 ✅ (73 novos) · imports e CLIs
 sanity-checked ✅ · ruff/mypy limpos nos arquivos da tarefa ✅ · qdrant-client
 1.9.1 → 1.18.0 (Query API; `search()` migrado para `query_points`).
+
+---
+
+# Vertical de Idiomas (F0-F9) — 2026-06-14
+
+> **Manual de operações dedicado:** `_docs/docs/IDIOMAS_OPERATIONS.md` (portas
+> de fala, flags por fase, FinOps por operação, LGPD do áudio, ADRs e
+> troubleshooting). Esta seção é o **mapa arquitetural** da vertical.
+
+Transforma o mesmo assistente, **sem fork**, em um **tutor de idiomas** quando o
+curso é de idioma — reusando jornada de leitura, SRS, QuizBank, funil RAG (com
+Recusa Honesta), janela de 24h e omnichannel. A capacidade nova é uma **camada
+de fala provider-agnóstica** (entrada e saída de áudio) e um punhado de fluxos
+gated. **Tudo OFF por padrão** ⇒ produção bit a bit inalterada (invariante
+provado por teste).
+
+## 1. Gatilho por NOME do curso (convenção sobre configuração)
+
+Nenhuma coluna, painel ou flag por-turma decide "isto é idioma": o
+`detect_language_course(course_name)` (puro, `src/shared/language.py`) decide em
+runtime, na ordem:
+
+1. **Tag autoritativa** na pasta do Drive: `Inglês Business [idioma:en]`,
+   `Espanhol A2 [idioma:es]` — vence a stoplist e aceita idiomas fora da
+   heurística (`[idioma:ko]`).
+2. **Stoplist** (exige tag): `História da Língua Inglesa`, `Literatura
+   Inglesa`, `Linguística Aplicada` **não** viram tutor sem a tag.
+3. **Heurística** por palavra-chave: `Inglês Business`, `Curso de Francês`.
+4. Senão → `None` (curso normal, comportamento clássico).
+
+O nome já flui ingestão → `Courses.name` → `build_system_prompt`, então o switch
+é grátis. A aba **Turmas** da planilha pode **sobrescrever** (coluna `Idioma`
+Sim/Não autoritativa + `Nível` → CEFR por turma).
+
+## 2. Camada de fala (Ports & Adapters, igual reranker/parser)
+
+```
+WhatsApp/Telegram (voz in)  ─► webhook (regex + media_id, SLA 200ms)
+   │                                       │ enfileira (worker faz o trabalho)
+   ▼                                       ▼
+download_media (canal) ─► ISpeechToText.transcribe ─► [IPronunciationAssessor.assess]
+   │ (áudio DESCARTADO após a análise — LGPD)                     │
+   ▼                                                              ▼
+LLM tutor (RAG + CRAG, provider-agnóstico) ─► feedback ─► ITextToSpeech.synthesize ─► áudio out
+```
+
+| Porta | Arquivo | Providers (env var) | `none` |
+|---|---|---|---|
+| `ISpeechToText` | `src/speech/stt.py` | `azure` · `whisper_openai` · `whisper_local` · `google` | pede texto |
+| `IPronunciationAssessor` | `src/speech/pronunciation.py` | `azure` | só transcreve |
+| `ITextToSpeech` | `src/speech/tts.py` | `azure` · `elevenlabs` · `google` | entrega só texto |
+
+`src/speech/factory.py` (`get_stt`/`get_pronunciation`/`get_tts`) cacheia por
+nome e devolve **None** em `none`/desconhecido/sem-chave — toda a vertical
+degrada com graça. `src/shared/tts.py` (pílulas de áudio H1.3) virou **façade**
+sobre `get_tts()` — comportamento idêntico com `TTS_PROVIDER=azure`.
+
+> **Azure é o default, não o dono:** o mesmo recurso/chave Azure Speech faz
+> STT + Pronunciation Assessment + TTS (menor atrito), mas `whisper_*` existem
+> para não depender da Azure. Trocar = trocar a env var.
+
+## 3. O que cada fase entregou
+
+| Fase | Flag(s) (+ `LANGUAGE_MODE_ENABLED`) | Entrega | Módulo central |
+|---|---|---|---|
+| **F0** Fundação | — | portas de fala + DTOs + detecção por nome + persona de tutor (hook no `prompt_builder`) | `src/speech/*`, `shared/language.py` |
+| **F1** Listening | `TTS_ENABLED` | check-in da leitura vira "áudio do dia": diálogo na língua-alvo + quiz de compreensão | `review_generator.py`, `reading_journey.py` |
+| **Perfil/nível** (parte do F5) | (`TTS_ENABLED` p/ áudio) | revisão da matéria respeita a **língua por nível** + áudio na língua-alvo (Iniciante → texto pt-BR + áudio-alvo; demais → tudo no alvo) | `generate_language_review`, `llm_worker.handle_review_request` |
+| **F2** Vocabulário SRS | `VOCABULARY_SRS_ENABLED` | flashcard palavra-alvo + significado L1 + áudio; entra no SRS; reentrega `$0` | `workers/vocabulary.py` |
+| **F3** Speaking/Pronúncia | `SPEECH_INPUT_ENABLED` (+ `PRONUNCIATION_PROVIDER`) | voz do aluno → STT → [pronúncia] → feedback socrático; **só scores persistem** | `workers/speaking.py` |
+| **F5** Nivelamento CEFR | `PLACEMENT_TEST_ENABLED` | `/nivelamento`: 6 questões A1→C2, classifica e grava `cefr_level` por matrícula | `workers/placement.py` |
+| **F6** Relatório proficiência | `PROFICIENCY_REPORT_ENABLED` | mensal: inventário ao aluno + agregado à escola (coorte ≥ 3) | `workers/proficiency_report.py` |
+| **F7** Rede L1 | `L1_SAFETY_NET_ENABLED` | diretiva emocional: destrava em L1 quando o aluno trava, devolve ao alvo | `prompt_builder.py` |
+| **F4** Roleplay | `ROLEPLAY_ENABLED` | dramatização por turno na língua-alvo; estado no Redis (TTL 30 min) | `query_router.py`, `workers/roleplay.py` |
+| **F8** Exam prep | `EXAM_PREP_ENABLED` | `/simulado` cronometrado sobre banco estilo-prova (`material_type='exam'`) | `workers/exam_prep.py` |
+| **F9** White-Label/B2B | `PARTNER_API_KEY` | Partner API (provisiona turma de idioma + proficiência agregada) + **opt-out** SAIR/VOLTAR | `webhook/partner.py`, `workers/optout.py` |
+
+## 4. Fluxo do speaking (F3) — espelha o `essay.py` (mídia → análise → feedback)
+
+```
+voz → webhook (media_id, regex/Redis; NUNCA baixa na borda — SLA 200ms)
+   → llm_worker fast-path (message_type=='audio', ANTES do debounce)
+   → speaking.handle_audio_message (gate + idempotência CAS por media_id)
+   → analyze_speaking: download_media → get_stt().transcribe
+        → [PRONUNCIATION_PROVIDER!=none] get_pronunciation().assess (matriz acústica)
+        → PRONUNCIATION_FEEDBACK_PROMPT → feedback socrático (não reescreve a fala)
+        → persiste SÓ os scores (PronunciationAttempts) ; `del audio_bytes`
+```
+
+## 5. Decisões de arquitetura (ADR resumido)
+
+- **Convenção sobre configuração** (gatilho por nome) — zero painel, switch em
+  runtime atrás de uma flag; banco (CEFR/alvo por turma) sobrescreve.
+- **Áudio efêmero** (LGPD — voz é dado sensível): `del audio_bytes` ao fim da
+  análise (`SPEECH_AUDIO_RETENTION_SECONDS=0`); persistimos só números
+  (`PronunciationAttempts`, sem coluna de áudio). Providers de voz =
+  suboperadores no RIPD.
+- **Reuso do SRS+QuizBank para vocabulário** (em vez de tabela paralela) →
+  herda cache `$0` e o motor de repetição espaçada de graça.
+- **`generate_language_review` SEM cache de propósito:** o QuizBank não é
+  escopado por nível; cachear a revisão por-nível colidiria entre turmas
+  Iniciante×Avançado. Vocab/listening/exam permanecem **cacheáveis** (formato
+  independente de nível).
+- **`ReviewOutput.audio_script`** (versão completa na língua-alvo) persiste no
+  QuizBank → sobrevive ao Cache Hit e à reentrega SRS (o iniciante lê pt-BR e
+  ouve a tradução íntegra).
+- **`/quiz_[turma]`:** áudio sintetizado **1×** e reaproveitado por todos os
+  alunos da turma (evita N chamadas de TTS).
+
+## 6. Invariantes (os mesmos do projeto, respeitados)
+
+- **Flag OFF = intocado:** teste prova que `LANGUAGE_MODE_ENABLED=false` **ou**
+  curso normal/stoplist ⇒ System Prompt byte a byte igual.
+- **SLA 200ms:** a voz entra só como `media_id` (regex/Redis na borda); download
+  e STT acontecem no worker.
+- **Fallback sempre:** sem provider/erro em qualquer camada de fala ⇒ degrada
+  para texto; o aluno nunca cai.
+- **Filtros obrigatórios** `teacher_id`/`course_id` em toda query nova; LGPD com
+  coorte ≥ 3 nos agregados; `str.format()` em todos os prompts; segredos via
+  Key Vault.
+- **Opt-out NÃO é flag-gated** (direito do aluno; coluna default `false` =
+  seguro por padrão).
+
+## 7. Modelo de dados (migrações novas, todas reversíveis em PG16)
+
+| Migração | Mudança |
+|---|---|
+| `c9d0e1f2a3b4` | `Classes.is_language` (bool) + `proficiency_level` |
+| `d0e1f2a3b4c5` | `QuizBank.audio_script` |
+| `e1f2a3b4c5d6` | tabela `PronunciationAttempts` (só scores, FK CASCADE, **sem áudio**) |
+| `f2a3b4c5d6e7` | `StudentEnrollment.cefr_level` (nível por aluno × turma) |
+| `a3b4c5d6e7f8` | `Students.messaging_opted_out` (opt-out B2B) |
+
+**Verificação (Idiomas):** `pytest` 309/309 ✅ (+110 desde o RAG Preciso) ·
+ruff limpo · mypy Success (0 erros, 98 arquivos) · as 5 migrações up→down→up em
+Postgres 16 real ✅. Sequência de piloto: ligar **uma flag por vez** em 1 turma,
+medir custo por operação (STT/min, pronúncia/chamada, TTS/char, LLM/turno) e
+ampliar.
