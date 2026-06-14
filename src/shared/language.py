@@ -161,6 +161,18 @@ def language_delivery(
     )
 
 
+def review_audio_text(audio_script: str | None, summary: str, is_beginner: bool) -> str | None:
+    """Texto a SINTETIZAR (TTS) na revisão de idioma — sempre na língua-alvo. Puro.
+
+    `audio_script` é a versão íntegra na língua-alvo. Quando vazio:
+    - nível avançado: o `summary` JÁ está na língua-alvo → narra o resumo;
+    - Iniciante: o `summary` está em L1 (pt-BR) → **None** (NÃO narrar pt-BR com a
+      voz/locale da língua-alvo = áudio na língua errada). O texto segue sempre."""
+    if audio_script:
+        return audio_script
+    return None if is_beginner else summary
+
+
 def detect_language_course(course_name: str, default_target: str | None = None) -> LanguageSpec | None:
     """Decide se `course_name` é um curso de idioma e qual o idioma-alvo.
 

@@ -470,17 +470,22 @@ async def handle_review_request(channel, sender_id: str, student_context: dict) 
     # próprio resumo (já na língua-alvo). TTS off/erro ⇒ segue só com o texto.
     if delivery is not None and target_language:
         from src.rag.review_generator import synthesize_listening
-        audio_text = review.audio_script or review.summary
-        try:
-            audio = await synthesize_listening(audio_text, target_language)
-            if audio:
-                await channel.send_audio(sender_id, audio)
-                track_event("review_audio_sent", {
-                    "student_id": student.id, "course_id": course.id,
-                    "lang": target_language, "level": getattr(class_obj, "proficiency_level", None),
-                })
-        except Exception as e:
-            logger.warning("review_audio_failed", student_id=student.id, error=str(e)[:200])
+        from src.shared.language import review_audio_text
+        # Iniciante: o resumo está em pt-BR. Só narramos quando há audio_script
+        # (tradução completa na língua-alvo); sem ele NÃO narramos o pt-BR com a
+        # voz/locale da língua-alvo (áudio na língua errada) — segue só o texto.
+        audio_text = review_audio_text(review.audio_script, review.summary, delivery.is_beginner)
+        if audio_text:
+            try:
+                audio = await synthesize_listening(audio_text, target_language)
+                if audio:
+                    await channel.send_audio(sender_id, audio)
+                    track_event("review_audio_sent", {
+                        "student_id": student.id, "course_id": course.id,
+                        "lang": target_language, "level": getattr(class_obj, "proficiency_level", None),
+                    })
+            except Exception as e:
+                logger.warning("review_audio_failed", student_id=student.id, error=str(e)[:200])
 
     # Convert ReviewQuiz to QuizOutput for micro_learning compatibility
     quiz_output = QuizOutput(
@@ -682,22 +687,15 @@ async def process_inbound(event: dict, ctx: MessageContext):
                     # fallback (primeira matrícula), preservando compat na transição.
                     review_class_id = reply_id.replace("review_accept_", "", 1)
 
-                    logger.info(f"DEBUG_ROUTING: Extracted review_class_id: {review_class_id}")
-
                     # Re-fetch context for the SPECIFIC class from the button
                     review_context = await get_student_context(sender_id, query_column, class_id=review_class_id)
 
                     if not review_context:
-                        logger.info("DEBUG_ROUTING: review_context was None! Falling back to default.")
                         review_context = student_context  # fallback to default
-                    else:
-                        logger.info(f"DEBUG_ROUTING: review_context found! Course: {review_context['course'].name}")
-                        
+
                     await handle_review_request(channel, sender_id, review_context)
                 except Exception as e:
-                    import traceback
                     logger.error("Fast-path review_accept error", error=str(e), exc_info=True)
-                    traceback.print_exc()
                     await channel.send_text(sender_id, ERROR_TECHNICAL)
                 finally:
                     await ctx.complete()

@@ -88,7 +88,14 @@ async def handle_audio_message(channel, sender_id: str, student_context: dict, m
         logger.info("speaking_replay_ignored", media_id=media_id, message_id=message_id)
         return
 
-    await analyze_speaking(channel, sender_id, student_context, media_id)
+    try:
+        await analyze_speaking(channel, sender_id, student_context, media_id)
+    except Exception:
+        # Falha inesperada APÓS o CAS: libera o media_id para que a reentrega da
+        # fila possa reprocessar (senão o aluno ficaria 24h sem feedback). O erro
+        # continua subindo para o tratamento padrão do worker.
+        await redis.delete(_processed_key(media_id))
+        raise
 
 
 async def analyze_speaking(channel, sender_id: str, student_context: dict, media_id: str) -> None:
@@ -183,7 +190,9 @@ async def analyze_speaking(channel, sender_id: str, student_context: dict, media
                                  :acc, :flu, :comp, :details)'''),
                     {
                         "id": str(uuid4()), "sid": student.id, "cid": course.id,
-                        "lang": target_lang, "ref": said[:2000],
+                        # LGPD: NÃO persistir a transcrição (conteúdo de fala = dado
+                        # pessoal). Guardamos só os scores numéricos → item_ref = NULL.
+                        "lang": target_lang, "ref": None,
                         "acc": score.accuracy, "flu": score.fluency,
                         "comp": score.completeness, "details": details,
                     },

@@ -24,6 +24,11 @@ def load_azure_secrets(settings) -> None:
             "AZURE-OPENAI-API-KEY", "AZURE-OPENAI-ENDPOINT", "SERVICEBUS-CONNECTION-STRING", "DATABASE-URL",
             "QDRANT-URL", "QDRANT-API-KEY", "REDIS-URL",
             "TELEGRAM-BOT-TOKEN", "TELEGRAM-WEBHOOK-SECRET",
+            # Vertical de idiomas (fala) + Partner API (B2B): sem estarem aqui, esses
+            # segredos viriam como env em claro no Container App ao ligar as flags de
+            # TTS/STT/pronúncia/Partner (exatamente o vetor F01/F02).
+            "AZURE-SPEECH-KEY", "ELEVENLABS-API-KEY",
+            "GOOGLE-TTS-API-KEY", "GOOGLE-STT-API-KEY", "PARTNER-API-KEY",
         ]
         
         for kv_key in keys_to_fetch:

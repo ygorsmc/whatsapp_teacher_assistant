@@ -409,7 +409,11 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
         quiz_audio = None
         if delivery is not None and target_language is not None:
             from src.rag.review_generator import synthesize_listening
-            review_audio = await synthesize_listening(review.audio_script or review.summary, target_language)
+            from src.shared.language import review_audio_text
+            # Iniciante: resumo em pt-BR → só narrar quando há audio_script (tradução
+            # na língua-alvo); senão não narrar pt-BR com a voz da língua-alvo.
+            audio_text = review_audio_text(review.audio_script, review.summary, delivery.is_beginner)
+            review_audio = await synthesize_listening(audio_text, target_language) if audio_text else None
             if not delivery.is_beginner:
                 opts = "\n".join(f"{a.id}) {a.text}" for a in review.quiz.alternatives)
                 quiz_audio = await synthesize_listening(f"{review.quiz.question}\n{opts}", target_language)

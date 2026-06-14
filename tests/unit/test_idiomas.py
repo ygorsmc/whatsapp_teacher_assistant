@@ -252,6 +252,38 @@ async def test_flag_off_nao_anexa_tutor(mocker):
 
 
 @pytest.mark.asyncio
+async def test_flag_off_prompt_byte_a_byte(mocker):
+    """Invariante-mestra (§4.1): com a flag OFF, o prompt de um curso de idioma é
+    byte a byte o PREFIXO do prompt com a flag ON — OFF não muta nada; a vertical
+    SÓ anexa (nunca reescreve o prompt base)."""
+    mocker.patch.object(settings, "L1_SAFETY_NET_ENABLED", False)
+    mocker.patch.object(settings, "DEFAULT_TARGET_LANGUAGE", "en")
+
+    mocker.patch.object(settings, "LANGUAGE_MODE_ENABLED", False)
+    prompt_off = await _build("Inglês [idioma:en]")
+    mocker.patch.object(settings, "LANGUAGE_MODE_ENABLED", True)
+    prompt_on = await _build("Inglês [idioma:en]")
+
+    assert prompt_on.startswith(prompt_off)   # OFF = prefixo exato (byte a byte)
+    assert prompt_on != prompt_off            # ON realmente anexa o persona
+    assert _TUTOR_MARKER not in prompt_off    # OFF sem conteúdo de tutor
+
+
+def test_review_audio_text_por_nivel():
+    """S1-3: o texto narrado nunca sai na língua errada. Iniciante sem audio_script
+    (tradução no alvo) ⇒ None (não narra o resumo pt-BR com voz do alvo)."""
+    from src.shared.language import review_audio_text
+    # Iniciante com audio_script (versão no alvo) → narra o script.
+    assert review_audio_text("HELLO no alvo", "resumo pt-BR", True) == "HELLO no alvo"
+    # Iniciante SEM audio_script → None (texto segue; áudio é suprimido).
+    assert review_audio_text(None, "resumo pt-BR", True) is None
+    assert review_audio_text("", "resumo pt-BR", True) is None
+    # Avançado: o resumo já está no alvo → narra o resumo mesmo sem audio_script.
+    assert review_audio_text(None, "summary no alvo", False) == "summary no alvo"
+    assert review_audio_text("script", "summary", False) == "script"
+
+
+@pytest.mark.asyncio
 async def test_flag_on_curso_normal_nao_anexa_tutor(mocker):
     mocker.patch.object(settings, "LANGUAGE_MODE_ENABLED", True)
     assert _TUTOR_MARKER not in await _build("Matemática")
