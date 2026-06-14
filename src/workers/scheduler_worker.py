@@ -93,8 +93,8 @@ async def process_pending_schedules():
     default_ct = settings.CHANNEL_BACKEND.lower()
     # LGPD Art. 14 (P1.1): exclui criança sem opt-in do responsável das
     # entregas proativas (string vazia com a flag off — comportamento atual).
-    from src.shared.privacy import guardian_consent_sql_clause
-    consent_clause = guardian_consent_sql_clause("s")
+    from src.shared.privacy import guardian_consent_sql_clause, messaging_optout_clause
+    consent_clause = guardian_consent_sql_clause("s") + messaging_optout_clause("s")  # P1.1 + F9 opt-out
 
     async with AsyncSessionLocal() as session:
         # Busca os agendamentos vencidos com os DOIS endereços do aluno + o canal preferido.

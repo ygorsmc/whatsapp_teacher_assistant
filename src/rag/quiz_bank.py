@@ -297,6 +297,7 @@ async def list_simulado_questions(
     subject_id: Optional[str],
     max_section: int,
     limit: int = 5,
+    material_type: Optional[str] = None,
 ) -> List[dict]:
     """Monta o pool do /simulado: questões do QuizBank cruzando capítulos e
     tópicos de 1 até `max_section` (livros/apostilas E aulas — para turmas que
@@ -304,8 +305,12 @@ async def list_simulado_questions(
 
     DISTINCT ON (lesson_number, topic): espalha o simulado por
     capítulos/tópicos diferentes em vez de concentrar tudo numa seção.
+
+    `material_type` (F8): quando informado, restringe ao banco daquele tipo (ex.:
+    'exam' para o simulado estilo-prova); None = qualquer tipo (comportamento atual).
     """
     subject_clause, subject_params = _subject_filter(subject_id)
+    mat_clause = "AND qb.material_type = :mat" if material_type else ""
     sql = f"""
         SELECT DISTINCT ON (qb.lesson_number, qb.topic)
                qb.id, qb.lesson_number, qb.material_type, qb.topic,
@@ -315,11 +320,14 @@ async def list_simulado_questions(
         WHERE qb.course_id = :cid
           AND {subject_clause}
           AND qb.lesson_number <= :max_section
+          {mat_clause}
         ORDER BY qb.lesson_number, qb.topic, qb.created_at DESC
         LIMIT :limit
     """
     params = {"cid": course_id, "max_section": max_section, "limit": limit}
     params.update(subject_params)
+    if material_type:
+        params["mat"] = material_type
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(text(sql), params)

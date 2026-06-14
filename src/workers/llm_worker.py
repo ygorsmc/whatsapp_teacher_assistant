@@ -109,6 +109,20 @@ async def run_rag_pipeline(student_context: dict, text: str) -> str:
         subject_name=subject_name
     )
 
+    # F4 — Roleplay (Vertical de Idiomas): se há sessão ativa (ou o aluno pede),
+    # anexa a diretiva de dramatização ao System Prompt. O RAG continua ancorando
+    # (Recusa Honesta). Gated: ROLEPLAY_ENABLED + curso de idioma; senão intocado.
+    _class_obj = student_context["class_obj"]
+    if settings.ROLEPLAY_ENABLED and settings.LANGUAGE_MODE_ENABLED and getattr(_class_obj, "is_language", False):
+        from src.workers.roleplay import maybe_apply_roleplay
+        from src.shared.language import detect_language_course, level_to_cefr
+        _spec = detect_language_course(course.name, default_target=settings.DEFAULT_TARGET_LANGUAGE)
+        _target = _spec.target_language if _spec else settings.DEFAULT_TARGET_LANGUAGE
+        system_message, _ = await maybe_apply_roleplay(
+            system_message, text, student.id, _target,
+            level_to_cefr(getattr(_class_obj, "proficiency_level", None)),
+        )
+
     # Diretrizes do Addon (Modo Socrático / Gabarito / Errata) entram ANTES do
     # contexto — são regras de comportamento, não material de consulta.
     if reading_addons.get("directives"):
@@ -777,6 +791,15 @@ async def process_inbound(event: dict, ctx: MessageContext):
         if message_type == "text" and combined.strip().lower() == "revisar":
             from src.workers.privacy_commands import request_essay_review
             if await request_essay_review(channel, sender_id, student_context):
+                await ctx.complete()
+                return
+
+        # F9 — opt-out de mensagens proativas ("SAIR"/"VOLTAR"): intercepta ANTES
+        # do pipeline (palavra-chave exata; não cai como pergunta de estudo).
+        if message_type == "text":
+            from src.workers.optout import optout_intent, handle_optout
+            if optout_intent(combined) is not None:
+                await handle_optout(channel, sender_id, student_context, combined)
                 await ctx.complete()
                 return
 

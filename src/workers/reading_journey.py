@@ -268,8 +268,8 @@ async def process_reading_plans():
     now_utc = _naive_utc_now()
     default_ct = settings.CHANNEL_BACKEND.lower()
 
-    from src.shared.privacy import guardian_consent_sql_clause
-    consent_clause = guardian_consent_sql_clause("s")  # LGPD Art. 14 (P1.1)
+    from src.shared.privacy import guardian_consent_sql_clause, messaging_optout_clause
+    consent_clause = guardian_consent_sql_clause("s") + messaging_optout_clause("s")  # P1.1 + F9 opt-out
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
@@ -461,8 +461,8 @@ async def process_reading_checkins():
     now_utc = _naive_utc_now()
     default_ct = settings.CHANNEL_BACKEND.lower()
 
-    from src.shared.privacy import guardian_consent_sql_clause
-    consent_clause = guardian_consent_sql_clause("s")  # LGPD Art. 14 (P1.1)
+    from src.shared.privacy import guardian_consent_sql_clause, messaging_optout_clause
+    consent_clause = guardian_consent_sql_clause("s") + messaging_optout_clause("s")  # P1.1 + F9 opt-out
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(

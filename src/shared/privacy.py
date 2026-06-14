@@ -49,6 +49,13 @@ def mask_contact(contact: str | None) -> str:
     return "…" + contact[-4:]
 
 
+def messaging_optout_clause(student_alias: str = "s") -> str:
+    """Cláusula AND para queries de ENTREGA PROATIVA: exclui alunos que pediram
+    opt-out ("Envie SAIR", F9 — Quality Rating da Meta). NÃO é flag-gated (direito
+    do aluno); segura por padrão (coluna default false ⇒ ninguém excluído até optar)."""
+    return f" AND NOT COALESCE({student_alias}.messaging_opted_out, false)"
+
+
 def guardian_consent_sql_clause(student_alias: str = "s") -> str:
     """Cláusula AND para queries de ENTREGA PROATIVA (Art. 14, P1.1).
 

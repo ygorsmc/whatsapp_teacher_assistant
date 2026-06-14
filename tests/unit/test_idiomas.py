@@ -25,6 +25,13 @@ from src.shared.language import (
     normalize_level,
 )
 from src.workers.placement import parse_placement_answers, placement_enabled
+from src.workers.roleplay import roleplay_enabled
+from src.workers.exam_prep import exam_prep_enabled
+from src.rag.query_router import detect_roleplay_intent, is_roleplay_exit
+from src.rag.review_generator import EXAM_PREP_PERSPECTIVES
+from src.shared.constants.prompts import EXAM_PREP_PROMPT
+from src.workers.optout import optout_intent
+from src.shared.privacy import messaging_optout_clause
 from src.speech.factory import get_pronunciation, get_stt, get_tts
 from src.speech.interfaces import PronunciationScore, Transcription, WordScore
 from src.speech.pronunciation import AzurePronunciation, _parse_azure
@@ -635,3 +642,79 @@ async def test_f7_curso_normal_nao_anexa(mocker):
     mocker.patch.object(settings, "LANGUAGE_MODE_ENABLED", True)
     mocker.patch.object(settings, "L1_SAFETY_NET_ENABLED", True)
     assert _L1_MARKER not in await _build("Matemática")
+
+
+# ==============================================================================
+# F4 — Roleplay (intenção/saída por regex + gate)
+# ==============================================================================
+
+def test_detect_roleplay_intent():
+    assert detect_roleplay_intent("vamos praticar uma conversa no restaurante") == "restaurante"
+    assert detect_roleplay_intent("vamos conversar") == ""          # intenção genérica
+    assert detect_roleplay_intent("faça um roleplay no aeroporto") == "aeroporto"
+    assert detect_roleplay_intent("o que é o present perfect?") is None  # sem intenção
+
+
+def test_is_roleplay_exit():
+    assert is_roleplay_exit("parar") is True
+    assert is_roleplay_exit("encerrar") is True
+    assert is_roleplay_exit("quero continuar a conversa") is False
+
+
+def test_roleplay_enabled_exige_as_duas_flags(mocker):
+    mocker.patch.object(settings, "LANGUAGE_MODE_ENABLED", True)
+    mocker.patch.object(settings, "ROLEPLAY_ENABLED", False)
+    assert roleplay_enabled() is False
+    mocker.patch.object(settings, "ROLEPLAY_ENABLED", True)
+    assert roleplay_enabled() is True
+    mocker.patch.object(settings, "LANGUAGE_MODE_ENABLED", False)
+    assert roleplay_enabled() is False
+
+
+# ==============================================================================
+# F8 — Exam prep (TOEFL/IELTS): estilo-prova + gate
+# ==============================================================================
+
+def test_exam_prep_perspectives_nao_vazio():
+    assert len(EXAM_PREP_PERSPECTIVES) >= 2
+
+
+def test_exam_prep_prompt_formata():
+    prompt = EXAM_PREP_PROMPT.format(
+        target_language_name="inglês", cefr_level="B2", student_name="Ana",
+        course_name="Inglês", lesson_label="Capítulo 1",
+        topic="academic vocabulary", perspective="reading comprehension",
+        lesson_content="The study concluded that...",
+    )
+    assert "inglês" in prompt and "TOEFL/IELTS" in prompt and "The study" in prompt
+
+
+def test_exam_prep_enabled_exige_as_duas_flags(mocker):
+    mocker.patch.object(settings, "LANGUAGE_MODE_ENABLED", True)
+    mocker.patch.object(settings, "EXAM_PREP_ENABLED", False)
+    assert exam_prep_enabled() is False
+    mocker.patch.object(settings, "EXAM_PREP_ENABLED", True)
+    assert exam_prep_enabled() is True
+    mocker.patch.object(settings, "LANGUAGE_MODE_ENABLED", False)
+    assert exam_prep_enabled() is False
+
+
+# ==============================================================================
+# F9 — White-Label/B2B: opt-out de mensagens (SAIR/VOLTAR) + cláusula SQL
+# ==============================================================================
+
+def test_optout_intent():
+    assert optout_intent("sair") == "out"
+    assert optout_intent("SAIR") == "out"
+    assert optout_intent("cancelar") == "out"
+    assert optout_intent("voltar") == "in"
+    assert optout_intent("retomar") == "in"
+    assert optout_intent("o que é o present perfect?") is None
+    assert optout_intent("vou sair de casa") is None  # não é standalone
+
+
+def test_messaging_optout_clause():
+    clause = messaging_optout_clause("s")
+    assert "messaging_opted_out" in clause and clause.strip().startswith("AND")
+    # 'sair' do roleplay foi reservado ao opt-out → não é mais saída de roleplay.
+    assert is_roleplay_exit("sair") is False

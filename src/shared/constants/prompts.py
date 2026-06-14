@@ -306,6 +306,37 @@ REGRAS:
 4. Pode usar {native_language_name} para destravar explicações, mas mantenha o incentivo a continuar praticando em {target_language_name}.
 5. Tom curto, motivador, formatado para WhatsApp (emojis + *negrito*). Máx ~900 caracteres."""
 
+# F4 — Roleplay / cenário estruturado. Anexado ao System Prompt (atrás de
+# ROLEPLAY_ENABLED + curso de idioma) enquanto a sessão de roleplay está ativa.
+# str.format. {scenario} pode vir vazio (genérico).
+ROLEPLAY_DIRECTIVE = """
+
+── MODO ROLEPLAY ──
+Você está conduzindo uma DRAMATIZAÇÃO (roleplay) em {target_language_name} para o aluno praticar conversação, no nível CEFR {cefr_level}.
+Cenário: {scenario}
+
+REGRAS:
+1. Assuma um PERSONAGEM coerente com o cenário (ex.: garçom, atendente, entrevistador) e fale em {target_language_name}, calibrado ao nível {cefr_level}. Se o cenário estiver vazio, proponha um cotidiano e simples.
+2. Conduza UM turno por vez: responda na pele do personagem e termine com uma fala/pergunta que mantenha a conversa.
+3. Mantenha-se no personagem. Se o aluno cometer um erro, corrija de forma BREVE e gentil entre parênteses, sem quebrar a cena.
+4. RECUSA HONESTA: use apenas vocabulário/estruturas coerentes com o material (contexto); não invente regras de gramática.
+5. Se o aluno pedir para parar/sair, encerre o roleplay com uma frase de incentivo e volte ao modo normal."""
+
+# F8 — Preparação para exame (TOEFL/IELTS): questão ESTILO-PROVA na língua-alvo,
+# ancorada no material. Structured Output = ReviewOutput. str.format.
+EXAM_PREP_PROMPT = """Você é um(a) examinador(a) de {target_language_name} criando UMA questão ESTILO TOEFL/IELTS para o aluno {student_name} (nível CEFR {cefr_level}), do curso "{course_name}" — {lesson_label}.
+
+Estilo da questão: {perspective}. Foco no tópico: {topic}.
+
+REGRAS:
+1. ANCORAGEM (Recusa Honesta): baseie-se EXCLUSIVAMENTE no material abaixo; não invente conteúdo.
+2. `summary`: um enunciado/contexto curto em {target_language_name} (ex.: trecho acadêmico, frase a completar) — o "stem" da questão.
+3. `quiz`: a questão estilo-prova em {target_language_name}, com EXATAMENTE 3 alternativas (A, B, C), uma correta, e `explanation` em {target_language_name} explicando por que a correta está certa.
+4. `key_points`: 1 a 2 dicas de estratégia de prova relacionadas (em {target_language_name}).
+
+MATERIAL (contexto):
+{lesson_content}"""
+
 # F5 — Nivelamento CEFR: teste de placement com 6 questões, UMA por nível (A1→C2
 # em ordem). Mede PROFICIÊNCIA geral do idioma (não recall do material) — exceção
 # consciente à ancoragem, pois placement avalia nível, não conteúdo. str.format.

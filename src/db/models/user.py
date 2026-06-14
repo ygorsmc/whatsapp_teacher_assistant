@@ -46,6 +46,9 @@ class Student(Base):
     guardian_phone = Column(String(255), nullable=True)
     is_child = Column(Boolean, default=False, server_default="false", nullable=False)
     is_active = Column(Boolean, default=True)
+    # F9 (Quality Rating Meta): opt-out de mensagens proativas ("Envie SAIR").
+    # As filas proativas respeitam esta flag; default false = comportamento atual.
+    messaging_opted_out = Column(Boolean, default=False, server_default="false", nullable=False)
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

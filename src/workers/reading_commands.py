@@ -249,6 +249,9 @@ async def run_simulado_command(channel, sender_id: str, class_query: str, max_ch
                 return
 
             class_id, c_name, course_id, subject_id = klass[0], klass[1], klass[2], klass[3]
+            subject_name = klass[5]                 # _resolve_owned_class
+            is_language = bool(getattr(klass, "is_language", False))
+            teacher_id = teacher[0]
 
             students = (await session.execute(
                 text('''SELECT s.id, s.phone, s.name, s.telegram_chat_id, s.preferred_channel,
@@ -263,9 +266,21 @@ async def run_simulado_command(channel, sender_id: str, class_query: str, max_ch
             )).fetchall()
 
         from src.rag.quiz_bank import list_simulado_questions
+        # F8 — Exam prep: turma de idioma com EXAM_PREP_ENABLED → simulado ESTILO-
+        # PROVA (banco material_type='exam'; semeia se faltar). Senão, simulado normal.
+        from src.workers.exam_prep import exam_prep_enabled, ensure_exam_questions, EXAM_MATERIAL_TYPE
+        exam_mode = exam_prep_enabled() and is_language
+        if exam_mode:
+            await channel.send_text(sender_id, "⏳ Preparando simulado estilo-prova (TOEFL/IELTS)...")
+            await ensure_exam_questions(
+                teacher_id=teacher_id, course_id=course_id, course_name=c_name,
+                subject_name=subject_name, subject_id=subject_id,
+                max_chapter=max_chapter, target_count=SIMULADO_MAX_QUESTIONS,
+            )
         questions = await list_simulado_questions(
             course_id=course_id, subject_id=subject_id,
             max_section=max_chapter, limit=SIMULADO_MAX_QUESTIONS,
+            material_type=EXAM_MATERIAL_TYPE if exam_mode else None,
         )
 
         if not questions:

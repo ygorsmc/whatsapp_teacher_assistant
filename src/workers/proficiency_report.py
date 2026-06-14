@@ -20,6 +20,7 @@ from sqlalchemy import text
 
 from src.shared.config import settings
 from src.shared.telemetry import logger, track_event
+from src.shared.privacy import messaging_optout_clause
 from src.db.database import AsyncSessionLocal
 
 LOCAL_TZ_OFFSET = timedelta(hours=settings.TIMEZONE_OFFSET_HOURS)
@@ -215,7 +216,8 @@ async def process_monthly_proficiency_report():
                                ) AS last_interaction
                         FROM "Students" s
                         JOIN "StudentEnrollment" se ON se.student_id = s.id
-                        WHERE se.class_id = :clid AND s.is_active = true'''),
+                        WHERE se.class_id = :clid AND s.is_active = true'''
+                        + messaging_optout_clause("s")),  # F9 — respeita opt-out
                 {"clid": cl.id},
             )).fetchall()
 

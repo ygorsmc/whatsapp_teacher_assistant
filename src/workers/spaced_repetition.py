@@ -227,8 +227,8 @@ async def process_spaced_repetition():
     default_ct = settings.CHANNEL_BACKEND.lower()
 
     async with AsyncSessionLocal() as session:
-        from src.shared.privacy import guardian_consent_sql_clause
-        consent_clause = guardian_consent_sql_clause("s")  # LGPD Art. 14 (P1.1)
+        from src.shared.privacy import guardian_consent_sql_clause, messaging_optout_clause
+        consent_clause = guardian_consent_sql_clause("s") + messaging_optout_clause("s")  # P1.1 + F9 opt-out
         result = await session.execute(
             text(f"""
                 SELECT srq.id AS srq_id, srq.student_id, srq.quiz_bank_id, srq.interval_days,

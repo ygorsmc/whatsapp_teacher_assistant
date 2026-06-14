@@ -28,6 +28,7 @@ from src.db.database import AsyncSessionLocal
 router = APIRouter(prefix="/v1/partner")
 
 MAX_KEYS_PER_REQUEST = 1000
+MIN_COHORT_SIZE = 3  # LGPD: agregados só com coorte >= 3
 
 
 def _check_api_key(x_api_key: str | None):
@@ -143,4 +144,83 @@ async def class_stats(course: str, class_name: str, x_api_key: str | None = Head
         "completed": sum(1 for p in plans if (p[0] or 0) >= p[1]),
         "paused": sum(1 for p in plans if p[2]),
         "activations_last_30d": activations_30d,
+    }
+
+
+class LanguageClassRequest(BaseModel):
+    course: str = Field(min_length=1, max_length=255, description="Nome do Curso (= pasta do Drive)")
+    class_name: str = Field(min_length=1, max_length=255, description="Turma de idioma")
+    level: str | None = Field(default=None, description="Nível: Iniciante|Intermediário|Avançado|Fluente")
+
+
+@router.post("/language_class")
+async def provision_language_class(body: LanguageClassRequest, x_api_key: str | None = Header(default=None)):
+    """F9 — provisiona/configura uma TURMA DE IDIOMA (is_language=true + nível),
+    sem tocar na planilha. IDs determinísticos (iguais à sync). A escola assume o
+    custo de áudio. O idioma-alvo é inferido pelo NOME do curso (§1.4)."""
+    _check_api_key(x_api_key)
+
+    from src.drive.spreadsheet_sync import generate_id
+    from src.shared.language import normalize_level
+    from src.db.database import BOOTSTRAP_ADMIN_ID
+
+    course_id = generate_id("crs", body.course)
+    class_id = generate_id("cls", f"{course_id}_{body.class_name}")
+    level = normalize_level(body.level)
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            text('''INSERT INTO "Courses" (id, teacher_id, name, is_active)
+                    VALUES (:id, :tid, :name, true) ON CONFLICT(id) DO NOTHING'''),
+            {"id": course_id, "tid": BOOTSTRAP_ADMIN_ID, "name": body.course},
+        )
+        await session.execute(
+            text('''INSERT INTO "Classes" (id, course_id, teacher_id, name, current_lesson_number,
+                                           is_language, proficiency_level)
+                    VALUES (:id, :cid, :tid, :name, 1, true, :level)
+                    ON CONFLICT(id) DO UPDATE SET
+                        is_language = true,
+                        proficiency_level = COALESCE(excluded.proficiency_level, "Classes".proficiency_level),
+                        updated_at = CURRENT_TIMESTAMP'''),
+            {"id": class_id, "cid": course_id, "tid": BOOTSTRAP_ADMIN_ID, "name": body.class_name, "level": level},
+        )
+        await session.commit()
+
+    track_event("partner_language_class_provisioned", {"class_id": class_id, "level": level})
+    logger.info("partner_language_class_provisioned", class_id=class_id, level=level)
+    return {"class_id": class_id, "is_language": True, "proficiency_level": level}
+
+
+@router.get("/proficiency")
+async def class_proficiency(course: str, class_name: str, x_api_key: str | None = Header(default=None)):
+    """F9 — métricas AGREGADAS de proficiência da turma (coorte >= 3, LGPD): só
+    médias/contagens, nunca indivíduos. Insumo do dashboard B2B da escola."""
+    _check_api_key(x_api_key)
+
+    from src.drive.spreadsheet_sync import generate_id
+    course_id = generate_id("crs", course)
+    class_id = generate_id("cls", f"{course_id}_{class_name}")
+    cutoff_30d = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=30)
+
+    async with AsyncSessionLocal() as session:
+        agg = (await session.execute(
+            text('''SELECT COUNT(DISTINCT pa.student_id) AS alunos, COUNT(*) AS tentativas,
+                           AVG(pa.accuracy) AS acc, AVG(pa.fluency) AS flu
+                    FROM "PronunciationAttempts" pa
+                    JOIN "StudentEnrollment" se ON se.student_id = pa.student_id
+                    WHERE se.class_id = :clid AND pa.course_id = :cid AND pa.created_at >= :cutoff'''),
+            {"clid": class_id, "cid": course_id, "cutoff": cutoff_30d},
+        )).fetchone()
+
+    n_students = int(agg.alunos or 0) if agg else 0
+    if agg is None or n_students < MIN_COHORT_SIZE:
+        # Coorte insuficiente → suprime (LGPD), nunca devolve dado de poucos alunos.
+        return {"class_id": class_id, "suppressed": True, "reason": f"cohort < {MIN_COHORT_SIZE}"}
+
+    return {
+        "class_id": class_id,
+        "students_assessed": n_students,
+        "attempts_last_30d": int(agg.tentativas or 0),
+        "avg_accuracy": round(agg.acc) if agg.acc is not None else None,
+        "avg_fluency": round(agg.flu) if agg.flu is not None else None,
     }

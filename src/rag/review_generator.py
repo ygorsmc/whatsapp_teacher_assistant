@@ -44,6 +44,7 @@ from src.shared.constants.prompts import (
     LISTENING_PROMPT_TEMPLATE,
     LANGUAGE_REVIEW_PROMPT_TEMPLATE,
     VOCAB_GENERATION_PROMPT,
+    EXAM_PREP_PROMPT,
     TOPIC_EXTRACTION_PROMPT,
 )
 
@@ -124,6 +125,14 @@ VOCAB_PERSPECTIVES = [
     "Priorize uma expressão idiomática ou colocação útil",
     "Priorize um conectivo/advérbio frequente no trecho",
     "Priorize um falso cognato ou palavra que costuma confundir",
+]
+
+# F8 — Exam prep: estilos de questão TOEFL/IELTS.
+EXAM_PREP_PERSPECTIVES = [
+    "Compreensão de leitura (reading): inferência sobre um trecho",
+    "Completar lacuna (gap-fill) com a palavra/colocação acadêmica correta",
+    "Vocabulário acadêmico: sinônimo/uso no contexto",
+    "Estrutura/gramática formal típica de prova",
 ]
 
 
@@ -299,9 +308,11 @@ async def generate_review(
     # vetores 'listening' indexados. retrieval_material_type permite esse desacople.
     retrieval_mt = retrieval_material_type or material_type
 
-    # Pool de lentes: explícito (flashcards) > vocab > listening > leitura > aulas.
+    # Pool de lentes: explícito (flashcards) > exam > vocab > listening > leitura > aulas.
     if perspectives is None:
-        if material_type == "vocab":
+        if material_type == "exam":
+            perspectives = EXAM_PREP_PERSPECTIVES
+        elif material_type == "vocab":
             perspectives = VOCAB_PERSPECTIVES
         elif material_type == "listening":
             perspectives = LISTENING_PERSPECTIVES
@@ -452,7 +463,20 @@ async def generate_review(
     # Geração do Resumo e Quiz (em 1 só chamada usando Structured Outputs).
     # Para livro/apostila o prompt é o de CHECK-IN DE LEITURA: guia curto
     # (proteção autoral) + quiz sobre o trecho específico da seção (Fase 3).
-    if material_type == "vocab":
+    if material_type == "exam":
+        # F8 — Exam prep: questão estilo TOEFL/IELTS na língua-alvo.
+        dirs = listening_directives(course_name)
+        prompt = EXAM_PREP_PROMPT.format(
+            target_language_name=dirs["target_language_name"],
+            cefr_level=dirs["cefr_level"],
+            student_name=student_name,
+            course_name=course_name,
+            lesson_label=lesson_label,
+            topic=chosen_topic,
+            perspective=chosen_perspective,
+            lesson_content=lesson_content,
+        )
+    elif material_type == "vocab":
         # F2 — Vocabulário: flashcard de palavra-alvo (significado em L1) + áudio.
         dirs = listening_directives(course_name)
         prompt = VOCAB_GENERATION_PROMPT.format(

@@ -251,3 +251,7 @@ PLACEMENT_INTRO = "🎯 *Teste de nivelamento* — 6 perguntas rápidas, da mais
 PLACEMENT_FAILED = "😕 Não consegui montar o teste agora. Tente novamente em instantes."
 PLACEMENT_ANSWERS_UNCLEAR = "Não entendi suas respostas. Envie as 6 letras, ex.: *1A 2B 3C 4A 5B 6C*"
 PLACEMENT_RESULT = "🎉 Pronto! Seu nível estimado é *{cefr}*.\nVamos calibrar as próximas atividades para esse nível. Bons estudos! 💪"
+
+# F9 (B2B/Quality Rating) — opt-out de mensagens proativas
+OPTOUT_CONFIRMED = "✅ Pronto, você não receberá mais mensagens automáticas. Para voltar a receber, envie *VOLTAR* a qualquer momento."
+OPTIN_CONFIRMED = "🎉 Que bom te ver de volta! Você voltará a receber as atividades. Bons estudos! 💪"

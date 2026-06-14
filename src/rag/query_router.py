@@ -106,6 +106,37 @@ def route_query(query: str) -> RouteResult:
     return result
 
 
+# ── F4 (Vertical de Idiomas) — intenção de ROLEPLAY (regex puro, testável) ──────
+_ROLEPLAY_INTENT_REGEX = re.compile(
+    r"\b(role\s?play|encen[ae]|vamos\s+(?:praticar|treinar|conversar|simular)"
+    r"|simular?\s+(?:uma\s+)?(?:conversa|di[áa]logo|situa[çc][ãa]o)"
+    r"|pratica(?:r)?\s+(?:comigo|conversa|conversa[çc][ãa]o|di[áa]logo))\b",
+    re.IGNORECASE,
+)
+_ROLEPLAY_SCENARIO_REGEX = re.compile(
+    r"\b(?:n[oa]|numa?|em\s+uma?|sobre|de)\s+([0-9A-Za-zÀ-ü][\wÀ-ü ]{2,38})", re.IGNORECASE
+)
+# "sair" é reservado ao opt-out de mensagens (convenção da Meta) — a saída do
+# roleplay usa parar/encerrar/chega/terminar/stop para não colidir.
+_ROLEPLAY_EXIT_REGEX = re.compile(
+    r"^\s*(parar|encerrar|chega|terminar|stop)\b", re.IGNORECASE
+)
+
+
+def detect_roleplay_intent(query: str) -> Optional[str]:
+    """Intenção de roleplay? Retorna o CENÁRIO (best-effort) ou "" (genérico) se
+    detectado; None caso contrário. Puro/testável."""
+    if not query or not _ROLEPLAY_INTENT_REGEX.search(query):
+        return None
+    scenario = _ROLEPLAY_SCENARIO_REGEX.search(query)
+    return scenario.group(1).strip() if scenario else ""
+
+
+def is_roleplay_exit(query: str) -> bool:
+    """O aluno quer encerrar o roleplay? (só consultado com roleplay ativo). Puro."""
+    return bool(query and _ROLEPLAY_EXIT_REGEX.search(query))
+
+
 def sparse_query_text(query: str, route: RouteResult) -> str:
     """Texto do braço esparso: a query + reforço dos termos literais detectados.
 
