@@ -13,50 +13,27 @@ az acr build --registry $ACR_NAME --image whatsapp-webhook:latest --file Dockerf
 echo "📦 2. Enviando o código para o Azure construir a imagem do Worker..."
 az acr build --registry $ACR_NAME --image whatsapp-worker:latest --file Dockerfile.worker .
 
-echo "🔄 3. Atualizando o Container App do Webhook..."
-# Primeiro garantimos que o container app existe.
-# Como o ambiente pede Log Analytics nativamente, precisamos garantir que o provedor esteja registrado:
-echo "⏳ Registrando provider Microsoft.OperationalInsights (necessário para logs)..."
-az provider register -n Microsoft.OperationalInsights --wait
-
-echo "⏳ Verificando Ambiente do Container Apps..."
-az containerapp env create \
-  --name env-whatsapp-bot \
-  --resource-group $RESOURCE_GROUP \
-  --location brazilsouth || true
-
-echo "🚢 4. Fazendo Deploy do Webhook..."
+echo "🚢 3. Atualizando a imagem do Webhook..."
 az containerapp update \
   --name webhook-app \
   --resource-group $RESOURCE_GROUP \
   --image ${ACR_NAME}.azurecr.io/whatsapp-webhook:latest \
   --set-env-vars FORCE_UPDATE=$(date +%s)
 
-echo "🚢 5. Fazendo Deploy do Worker (LLM) e Atualizando Escalonamento (KEDA)..."
+echo "🚢 4. Atualizando a imagem do Worker (LLM)..."
 az containerapp update \
   --name worker-llm \
   --resource-group $RESOURCE_GROUP \
   --image ${ACR_NAME}.azurecr.io/whatsapp-worker:latest \
-  --set-env-vars FORCE_UPDATE=$(date +%s) QUEUE_BACKEND=redis PARSER_BACKEND=azure
+  --set-env-vars FORCE_UPDATE=$(date +%s)
 
-# Limpa regras antigas do Service Bus (se houver) e adiciona Redis
-# O Container App reinicia rapidamente após essas mudanças
-echo "⏳ Atualizando regra de escala KEDA para Redis Streams (inbound_messages)..."
-az containerapp update \
-  --name worker-llm \
-  --resource-group $RESOURCE_GROUP \
-  --scale-rule-name inbound-messages-rule \
-  --scale-rule-type redis-streams \
-  --scale-rule-auth "address=redis-url" \
-  --scale-rule-metadata "stream=inbound_messages" "consumerGroup=whatsapp_workers" "pendingEntriesCount=5" || true
-
-echo "🚢 6. Fazendo Deploy do Worker (Scheduler)..."
+echo "🚢 5. Atualizando a imagem do Worker (Scheduler)..."
 az containerapp update \
   --name worker-scheduler \
   --resource-group $RESOURCE_GROUP \
   --image ${ACR_NAME}.azurecr.io/whatsapp-worker:latest \
-  --set-env-vars FORCE_UPDATE=$(date +%s) QUEUE_BACKEND=redis PARSER_BACKEND=azure
+  --set-env-vars FORCE_UPDATE=$(date +%s)
 
-echo "✅ Deploy Completo! O seu bot foi atualizado de forma segura, mantendo todas as regras do KEDA e Variáveis de Ambiente."
+echo "✅ Deploy Completo! A infraestrutura e regras KEDA agora são 100% gerenciadas pelo Bicep."
 echo "Para pegar a URL pública do seu Webhook (para colar na Meta), rode:"
 echo "az containerapp show -n webhook-app -g $RESOURCE_GROUP --query properties.configuration.ingress.fqdn -o tsv"

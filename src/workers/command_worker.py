@@ -1,17 +1,108 @@
+import re
 from src.queue.interfaces import MessageContext
 from datetime import datetime, timezone, timedelta
 from src.shared.config import settings
 from src.channel.factory import get_channel
 from src.shared.telemetry import logger
 from src.db.database import AsyncSessionLocal
+from src.cache.redis_client import get_redis
 from sqlalchemy import text
 from src.shared.constants.messages import (
-    CMD_SYNC_ALUNOS_START, CMD_SYNC_MATERIAIS_START, CMD_SYNC_MATERIAIS_SUCCESS, CMD_SYNC_SUCCESS, CMD_SYNC_ERROR,
-    CMD_SYNC_UNLINKED_WARNING, CMD_SYNC_NO_TEACHER_WARNING, CMD_SYNC_DISCIPLINA_WARNING
+    CMD_SYNC_ALUNOS_START, CMD_SYNC_SUCCESS, CMD_SYNC_ERROR,
+    CMD_SYNC_UNLINKED_WARNING, CMD_SYNC_NO_TEACHER_WARNING, CMD_SYNC_DISCIPLINA_WARNING,
+    CMD_HELP_TEXT, CMD_CLASS_NOT_FOUND, CMD_TEACHER_NOT_FOUND, CMD_AVISO_USAGE,
+    CMD_STUDENT_PHONE_USAGE, CMD_STUDENT_NOT_FOUND, CMD_STUDENT_NOT_OWNED,
 )
-from src.shared.constants.commands import parse_command, CommandType
+from src.shared.constants.commands import (
+    parse_command, parse_management_command, parse_student_command, CommandType,
+)
 
 
+# ==============================================================================
+# HELPERS DE RESOLUÇÃO E POSSE
+# ==============================================================================
+
+async def _resolve_teacher(session, channel, sender_id: str, extra_fields: str = ""):
+    """Resolve o professor pelo identificador do canal (phone/telegram_chat_id),
+    com "self-heal" do vínculo via sufixo do telefone — mesmo padrão dos
+    comandos legados (/aula, /quiz). Retorna a Row ou None.
+
+    Campos retornados: id, is_admin[, extra_fields...]
+    """
+    query_col = channel.get_user_query_column()
+    fields = "id, is_admin" + (f", {extra_fields}" if extra_fields else "")
+
+    result = await session.execute(
+        text(f'SELECT {fields} FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id}
+    )
+    teacher = result.fetchone()
+
+    if not teacher:
+        res_stu = await session.execute(
+            text(f'SELECT phone FROM "Students" WHERE {query_col} = :sid'), {"sid": sender_id}
+        )
+        stu_phone = res_stu.scalar_one_or_none()
+        if stu_phone:
+            phone_suffix = stu_phone[-8:] if len(stu_phone) >= 8 else stu_phone
+            res_tea = await session.execute(
+                text(f'SELECT {fields} FROM "Teachers" WHERE phone LIKE :phone_like'),
+                {"phone_like": f"%{phone_suffix}"}
+            )
+            teacher = res_tea.fetchone()
+            if teacher:
+                await session.execute(
+                    text(f'UPDATE "Teachers" SET {query_col} = :sid WHERE id = :tid'),
+                    {"sid": sender_id, "tid": teacher[0]}
+                )
+                await session.commit()
+
+    return teacher
+
+
+async def _resolve_owned_class(session, teacher_id: str, is_admin: bool, class_query: str):
+    """Resolve a turma por nome (ILIKE) GARANTINDO a posse (Classes.teacher_id),
+    a menos que o professor seja admin. Esta é a validação de segurança central
+    de TODOS os comandos gerenciais por turma.
+
+    Retorna Row(id, name, course_id, subject_id, current_lesson_number,
+    subject_name, is_language, proficiency_level) ou None. (As 2 últimas — vertical
+    de Idiomas — são apêndices; os demais comandos usam só os índices 0–5.)
+    """
+    base_sql = """
+        SELECT c.id, c.name, c.course_id, c.subject_id, c.current_lesson_number,
+               sub.name AS subject_name, c.is_language, c.proficiency_level
+        FROM "Classes" c
+        LEFT JOIN "Subjects" sub ON sub.id = c.subject_id
+        WHERE c.name ILIKE '%' || :cname || '%'
+    """
+    if is_admin:
+        result = await session.execute(text(base_sql), {"cname": class_query})
+    else:
+        result = await session.execute(
+            text(base_sql + " AND c.teacher_id = :tid"),
+            {"cname": class_query, "tid": teacher_id}
+        )
+    return result.fetchone()
+
+
+def _naive_utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _as_naive(dt):
+    """Normaliza timestamps vindos do banco (str/aware) para naive UTC."""
+    if dt is None:
+        return None
+    if isinstance(dt, str):
+        dt = datetime.fromisoformat(dt)
+    if dt.tzinfo is not None:
+        dt = dt.replace(tzinfo=None)
+    return dt
+
+
+# ==============================================================================
+# COMANDOS LEGADOS
+# ==============================================================================
 
 async def run_sync_alunos_command(channel, sender_id: str):
     from src.drive.spreadsheet_sync import sync_users_from_sheet
@@ -59,14 +150,9 @@ async def run_sync_materiais_command(channel, sender_id: str):
     from src.workers.ingestion_worker import sync_google_drive
     try:
         await channel.send_text(sender_id, "⏳ Verificando o Google Drive por novos materiais. Arquivos pendentes serão colocados na Fila de Ingestão e processados em background...")
-        stats = await sync_google_drive()
-        
-        pendentes_na_fila = stats.get('docs_before', 0) - stats.get('docs_after', 0)
-        # O docs_before agora tem tudo que está em concluído, docs_after também.
-        # Wait, sync_google_drive retorna stats={"docs_before": count, "docs_after": count} onde count é os que estão concluídos.
-        # It's better to just give a simple response.
-        
-        msg = f"✅ Varredura concluída! Novos arquivos identificados foram enviados para a Fila de Processamento (limite de 2 simultâneos na nuvem).\n\nUse /listar_materiais para acompanhar o status."
+        await sync_google_drive()
+
+        msg = "✅ Varredura concluída! Novos arquivos identificados foram enviados para a Fila de Processamento (limite de 2 simultâneos na nuvem).\n\nUse /listar_materiais para acompanhar o status."
         await channel.send_text(sender_id, msg)
     except Exception as e:
         await channel.send_text(sender_id, f"❌ Erro na varredura: {str(e)[:100]}")
@@ -74,23 +160,9 @@ async def run_sync_materiais_command(channel, sender_id: str):
 async def run_list_cursos_command(channel, sender_id: str):
     try:
         async with AsyncSessionLocal() as session:
-            query_col = channel.get_user_query_column()
-            result = await session.execute(text(f'SELECT id, is_admin FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
-            teacher = result.fetchone()
-            
+            teacher = await _resolve_teacher(session, channel, sender_id)
             if not teacher:
-                res_stu = await session.execute(text(f'SELECT phone FROM "Students" WHERE {query_col} = :sid'), {"sid": sender_id})
-                stu_phone = res_stu.scalar_one_or_none()
-                if stu_phone:
-                    phone_suffix = stu_phone[-8:] if len(stu_phone) >= 8 else stu_phone
-                    res_tea = await session.execute(text('SELECT id, is_admin FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
-                    teacher = res_tea.fetchone()
-                    if teacher:
-                        await session.execute(text(f'UPDATE "Teachers" SET {query_col} = :sid WHERE id = :tid'), {"sid": sender_id, "tid": teacher[0]})
-                        await session.commit()
-                        
-            if not teacher:
-                await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
                 return
             
             teacher_id = teacher[0]
@@ -134,7 +206,7 @@ async def run_list_materiais_command(channel, sender_id: str, course_query: str)
             result = await session.execute(text('SELECT id FROM \"Teachers\" WHERE phone = :phone'), {"phone": sender_id})
             teacher = result.fetchone()
             if not teacher:
-                await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
                 return
                 
             folder_id = settings.GOOGLE_DRIVE_FOLDER_ID
@@ -191,48 +263,16 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
             return
 
         async with AsyncSessionLocal() as session:
-            query_col = channel.get_user_query_column()
-            result = await session.execute(text(f'SELECT id, is_admin FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
-            teacher = result.fetchone()
-            
+            teacher = await _resolve_teacher(session, channel, sender_id)
             if not teacher:
-                res_stu = await session.execute(text(f'SELECT phone FROM "Students" WHERE {query_col} = :sid'), {"sid": sender_id})
-                stu_phone = res_stu.scalar_one_or_none()
-                if stu_phone:
-                    phone_suffix = stu_phone[-8:] if len(stu_phone) >= 8 else stu_phone
-                    res_tea = await session.execute(text('SELECT id, is_admin FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
-                    teacher = res_tea.fetchone()
-                    if teacher:
-                        await session.execute(text(f'UPDATE "Teachers" SET {query_col} = :sid WHERE id = :tid'), {"sid": sender_id, "tid": teacher[0]})
-                        await session.commit()
-                        
-            if not teacher:
-                await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
                 return
             
-            teacher_id = teacher[0]
-            is_admin = teacher[1]
-            
             # Posse por turma: a turma precisa pertencer a este professor, a menos que seja admin
-            if is_admin:
-                stmt = text("""
-                    SELECT c.id, c.current_lesson_number
-                    FROM "Classes" c
-                    WHERE c.name ILIKE '%' || :cname || '%'
-                """)
-                result = await session.execute(stmt, {"cname": class_name})
-            else:
-                stmt = text("""
-                    SELECT c.id, c.current_lesson_number
-                    FROM "Classes" c
-                    WHERE c.name ILIKE '%' || :cname || '%' AND c.teacher_id = :tid
-                """)
-                result = await session.execute(stmt, {"cname": class_name, "tid": teacher_id})
-                
-            class_row = result.fetchone()
+            class_row = await _resolve_owned_class(session, teacher[0], teacher[1], class_name)
             
             if not class_row:
-                await channel.send_text(sender_id, f"❌ Turma '{class_name}' não encontrada.")
+                await channel.send_text(sender_id, CMD_CLASS_NOT_FOUND.format(class_query=class_name))
                 return
                 
             class_id = class_row[0]
@@ -260,57 +300,31 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
             
         async with AsyncSessionLocal() as session:
             # 1. Fetch Teacher
-            query_col = channel.get_user_query_column()
-            result = await session.execute(text(f'SELECT id, name, subject, is_admin FROM "Teachers" WHERE {query_col} = :sid'), {"sid": sender_id})
-            teacher = result.fetchone()
-            
-            if not teacher:
-                res_stu = await session.execute(text(f'SELECT phone FROM "Students" WHERE {query_col} = :sid'), {"sid": sender_id})
-                stu_phone = res_stu.scalar_one_or_none()
-                if stu_phone:
-                    phone_suffix = stu_phone[-8:] if len(stu_phone) >= 8 else stu_phone
-                    res_tea = await session.execute(text('SELECT id, name, subject, is_admin FROM "Teachers" WHERE phone LIKE :phone_like'), {"phone_like": f"%{phone_suffix}"})
-                    teacher = res_tea.fetchone()
-                    if teacher:
-                        await session.execute(text(f'UPDATE "Teachers" SET {query_col} = :sid WHERE id = :tid'), {"sid": sender_id, "tid": teacher[0]})
-                        await session.commit()
+            teacher = await _resolve_teacher(session, channel, sender_id, extra_fields="name, subject")
+            # Row: (id, is_admin, name, subject)
                         
             if not teacher:
-                await channel.send_text(sender_id, "❌ Professor não encontrado no sistema.")
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
                 return
                 
             # 2. Fetch Class & Course & Subject (posse por turma: c.teacher_id, a menos que seja admin)
             teacher_id = teacher[0]
-            is_admin = teacher[3]
+            is_admin = teacher[1]
             
-            if is_admin:
-                stmt = text("""
-                    SELECT c.id, c.current_lesson_number, c.course_id, c.name, sub.name AS subject_name
-                    FROM "Classes" c
-                    LEFT JOIN "Subjects" sub ON sub.id = c.subject_id
-                    WHERE c.name ILIKE '%' || :cname || '%'
-                """)
-                result = await session.execute(stmt, {"cname": class_name})
-            else:
-                stmt = text("""
-                    SELECT c.id, c.current_lesson_number, c.course_id, c.name, sub.name AS subject_name
-                    FROM "Classes" c
-                    LEFT JOIN "Subjects" sub ON sub.id = c.subject_id
-                    WHERE c.name ILIKE '%' || :cname || '%' AND c.teacher_id = :tid
-                """)
-                result = await session.execute(stmt, {"cname": class_name, "tid": teacher_id})
-                
-            class_row = result.fetchone()
+            class_row = await _resolve_owned_class(session, teacher_id, is_admin, class_name)
 
             if not class_row:
-                await channel.send_text(sender_id, f"❌ Turma '{class_name}' não encontrada.")
+                await channel.send_text(sender_id, CMD_CLASS_NOT_FOUND.format(class_query=class_name))
                 return
 
             class_id = class_row[0]
-            current_lesson = class_row[1]
+            c_name = class_row[1]
             course_id = class_row[2]
-            c_name = class_row[3]
-            subject_name = class_row[4]  # disciplina da turma (pode ser None em legado)
+            subject_id = class_row[3]      # disciplina da turma (escopo do QuizBank)
+            current_lesson = class_row[4]
+            subject_name = class_row[5]    # pode ser None em legado
+            is_language = class_row[6]     # vertical de Idiomas (planilha)
+            proficiency_level = class_row[7]
             
             # 3. Fetch Enrolled Active Students (com endereços dos dois canais + canal preferido)
             # Adiciona a data da última interação para validação da janela de 24h
@@ -342,22 +356,63 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
         
         lesson_label = await resolve_lesson_label(course_id, str(current_lesson))
         
-        review = await generate_review(
-            teacher_id=teacher[0],
-            teacher_name=teacher[1],
-            teacher_subject=teacher[2],
-            student_id="broadcast",
-            student_name="Turma",  # Mensagem generalizada para a turma
-            course_id=course_id,
-            course_name=c_name,
-            subject_name=subject_name,
-            current_lesson_number=current_lesson,
-            lesson_label=lesson_label,
-        )
-        
+        # Vertical de Idiomas: turma de idioma → revisão com a língua do TEXTO por
+        # nível + áudio na língua-alvo (paridade com a revisão individual). Sem
+        # cache (gerador dedicado); fallback à revisão normal sem conteúdo.
+        from src.rag.review_generator import class_language_context, generate_language_review
+        delivery, target_language = class_language_context(c_name, is_language, proficiency_level)
+
+        review = None
+        if delivery is not None and target_language is not None:
+            review = await generate_language_review(
+                teacher_id=teacher[0],
+                student_name="Turma",
+                course_id=course_id,
+                course_name=c_name,
+                subject_name=subject_name,
+                current_lesson_number=current_lesson,
+                lesson_label=lesson_label,
+                delivery=delivery,
+                target_language=target_language,
+            )
+            if review is None:
+                delivery = None  # sem conteúdo de idioma → revisão normal
+
+        if review is None:
+            # from_bank=False: o broadcast precisa de uma questão NOVA para a turma
+            # inteira (a leitura per-aluno do cache não se aplica a 'broadcast').
+            # O pacote gerado é SALVO no QuizBank mesmo assim — a turma toda passa
+            # a aproveitá-lo nas revisões individuais futuras.
+            review = await generate_review(
+                teacher_id=teacher[0],
+                teacher_name=teacher[2],
+                teacher_subject=teacher[3],
+                student_id="broadcast",
+                student_name="Turma",  # Mensagem generalizada para a turma
+                course_id=course_id,
+                course_name=c_name,
+                subject_name=subject_name,
+                current_lesson_number=current_lesson,
+                lesson_label=lesson_label,
+                subject_id=subject_id,
+                from_bank=False,
+            )
+
         if not review:
             await channel.send_text(sender_id, f"❌ Nenhum material encontrado no banco de dados para a aula {current_lesson}.")
             return
+
+        # Áudio sintetizado UMA vez e reaproveitado no broadcast (evita N chamadas
+        # de TTS). Revisão sempre na língua-alvo; quiz só quando o texto já é alvo
+        # (níveis avançados) — assim o áudio reproduz fielmente o que está escrito.
+        review_audio = None
+        quiz_audio = None
+        if delivery is not None and target_language is not None:
+            from src.rag.review_generator import synthesize_listening
+            review_audio = await synthesize_listening(review.audio_script or review.summary, target_language)
+            if not delivery.is_beginner:
+                opts = "\n".join(f"{a.id}) {a.text}" for a in review.quiz.alternatives)
+                quiz_audio = await synthesize_listening(f"{review.quiz.question}\n{opts}", target_language)
             
         # Format the summary message to be broadcasted before the quiz
         key_points_text = "\n".join(f"  • {kp}" for kp in review.key_points)
@@ -384,13 +439,12 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
             
         # 5. Broadcast quiz to all students — roteamento por aluno ("follow-the-user").
         # O endereço de entrega depende do canal: telegram_chat_id (Telegram) ou phone (WhatsApp).
-        # Antes usava sempre s.phone, o que fazia o envio no Telegram falhar (chat_id inválido).
         from src.workers.micro_learning import send_quiz_to_student
         default_ct = settings.CHANNEL_BACKEND.lower()
         success_count = 0
         skipped_unlinked = 0
         skipped_window_names = []
-        twenty_four_hours_ago = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=24)
+        twenty_four_hours_ago = _naive_utc_now() - timedelta(hours=24)
 
         for st in students:
             ct = (st[4] or default_ct).lower()
@@ -402,15 +456,8 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
                 continue
                 
             # Checa a janela de 24h
-            last_int = st[5]
-            window_active = False
-            if last_int:
-                if isinstance(last_int, str):
-                    last_int = datetime.fromisoformat(last_int)
-                if last_int.tzinfo is not None:
-                    last_int = last_int.replace(tzinfo=None)
-                if last_int > twenty_four_hours_ago:
-                    window_active = True
+            last_int = _as_naive(st[5])
+            window_active = bool(last_int and last_int > twenty_four_hours_ago)
                     
             if not window_active:
                 skipped_window_names.append(st[2])
@@ -421,7 +468,16 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
                 c = get_channel(ct)
                 # Envia o resumo antes do quiz
                 await c.send_text(addr, summary_message)
-                # Envia o quiz interativo
+                # Vertical de Idiomas: áudio da revisão na língua-alvo (bytes
+                # reaproveitados; best-effort — falha não derruba a entrega).
+                if review_audio:
+                    try:
+                        await c.send_audio(addr, review_audio)
+                    except Exception as e:
+                        logger.warning("quiz_review_audio_failed", student_id=st[0], error=str(e)[:200])
+                # Envia o quiz interativo — o quiz_bank_id registra o consumo
+                # da questão por ESTE aluno (PendingQuizzes.quiz_bank_id),
+                # garantindo que ele não a receba de novo numa revisão futura.
                 await send_quiz_to_student(
                     channel=c,
                     student={
@@ -430,8 +486,14 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
                         "course_id": course_id,
                         "lesson_pointer": str(current_lesson)
                     },
-                    quiz=quiz_output
+                    quiz=quiz_output,
+                    quiz_bank_id=review.quiz_bank_id,
                 )
+                if quiz_audio:
+                    try:
+                        await c.send_audio(addr, quiz_audio)
+                    except Exception as e:
+                        logger.warning("quiz_audio_send_failed", student_id=st[0], error=str(e)[:200])
                 success_count += 1
             except Exception as e:
                 logger.error("failed_to_send_quiz_to_student", student_id=st[0], error=str(e))
@@ -447,12 +509,708 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
     except Exception as e:
         await channel.send_text(sender_id, f"❌ Erro ao enviar quiz: {str(e)[:100]}")
 
+
+# ==============================================================================
+# COMANDOS GERENCIAIS — /comando_[turma]_[arg]
+# Todos validam a posse da turma via Classes.teacher_id (_resolve_owned_class).
+# ==============================================================================
+
+async def run_engagement_command(channel, sender_id: str, class_query: str):
+    """/engajamento_[turma] — alunos ativos e total de interações em 7 dias."""
+    try:
+        async with AsyncSessionLocal() as session:
+            teacher = await _resolve_teacher(session, channel, sender_id)
+            if not teacher:
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
+                return
+            klass = await _resolve_owned_class(session, teacher[0], teacher[1], class_query)
+            if not klass:
+                await channel.send_text(sender_id, CMD_CLASS_NOT_FOUND.format(class_query=class_query))
+                return
+
+            class_id, c_name = klass[0], klass[1]
+            cutoff = _naive_utc_now() - timedelta(days=7)
+
+            total_students = (await session.execute(
+                text('''SELECT count(*)
+                        FROM "StudentEnrollment" se
+                        JOIN "Students" s ON s.id = se.student_id
+                        WHERE se.class_id = :cid AND s.is_active = true'''),
+                {"cid": class_id}
+            )).scalar() or 0
+
+            row = (await session.execute(
+                text('''SELECT count(DISTINCT si.student_id) AS ativos,
+                               count(*) AS interacoes
+                        FROM "StudentInteractions" si
+                        JOIN "StudentEnrollment" se ON se.student_id = si.student_id
+                        WHERE se.class_id = :cid AND si.timestamp >= :cutoff'''),
+                {"cid": class_id, "cutoff": cutoff}
+            )).fetchone()
+            active_students = (row[0] if row else 0) or 0
+            interactions = (row[1] if row else 0) or 0
+
+            quizzes_answered = (await session.execute(
+                text('''SELECT count(*)
+                        FROM "PendingQuizzes" pq
+                        JOIN "StudentEnrollment" se ON se.student_id = pq.student_id
+                        WHERE se.class_id = :cid
+                          AND pq.status = 'answered'
+                          AND pq.answered_at >= :cutoff'''),
+                {"cid": class_id, "cutoff": cutoff}
+            )).scalar() or 0
+
+        pct = round(100 * active_students / total_students) if total_students else 0
+        msg = (
+            f"📊 *Engajamento — {c_name}* (últimos 7 dias)\n\n"
+            f"👥 Alunos ativos: *{active_students} de {total_students}* ({pct}%)\n"
+            f"💬 Interações registradas: *{interactions}*\n"
+            f"📝 Quizzes respondidos: *{quizzes_answered}*"
+        )
+        await channel.send_text(sender_id, msg)
+    except Exception as e:
+        logger.error("engagement_command_failed", error=str(e)[:300])
+        await channel.send_text(sender_id, f"❌ Erro ao calcular engajamento: {str(e)[:100]}")
+
+
+async def run_quiz_performance_command(channel, sender_id: str, class_query: str):
+    """/acertos_[turma] — junta PendingQuizzes ↔ QuizBank, agrupa por topic e
+    retorna os 3 tópicos com pior desempenho."""
+    try:
+        async with AsyncSessionLocal() as session:
+            teacher = await _resolve_teacher(session, channel, sender_id)
+            if not teacher:
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
+                return
+            klass = await _resolve_owned_class(session, teacher[0], teacher[1], class_query)
+            if not klass:
+                await channel.send_text(sender_id, CMD_CLASS_NOT_FOUND.format(class_query=class_query))
+                return
+
+            class_id, c_name = klass[0], klass[1]
+
+            overall = (await session.execute(
+                text('''SELECT SUM(CASE WHEN pq.is_correct THEN 1 ELSE 0 END) AS acertos,
+                               COUNT(*) AS total
+                        FROM "PendingQuizzes" pq
+                        JOIN "QuizBank" qb ON qb.id = pq.quiz_bank_id
+                        JOIN "StudentEnrollment" se ON se.student_id = pq.student_id
+                        WHERE se.class_id = :cid AND pq.status = 'answered' '''),
+                {"cid": class_id}
+            )).fetchone()
+            total_answered = (overall[1] if overall else 0) or 0
+            total_correct = (overall[0] if overall else 0) or 0
+
+            if not total_answered:
+                await channel.send_text(
+                    sender_id,
+                    f"📈 *Acertos — {c_name}*\n\nAinda não há quizzes do Banco de Questões "
+                    "respondidos nesta turma.\n\n_Nota: respostas anteriores à ativação do "
+                    "QuizBank não entram nesta análise (não têm vínculo com tópico)._"
+                )
+                return
+
+            worst = (await session.execute(
+                text('''SELECT qb.topic,
+                               SUM(CASE WHEN pq.is_correct THEN 1 ELSE 0 END) AS acertos,
+                               COUNT(*) AS total
+                        FROM "PendingQuizzes" pq
+                        JOIN "QuizBank" qb ON qb.id = pq.quiz_bank_id
+                        JOIN "StudentEnrollment" se ON se.student_id = pq.student_id
+                        WHERE se.class_id = :cid AND pq.status = 'answered'
+                        GROUP BY qb.topic
+                        ORDER BY (SUM(CASE WHEN pq.is_correct THEN 1 ELSE 0 END)::float / COUNT(*)) ASC,
+                                 COUNT(*) DESC
+                        LIMIT 3'''),
+                {"cid": class_id}
+            )).fetchall()
+
+        overall_pct = round(100 * total_correct / total_answered)
+        msg = (
+            f"📈 *Acertos — {c_name}*\n\n"
+            f"Geral: *{total_correct}/{total_answered}* respostas corretas ({overall_pct}%)\n\n"
+            f"⚠️ *3 tópicos com pior desempenho:*\n"
+        )
+        for idx, r in enumerate(worst, 1):
+            topic, hits, total = r[0], r[1] or 0, r[2] or 0
+            pct = round(100 * hits / total) if total else 0
+            msg += f"{idx}. *{topic}* — {hits}/{total} ({pct}%)\n"
+        msg += "\n💡 _Dica: vale reforçar esses tópicos na próxima aula._"
+        await channel.send_text(sender_id, msg[:4000])
+    except Exception as e:
+        logger.error("quiz_performance_command_failed", error=str(e)[:300])
+        await channel.send_text(sender_id, f"❌ Erro ao calcular acertos: {str(e)[:100]}")
+
+
+async def run_at_risk_command(channel, sender_id: str, class_query: str):
+    """/risco_[turma] — alunos com max(timestamp) < NOW() - 7 dias e/ou
+    aproveitamento baixo nos quizzes."""
+    try:
+        async with AsyncSessionLocal() as session:
+            teacher = await _resolve_teacher(session, channel, sender_id)
+            if not teacher:
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
+                return
+            klass = await _resolve_owned_class(session, teacher[0], teacher[1], class_query)
+            if not klass:
+                await channel.send_text(sender_id, CMD_CLASS_NOT_FOUND.format(class_query=class_query))
+                return
+
+            class_id, c_name = klass[0], klass[1]
+
+            rows = (await session.execute(
+                text('''SELECT s.id, s.name,
+                               (SELECT MAX(si.timestamp) FROM "StudentInteractions" si
+                                WHERE si.student_id = s.id) AS last_seen,
+                               (SELECT COUNT(*) FROM "PendingQuizzes" pq
+                                WHERE pq.student_id = s.id AND pq.status = 'answered') AS respondidos,
+                               (SELECT COUNT(*) FROM "PendingQuizzes" pq
+                                WHERE pq.student_id = s.id AND pq.status = 'answered'
+                                  AND pq.is_correct = true) AS corretos
+                        FROM "Students" s
+                        JOIN "StudentEnrollment" se ON se.student_id = s.id
+                        WHERE se.class_id = :cid AND s.is_active = true
+                        ORDER BY s.name'''),
+                {"cid": class_id}
+            )).fetchall()
+
+        now = _naive_utc_now()
+        cutoff = now - timedelta(days=7)
+        at_risk = []
+        for r in rows:
+            reasons = []
+            last_seen = _as_naive(r[2])
+            if last_seen is None:
+                reasons.append("📵 nunca interagiu")
+            elif last_seen < cutoff:
+                reasons.append(f"📵 inativo há {(now - last_seen).days}d")
+
+            respondidos = r[3] or 0
+            corretos = r[4] or 0
+            if respondidos >= 3:
+                taxa = corretos / respondidos
+                if taxa < 0.5:
+                    reasons.append(f"📉 acertos {round(taxa * 100)}% ({corretos}/{respondidos})")
+
+            if reasons:
+                at_risk.append((r[1], reasons))
+
+        if not at_risk:
+            await channel.send_text(sender_id, f"🟢 *Risco — {c_name}*\n\nNenhum aluno em risco identificado. Boa!")
+            return
+
+        msg = f"🚨 *Alunos em risco — {c_name}* ({len(at_risk)})\n\n"
+        for name, reasons in at_risk[:25]:
+            msg += f"• *{name}* — {', '.join(reasons)}\n"
+        if len(at_risk) > 25:
+            msg += f"\n… e mais {len(at_risk) - 25} aluno(s)."
+        msg += "\n\n_Critérios: sem interação há 7+ dias e/ou < 50% de acertos (mín. 3 quizzes)._"
+        await channel.send_text(sender_id, msg[:4000])
+    except Exception as e:
+        logger.error("at_risk_command_failed", error=str(e)[:300])
+        await channel.send_text(sender_id, f"❌ Erro ao calcular risco: {str(e)[:100]}")
+
+
+async def run_frequent_doubts_command(channel, sender_id: str, class_query: str):
+    """/duvidas_frequentes_[turma] — coleta message_content da última semana,
+    passa pro LLM (Gemini/provider configurado) e devolve um sumário."""
+    try:
+        async with AsyncSessionLocal() as session:
+            teacher = await _resolve_teacher(session, channel, sender_id)
+            if not teacher:
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
+                return
+            klass = await _resolve_owned_class(session, teacher[0], teacher[1], class_query)
+            if not klass:
+                await channel.send_text(sender_id, CMD_CLASS_NOT_FOUND.format(class_query=class_query))
+                return
+
+            class_id, c_name = klass[0], klass[1]
+            cutoff = _naive_utc_now() - timedelta(days=7)
+
+            rows = (await session.execute(
+                text('''SELECT si.message_content
+                        FROM "StudentInteractions" si
+                        JOIN "StudentEnrollment" se ON se.student_id = si.student_id
+                        WHERE se.class_id = :cid
+                          AND si.interaction_type = 'message_received'
+                          AND si.timestamp >= :cutoff
+                          AND si.message_content IS NOT NULL
+                        ORDER BY si.timestamp ASC
+                        LIMIT 300'''),
+                {"cid": class_id, "cutoff": cutoff}
+            )).fetchall()
+
+        # Filtra ruído: comandos, respostas de botão e mensagens triviais
+        candidates = []
+        for r in rows:
+            content = (r[0] or "").strip()
+            if not content or content.startswith("/") or len(content) < 4:
+                continue
+            candidates.append(content)
+
+        if not candidates:
+            await channel.send_text(
+                sender_id,
+                f"📭 *Dúvidas Frequentes — {c_name}*\n\nNenhuma mensagem de aluno encontrada nos últimos 7 dias."
+            )
+            return
+
+        await channel.send_text(sender_id, f"⏳ Analisando {len(candidates)} mensagens da turma com a IA...")
+
+        # Limita o corpus para caber confortavelmente no contexto do LLM
+        corpus_lines, total_chars = [], 0
+        for m in candidates:
+            if total_chars + len(m) > 12000:
+                break
+            corpus_lines.append(f"- {m}")
+            total_chars += len(m)
+
+        # A chamada ao LLM acontece FORA da sessão de banco (conexão liberada).
+        from src.llm.factory import get_provider
+        from src.shared.constants.prompts import FREQUENT_DOUBTS_PROMPT
+
+        llm = get_provider(settings.DEFAULT_LLM_PROVIDER)
+        report = await llm.agenerate(
+            prompt=FREQUENT_DOUBTS_PROMPT.format(messages="\n".join(corpus_lines))
+        )
+
+        await channel.send_text(
+            sender_id,
+            f"💬 *Dúvidas Frequentes — {c_name}* (últimos 7 dias)\n\n{report}"[:4000]
+        )
+    except Exception as e:
+        logger.error("frequent_doubts_command_failed", error=str(e)[:300])
+        await channel.send_text(sender_id, f"❌ Erro ao analisar dúvidas: {str(e)[:100]}")
+
+
+async def _resolve_owned_student(session, teacher_id: str, is_admin: bool, phone_arg: str):
+    """Resolve um aluno por sufixo de telefone E valida a posse: o aluno precisa
+    estar matriculado em pelo menos uma turma do professor (Classes.teacher_id),
+    a menos que o professor seja admin.
+
+    Retorna (student_row, enrollments, digits) onde:
+      student_row = (id, name, phone, is_active) | None
+      enrollments = [(class_name, current_lesson_number, course_name, subject_name, class_id)]
+    """
+    digits = re.sub(r"\D", "", phone_arg or "")
+    if len(digits) < 8:
+        return None, [], digits
+
+    stu = (await session.execute(
+        text('SELECT id, name, phone, is_active FROM "Students" WHERE phone LIKE :pl LIMIT 1'),
+        {"pl": f"%{digits}"}
+    )).fetchone()
+    if not stu:
+        return None, [], digits
+
+    enroll_sql = '''
+        SELECT cl.name, cl.current_lesson_number, crs.name AS course_name,
+               sub.name AS subject_name, cl.id
+        FROM "StudentEnrollment" se
+        JOIN "Classes" cl ON cl.id = se.class_id
+        JOIN "Courses" crs ON crs.id = cl.course_id
+        LEFT JOIN "Subjects" sub ON sub.id = cl.subject_id
+        WHERE se.student_id = :stid
+    '''
+    if is_admin:
+        result = await session.execute(text(enroll_sql), {"stid": stu[0]})
+    else:
+        result = await session.execute(
+            text(enroll_sql + " AND cl.teacher_id = :tid"),
+            {"stid": stu[0], "tid": teacher_id}
+        )
+    return stu, result.fetchall(), digits
+
+
+async def run_view_student_command(channel, sender_id: str, phone_arg: str):
+    """/ver_aluno_[telefone] — matrícula, lição atual e últimas 10 interações."""
+    try:
+        async with AsyncSessionLocal() as session:
+            teacher = await _resolve_teacher(session, channel, sender_id)
+            if not teacher:
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
+                return
+
+            stu, enrollments, digits = await _resolve_owned_student(session, teacher[0], teacher[1], phone_arg)
+            if len(digits) < 8:
+                await channel.send_text(sender_id, CMD_STUDENT_PHONE_USAGE.format(command="/ver_aluno"))
+                return
+            if not stu:
+                await channel.send_text(sender_id, CMD_STUDENT_NOT_FOUND.format(digits=digits[-8:]))
+                return
+            if not enrollments:
+                # Posse negada: aluno existe mas não está em nenhuma turma do professor.
+                await channel.send_text(sender_id, CMD_STUDENT_NOT_OWNED)
+                return
+
+            quiz_stats = (await session.execute(
+                text('''SELECT COUNT(*) AS respondidos,
+                               SUM(CASE WHEN is_correct THEN 1 ELSE 0 END) AS corretos
+                        FROM "PendingQuizzes"
+                        WHERE student_id = :stid AND status = 'answered' '''),
+                {"stid": stu[0]}
+            )).fetchone()
+
+            interactions = (await session.execute(
+                text('''SELECT interaction_type, message_content, timestamp, is_correct
+                        FROM "StudentInteractions"
+                        WHERE student_id = :stid
+                        ORDER BY timestamp DESC
+                        LIMIT 10'''),
+                {"stid": stu[0]}
+            )).fetchall()
+
+        status_emoji = "🟢 ativo" if stu[3] else "🔴 inativo"
+        msg = f"👤 *Ficha do Aluno*\n\n*{stu[1]}*\n📱 {stu[2]} — {status_emoji}\n\n📚 *Matrículas:*\n"
+        for e in enrollments:
+            subj = f" — {e[3]}" if e[3] else ""
+            msg += f"• {e[2]}{subj} | Turma *{e[0]}* | Aula atual: *{e[1]}*\n"
+
+        respondidos = (quiz_stats[0] if quiz_stats else 0) or 0
+        corretos = (quiz_stats[1] if quiz_stats else 0) or 0
+        if respondidos:
+            msg += f"\n📝 Quizzes: *{corretos}/{respondidos}* corretos ({round(100 * corretos / respondidos)}%)\n"
+        else:
+            msg += "\n📝 Quizzes: nenhum respondido ainda.\n"
+
+        msg += "\n🕓 *Últimas 10 interações:*\n"
+        if not interactions:
+            msg += "_Nenhuma interação registrada._"
+        else:
+            type_emoji = {"message_received": "💬", "quiz_answered": "📝", "review_sent": "📖"}
+            for it in interactions:
+                ts = _as_naive(it[2])
+                ts_str = ts.strftime("%d/%m %H:%M") if ts else "--/--"
+                emoji = type_emoji.get(it[0], "•")
+                detail = (it[1] or "").replace("\n", " ").strip()
+                if it[0] == "quiz_answered" and it[3] is not None:
+                    detail = f"{detail} ({'✅' if it[3] else '❌'})".strip()
+                if len(detail) > 60:
+                    detail = detail[:57] + "..."
+                msg += f"{emoji} {ts_str} · {detail or it[0]}\n"
+
+        await channel.send_text(sender_id, msg[:4000])
+    except Exception as e:
+        logger.error("view_student_command_failed", error=str(e)[:300])
+        await channel.send_text(sender_id, f"❌ Erro ao buscar aluno: {str(e)[:100]}")
+
+
+async def run_reset_student_command(channel, sender_id: str, phone_arg: str):
+    """/resetar_aluno_[telefone] — reinicia a jornada individual do aluno:
+    zera a rotação de tópicos (Redis), limpa a memória de conversa, expira os
+    quizzes pendentes e desvincula o histórico do Banco de Questões (o aluno
+    volta a poder receber TODAS as questões, como se estivesse na aula 1).
+
+    Nota de arquitetura: o ponteiro de aula é por TURMA
+    (Classes.current_lesson_number) — para voltar a turma inteira à aula 1,
+    o professor usa `/aula Turma = 1`.
+    """
+    try:
+        async with AsyncSessionLocal() as session:
+            teacher = await _resolve_teacher(session, channel, sender_id)
+            if not teacher:
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
+                return
+
+            stu, enrollments, digits = await _resolve_owned_student(session, teacher[0], teacher[1], phone_arg)
+            if len(digits) < 8:
+                await channel.send_text(sender_id, CMD_STUDENT_PHONE_USAGE.format(command="/resetar_aluno"))
+                return
+            if not stu:
+                await channel.send_text(sender_id, CMD_STUDENT_NOT_FOUND.format(digits=digits[-8:]))
+                return
+            if not enrollments:
+                await channel.send_text(sender_id, CMD_STUDENT_NOT_OWNED)
+                return
+
+            student_id, student_name, student_phone = stu[0], stu[1], stu[2]
+
+            # 1) Expira quizzes pendentes (não respondidos)
+            res_exp = await session.execute(
+                text('''UPDATE "PendingQuizzes"
+                        SET status = 'expired', updated_at = CURRENT_TIMESTAMP
+                        WHERE student_id = :stid AND status = 'pending' '''),
+                {"stid": student_id}
+            )
+            expired = res_exp.rowcount or 0  # type: ignore[attr-defined]  # CursorResult tem rowcount
+
+            # 2) Desvincula o histórico do QuizBank: o dedupe "esquece" o aluno
+            #    e ele volta a poder receber todas as questões do banco.
+            res_unlink = await session.execute(
+                text('''UPDATE "PendingQuizzes"
+                        SET quiz_bank_id = NULL
+                        WHERE student_id = :stid AND quiz_bank_id IS NOT NULL'''),
+                {"stid": student_id}
+            )
+            unlinked = res_unlink.rowcount or 0  # type: ignore[attr-defined]  # CursorResult tem rowcount
+            await session.commit()
+
+        # 3) Redis: zera a rotação de tópicos e a memória de conversa
+        redis = await get_redis()
+        deleted_keys = 0
+        async for key in redis.scan_iter(match=f"used_topics:{student_id}:*"):
+            await redis.delete(key)
+            deleted_keys += 1
+        await redis.delete(f"chat_history:{student_phone}")
+
+        turma_hint = enrollments[0][0] if enrollments else "Turma"
+        msg = (
+            f"🔄 *Aluno resetado: {student_name}*\n\n"
+            f"• Rotação de tópicos zerada ({deleted_keys} ciclo(s) limpos)\n"
+            f"• Memória de conversa apagada\n"
+            f"• {expired} quiz(zes) pendente(s) expirados\n"
+            f"• Histórico do Banco de Questões desvinculado ({unlinked} registro(s)) — "
+            f"o aluno voltará a receber todas as questões desde o início.\n\n"
+            f"ℹ️ O ponteiro de aula é por *turma*. Para voltar a turma à aula 1, use:\n"
+            f"`/aula {turma_hint} = 1`"
+        )
+        await channel.send_text(sender_id, msg)
+        logger.info("student_reset", student_id=student_id, expired=expired, unlinked=unlinked)
+    except Exception as e:
+        logger.error("reset_student_command_failed", error=str(e)[:300])
+        await channel.send_text(sender_id, f"❌ Erro ao resetar aluno: {str(e)[:100]}")
+
+
+async def run_clear_quiz_bank_command(channel, sender_id: str, class_query: str):
+    """/limpar_quizzes_[turma] — deleta FISICAMENTE os quizzes cacheados no
+    QuizBank para o curso/disciplina da turma, forçando o LLM a gerar novos do
+    zero na próxima rodada."""
+    try:
+        async with AsyncSessionLocal() as session:
+            teacher = await _resolve_teacher(session, channel, sender_id)
+            if not teacher:
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
+                return
+            klass = await _resolve_owned_class(session, teacher[0], teacher[1], class_query)
+            if not klass:
+                await channel.send_text(sender_id, CMD_CLASS_NOT_FOUND.format(class_query=class_query))
+                return
+
+        c_name, course_id, subject_id, subject_name = klass[1], klass[2], klass[3], klass[5]
+
+        from src.rag.quiz_bank import delete_scope_quizzes
+        deleted = await delete_scope_quizzes(course_id=course_id, subject_id=subject_id)
+
+        scope_label = f"{c_name}" + (f" — {subject_name}" if subject_name else "")
+        msg = (
+            f"🧹 *Banco de Questões limpo!*\n\n"
+            f"*{deleted}* questão(ões) apagadas para *{scope_label}*.\n\n"
+            f"A próxima rodada de quizzes será gerada do zero pelo LLM a partir do material atual. "
+            f"O histórico de respostas dos alunos foi preservado."
+        )
+        await channel.send_text(sender_id, msg)
+    except Exception as e:
+        logger.error("clear_quiz_bank_command_failed", error=str(e)[:300])
+        await channel.send_text(sender_id, f"❌ Erro ao limpar quizzes: {str(e)[:100]}")
+
+
+async def run_broadcast_notice_command(channel, sender_id: str, class_query: str, message: str):
+    """/aviso_[turma]_[mensagem] — resolve todos os student_id da turma e
+    publica mensagens INDIVIDUAIS na fila `outbound_messages` (a entrega real
+    é feita pelo consumidor outbound, fora deste handler)."""
+    try:
+        if not class_query or not message:
+            await channel.send_text(sender_id, CMD_AVISO_USAGE)
+            return
+
+        async with AsyncSessionLocal() as session:
+            teacher = await _resolve_teacher(session, channel, sender_id)
+            if not teacher:
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
+                return
+            klass = await _resolve_owned_class(session, teacher[0], teacher[1], class_query)
+            if not klass:
+                await channel.send_text(sender_id, CMD_CLASS_NOT_FOUND.format(class_query=class_query))
+                return
+
+            class_id, c_name = klass[0], klass[1]
+
+            students = (await session.execute(
+                text('''SELECT s.id, s.phone, s.name, s.telegram_chat_id, s.preferred_channel,
+                               (SELECT MAX(timestamp) FROM "StudentInteractions"
+                                WHERE student_id = s.id
+                                  AND interaction_type IN ('message_received', 'quiz_answered')
+                               ) as last_interaction
+                        FROM "Students" s
+                        JOIN "StudentEnrollment" se ON s.id = se.student_id
+                        WHERE se.class_id = :cid AND s.is_active = true'''),
+                {"cid": class_id}
+            )).fetchall()
+
+        if not students:
+            await channel.send_text(sender_id, f"❌ Nenhum aluno ativo encontrado na turma '{c_name}'.")
+            return
+
+        notice_text = f"📣 *Aviso do professor — {c_name}*\n\n{message}"
+        default_ct = settings.CHANNEL_BACKEND.lower()
+        twenty_four_hours_ago = _naive_utc_now() - timedelta(hours=24)
+
+        from src.queue.factory import get_queue
+        queue = get_queue()
+
+        queued = 0
+        skipped_unlinked = 0
+        skipped_window_names = []
+
+        for st in students:
+            ct = (st[4] or default_ct).lower()
+            addr = st[3] if ct == "telegram" else st[1]  # telegram_chat_id | phone
+            if not addr:
+                skipped_unlinked += 1
+                continue
+
+            # Janela de 24h: restrição da POLÍTICA DA META — só se aplica ao
+            # WhatsApp. No Telegram não existe janela, então entregamos sempre.
+            if ct == "whatsapp":
+                last_int = _as_naive(st[5])
+                if not (last_int and last_int > twenty_four_hours_ago):
+                    skipped_window_names.append(st[2])
+                    continue
+
+            await queue.enqueue("outbound_messages", {
+                "recipient_id": addr,
+                "channel": ct,
+                "text": notice_text,
+                "student_id": st[0],
+                "origin": "teacher_notice",
+            })
+            queued += 1
+
+        msg = f"📣 Aviso enfileirado para *{queued}* aluno(s) da turma '{c_name}'."
+        if skipped_unlinked:
+            msg += f"\n⚠️ {skipped_unlinked} aluno(s) sem conta vinculada no bot foram pulados."
+        if skipped_window_names:
+            names_str = "\n".join(f"• {n}" for n in skipped_window_names)
+            msg += f"\n\n⚠️ Fora da janela de 24h do WhatsApp (não receberão):\n{names_str}"
+        await channel.send_text(sender_id, msg[:4000])
+        logger.info("notice_broadcast_enqueued", class_id=class_id, queued=queued)
+    except Exception as e:
+        logger.error("broadcast_notice_command_failed", error=str(e)[:300])
+        await channel.send_text(sender_id, f"❌ Erro ao enviar aviso: {str(e)[:100]}")
+
+
+# ==============================================================================
+# DISPATCH
+# ==============================================================================
+
 async def process_command_message(message_body: dict):
     sender_id = str(message_body.get("sender_id", message_body.get("phone", "")))
     text_content = message_body.get("text", "")
     channel_type = message_body.get("channel")
+    role = message_body.get("role", "teacher")
     channel = get_channel(channel_type)
-    
+
+    # -1) ATIVAÇÃO POR QR CODE (H2.1/H3.1) — chave LIVRO-/PROF- ou resposta
+    #     (nome) de uma ativação pendente. Roteado pelo webhook com
+    #     role="activation" (inclusive de remetentes desconhecidos).
+    if role == "activation":
+        from src.workers.activation_worker import process_activation_message
+        await process_activation_message(message_body)
+        return
+
+    # -0.5) LGPD Art. 14: mensagem do RESPONSÁVEL (botão de consentimento ou
+    #       REVOGAR). Remetente desconhecido — roteado pelo webhook com
+    #       role="guardian".
+    if role == "guardian":
+        from src.workers.guardian_consent import handle_guardian_message
+        await handle_guardian_message(message_body)
+        return
+
+    # 0) Comandos de ALUNO (Addon de Livros) — o webhook só roteia para cá os
+    #    comandos da allowlist (STUDENT_COMMAND_REGEX) com role="student".
+    student_cmd = parse_student_command(text_content)
+    if student_cmd and role == "student":
+        from src.workers import reading_commands
+        logger.info("process_student_command", sender_id=sender_id, command=student_cmd)
+
+        if student_cmd == CommandType.PAUSE_READING:
+            await reading_commands.run_pause_reading_command(channel, sender_id)
+        elif student_cmd == CommandType.RESUME_READING:
+            await reading_commands.run_resume_reading_command(channel, sender_id)
+        elif student_cmd == CommandType.MY_PROGRESS:
+            await reading_commands.run_my_progress_command(channel, sender_id)
+        elif student_cmd == CommandType.FLASHCARDS:
+            await reading_commands.run_flashcards_command(channel, sender_id)
+        elif student_cmd == CommandType.PLACEMENT:
+            from src.workers.placement import start_placement
+            await start_placement(channel, sender_id)
+        elif student_cmd == CommandType.LEAVE_BOOK:
+            from src.workers.activation_worker import run_leave_book_command
+            await run_leave_book_command(channel, sender_id)
+        elif student_cmd == CommandType.CORRECT_ESSAY:
+            from src.workers.essay import run_correct_essay_command
+            await run_correct_essay_command(channel, sender_id)
+        elif student_cmd == CommandType.DELETE_MY_DATA:
+            # LGPD Art. 18: passo 1 (confirmação por botões). O clique é tratado
+            # no fast-path do llm_worker (lgpd_delete_confirm/cancel).
+            from src.workers.privacy_commands import run_delete_my_data_command
+            await run_delete_my_data_command(channel, sender_id)
+        return
+
+    # 1) Comandos gerenciais — sintaxe explícita /comando_[turma]_[arg].
+    #    O regex é a mesma fonte da verdade usada pelo webhook para rotear.
+    mgmt = parse_management_command(text_content)
+    if mgmt:
+        cmd_type, target, extra = mgmt
+        logger.info("process_management_command", sender_id=sender_id, command=cmd_type, target=target[:60])
+
+        if cmd_type == CommandType.ENGAGEMENT:
+            await run_engagement_command(channel, sender_id, target)
+        elif cmd_type == CommandType.QUIZ_PERFORMANCE:
+            await run_quiz_performance_command(channel, sender_id, target)
+        elif cmd_type == CommandType.AT_RISK:
+            await run_at_risk_command(channel, sender_id, target)
+        elif cmd_type == CommandType.FREQUENT_DOUBTS:
+            await run_frequent_doubts_command(channel, sender_id, target)
+        elif cmd_type == CommandType.VIEW_STUDENT:
+            await run_view_student_command(channel, sender_id, target)
+        elif cmd_type == CommandType.RESET_STUDENT:
+            await run_reset_student_command(channel, sender_id, target)
+        elif cmd_type == CommandType.CLEAR_QUIZ_BANK:
+            await run_clear_quiz_bank_command(channel, sender_id, target)
+        elif cmd_type == CommandType.BROADCAST_NOTICE:
+            await run_broadcast_notice_command(channel, sender_id, target, extra)
+        else:
+            # ── Addon de Livros (professor) — handlers em reading_commands ──
+            from src.workers import reading_commands
+            if cmd_type == CommandType.READING_PLAN:
+                await reading_commands.run_reading_plan_command(channel, sender_id, target, extra)
+            elif cmd_type == CommandType.SIMULADO:
+                await reading_commands.run_simulado_command(channel, sender_id, target, extra)
+            elif cmd_type == CommandType.LINK_LESSON_CHAPTER:
+                await reading_commands.run_link_lesson_chapter_command(channel, sender_id, target, extra)
+            elif cmd_type == CommandType.ERRATA:
+                await reading_commands.run_errata_command(channel, sender_id, target, extra)
+            elif cmd_type == CommandType.ACTIVATE_CHAPTERS:
+                await reading_commands.run_activate_chapters_command(channel, sender_id, target, extra)
+            elif cmd_type == CommandType.ANSWER_KEY:
+                await reading_commands.run_answer_key_command(channel, sender_id, target, extra)
+            elif cmd_type == CommandType.DIFFICULTY_MAP:
+                await reading_commands.run_difficulty_map_command(channel, sender_id, target)
+            elif cmd_type == CommandType.COMPLETION_FUNNEL:
+                await reading_commands.run_completion_funnel_command(channel, sender_id, target)
+            elif cmd_type == CommandType.DOUBTS_CORPUS:
+                await reading_commands.run_doubts_corpus_command(channel, sender_id, target)
+            # ── Horizontes H1-H3 ────────────────────────────────────────────
+            elif cmd_type == CommandType.CLASS_CHALLENGE:
+                from src.workers.challenges import run_class_challenge_command
+                await run_class_challenge_command(channel, sender_id, target)
+            elif cmd_type == CommandType.KEY_STATS:
+                from src.workers.activation_worker import run_key_stats_command
+                await run_key_stats_command(channel, sender_id, target)
+            elif cmd_type == CommandType.RUBRIC:
+                from src.workers.onboarding_commands import run_rubric_command
+                await run_rubric_command(channel, sender_id, target, extra)
+            elif cmd_type == CommandType.CREATE_CLASS:
+                from src.workers.onboarding_commands import run_create_class_command
+                await run_create_class_command(channel, sender_id, target, extra)
+            elif cmd_type == CommandType.ADD_STUDENTS:
+                from src.workers.onboarding_commands import run_add_students_command
+                await run_add_students_command(channel, sender_id, target, extra)
+        return
+
+    # 2) Comandos legados
     command, args = parse_command(text_content)
     logger.info("process_command_message", sender_id=sender_id, command=command, args=args)
     
@@ -469,12 +1227,17 @@ async def process_command_message(message_body: dict):
     elif command == CommandType.SEND_QUIZ:
         await run_broadcast_quiz_command(channel, sender_id, args)
     elif command == CommandType.HELP:
-        await channel.send_text(sender_id, "Comandos disponíveis:\n/sinc_alunos\n/sinc_materiais\n/listar_cursos\n/listar_materiais\n/aula [turma] = [numero]\n/quiz_[turma]")
+        await channel.send_text(sender_id, CMD_HELP_TEXT)
     elif command == CommandType.WAKEUP:
         logger.info("waking_up_worker_via_hack")
         return
     else:
-        await channel.send_text(sender_id, "❌ Comando desconhecido.")
+        await channel.send_text(sender_id, "❌ Comando desconhecido. Digite /ajuda para ver a lista de comandos.")
+
+
+# ==============================================================================
+# CONSUMER LOOPS
+# ==============================================================================
 
 async def command_loop():
     logger.info("main_worker_starting", environment=settings.ENVIRONMENT, worker_type="command")
@@ -491,3 +1254,47 @@ async def command_loop():
             
     queue = get_queue()
     await queue.consume_loop("command_messages", handler, use_sessions=False)
+
+
+async def handle_outbound_message(payload: dict, ctx: MessageContext):
+    """Consome a fila `outbound_messages` e entrega a mensagem no canal do
+    destinatário. Usado pelo /aviso (e por qualquer produtor futuro de
+    mensagens proativas)."""
+    try:
+        recipient = str(payload.get("recipient_id", ""))
+        text_content = payload.get("text", "")
+        channel_type = payload.get("channel")
+
+        if not recipient or not text_content:
+            await ctx.dead_letter(reason="InvalidOutboundPayload", description=str(payload)[:300])
+            return
+
+        ch = get_channel(channel_type)
+        await ch.send_text(recipient, text_content)
+        await ctx.complete()
+        logger.info("outbound_message_delivered", recipient=recipient[:8] + "***", channel=channel_type)
+    except Exception as e:
+        logger.error("outbound_delivery_failed", error=str(e)[:300])
+        await ctx.dead_letter(reason="OutboundDeliveryError", description=str(e)[:500])
+
+
+async def outbound_loop():
+    logger.info("outbound_worker_starting", environment=settings.ENVIRONMENT, worker_type="outbound")
+
+    from src.queue.factory import get_queue
+    queue = get_queue()
+    await queue.consume_loop("outbound_messages", handle_outbound_message, use_sessions=False)
+
+
+async def _standalone():
+    """Execução dedicada: `python -m src.workers.command_worker` consome
+    command_messages + outbound_messages no mesmo processo."""
+    import asyncio
+    await asyncio.gather(command_loop(), outbound_loop())
+
+
+if __name__ == "__main__":
+    import asyncio
+    from src.shared.telemetry import setup_telemetry
+    setup_telemetry(settings.LOG_LEVEL)
+    asyncio.run(_standalone())

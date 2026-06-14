@@ -1,6 +1,11 @@
+from typing import cast
+
 from src.db.models.user import Teacher, Student
 
-from src.shared.constants.prompts import SYSTEM_PROMPT_TEMPLATE
+from src.shared.config import settings
+from src.shared.constants.prompts import SYSTEM_PROMPT_TEMPLATE, LANGUAGE_TUTOR_PERSONA, L1_SAFETY_DIRECTIVE
+from src.shared.language import detect_language_course, language_name
+from src.shared.privacy import llm_safe_name
 
 async def resolve_lesson_label(course_id: str, lesson_id: str) -> str:
     """
@@ -17,15 +22,41 @@ async def build_system_prompt(teacher: Teacher, student: Student, course_id: str
     """
     lesson_label = await resolve_lesson_label(course_id, current_lesson_id)
     subject_text = f" na disciplina '{subject_name}'" if subject_name else ""
-    
-    return SYSTEM_PROMPT_TEMPLATE.format(
+
+    base_prompt = SYSTEM_PROMPT_TEMPLATE.format(
         teacher_name=teacher.name,
         teacher_subject=teacher.subject,
         teacher_persona=teacher.assistant_persona,
-        student_name=student.name,
+        # LGPD P0.1 (minimização): só o primeiro nome do aluno vai ao provedor
+        # de IA — sobrenome/telefone ficam restritos ao banco local. (cast: a
+        # coluna SQLAlchemy é str em runtime; sem plugin o mypy a vê como Column.)
+        student_name=llm_safe_name(cast(str, student.name)),
         current_lesson_number=current_lesson_id,
         current_lesson_label=lesson_label,
         course_name=course_name,
         subject_text=subject_text,
         out_of_scope=teacher.out_of_scope_message
     )
+
+    # Vertical de Idiomas (§1.4): único switch de comportamento do bot. SOMENTE
+    # com a flag ligada E o curso detectado como de idioma (pelo NOME) anexamos o
+    # persona de tutor. Flag off OU curso normal ⇒ prompt base intocado.
+    if settings.LANGUAGE_MODE_ENABLED:
+        spec = detect_language_course(course_name, default_target=settings.DEFAULT_TARGET_LANGUAGE)
+        if spec is not None:
+            # CEFR/L1 vêm dos defaults; o perfil por turma (F5) poderá sobrescrever.
+            target_name = language_name(spec.target_language)
+            native_name = language_name(settings.DEFAULT_NATIVE_LANGUAGE)
+            base_prompt += LANGUAGE_TUTOR_PERSONA.format(
+                target_language_name=target_name,
+                cefr_level=settings.DEFAULT_CEFR_LEVEL,
+                native_language_name=native_name,
+            )
+            # F7 — rede de segurança L1 + inteligência emocional (flag própria).
+            if settings.L1_SAFETY_NET_ENABLED:
+                base_prompt += L1_SAFETY_DIRECTIVE.format(
+                    target_language_name=target_name,
+                    native_language_name=native_name,
+                )
+
+    return base_prompt

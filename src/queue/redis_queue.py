@@ -1,10 +1,12 @@
+import os
 import json
 import asyncio
 import structlog
 import uuid
 from typing import Callable, Awaitable
 import redis.asyncio as redis
-from redis.exceptions import ResponseError
+from redis.exceptions import ResponseError, ConnectionError, TimeoutError
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from src.shared.config import settings
 from src.shared.telemetry import track_event
 from src.queue.interfaces import IMessageQueue, MessageContext
@@ -39,8 +41,6 @@ class RedisStreamContext(MessageContext):
         # Redis streams PEL doesn't expire implicitly, so no renewal is needed
         pass
 
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from redis.exceptions import ConnectionError, TimeoutError
 
 class RedisStreamsQueue(IMessageQueue):
     def __init__(self):
@@ -53,7 +53,7 @@ class RedisStreamsQueue(IMessageQueue):
             health_check_interval=30
         )
         self.group_name = "messaging_workers"
-        self.consumer_name = f"worker_{uuid.uuid4().hex[:8]}"
+        self.consumer_name = os.getenv("HOSTNAME") or f"worker_{uuid.uuid4().hex[:8]}"
 
     async def _ensure_group(self, queue: str):
         try:
@@ -61,6 +61,37 @@ class RedisStreamsQueue(IMessageQueue):
         except ResponseError as e:
             if "BUSYGROUP Consumer Group name already exists" not in str(e):
                 raise
+
+    async def _reap_pending(self, queue: str, handler: Callable[[dict, MessageContext], Awaitable[None]], min_idle_ms: int = 60000):
+        """Reivindica mensagens presas na PEL de consumidores mortos e tenta reprocessar."""
+        start_id = "0-0"
+        while True:
+            try:
+                # XAUTOCLAIM transfere a posse das mensagens que estão pendentes há > min_idle_ms
+                next_id, claimed, _ = await self.client.xautoclaim(
+                    queue, self.group_name, self.consumer_name,
+                    min_idle_time=min_idle_ms, start_id=start_id, count=10
+                )
+                for message_id, fields in claimed:
+                    payload_bytes = fields.get(b"payload")
+                    if not payload_bytes:
+                        await self.client.xack(queue, self.group_name, message_id)
+                        continue
+                        
+                    payload = json.loads(payload_bytes.decode('utf-8'))
+                    ctx = RedisStreamContext(self.client, queue, self.group_name, message_id)
+                    try:
+                        await handler(payload, ctx)
+                    except Exception as e:
+                        # Nunca deixar mensagem órfã, dead-letter imediato no reap failure
+                        await ctx.dead_letter("ReapFailure", str(e)[:500])
+                        
+                start_id = next_id
+                if next_id == b"0-0":
+                    break
+            except Exception as e:
+                logger.error("redis_reap_pending_error", error=str(e)[:500])
+                break
 
     @retry(
         stop=stop_after_attempt(4),
@@ -86,6 +117,8 @@ class RedisStreamsQueue(IMessageQueue):
         
         while True:
             try:
+                await self._reap_pending(queue, handler)
+                
                 # Block for up to 5 seconds
                 streams = await self.client.xreadgroup(
                     self.group_name,
@@ -107,12 +140,20 @@ class RedisStreamsQueue(IMessageQueue):
                             
                         payload = json.loads(payload_bytes.decode('utf-8'))
                         ctx = RedisStreamContext(self.client, queue, self.group_name, message_id)
+                        session_id = fields.get(b"session_id", b"").decode("utf-8")
                         
                         try:
-                            await handler(payload, ctx)
+                            if use_sessions and session_id:
+                                # Bug 11 FIX: Lock distributed for FIFO by session
+                                session_lock = self.client.lock(f"session_lock:{session_id}", timeout=120, sleep=0.5)
+                                async with session_lock:
+                                    await handler(payload, ctx)
+                            else:
+                                await handler(payload, ctx)
                         except Exception as e:
                             logger.error("redis_handler_error", error=str(e))
-                            # Depending on config, you could auto dead-letter here
+                            # Obriga o envio para DLQ e ACK da fila principal (Impede que vire mensagem órfã na PEL)
+                            await ctx.dead_letter("HandlerError", str(e)[:500])
                             
             except Exception as e:
                 err_str = str(e)

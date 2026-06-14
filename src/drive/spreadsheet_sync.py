@@ -53,7 +53,10 @@ def clean_phone(phone: str) -> str:
 def generate_id(prefix: str, seed: str) -> str:
     """Generates a deterministic ID based on a string seed."""
     import hashlib
-    h = hashlib.md5(seed.encode()).hexdigest()[:8]
+    # MD5 aqui é só para derivar um ID estável (não-criptográfico); o flag
+    # `usedforsecurity=False` documenta a intenção e satisfaz o FIPS/bandit
+    # sem alterar o hash gerado (IDs existentes permanecem idênticos).
+    h = hashlib.md5(seed.encode(), usedforsecurity=False).hexdigest()[:8]
     return f"{prefix}_{h}"
 
 
@@ -92,7 +95,10 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
         logger.warning("Aba 'Professores' não encontrada ou ilegível", error=str(e)[:200])
 
     try:
-        alunos_rows = await drive_client.get_spreadsheet_data(sheet_id, "Alunos!A2:I1000")
+        # A:K cobre Nome..Status (A-I) + Responsável (J) + Menor (K) — as duas
+        # últimas são LGPD P1.1 (Art. 14), opcionais. Sem elas, as células vêm
+        # vazias e o aluno nasce sem responsável/não-criança (compat. total).
+        alunos_rows = await drive_client.get_spreadsheet_data(sheet_id, "Alunos!A2:K1000")
     except Exception as e:
         logger.error("Falha ao ler a aba 'Alunos'", error=str(e))
         return {"error": f"Drive API Error (Alunos): {str(e)}"}
@@ -198,6 +204,12 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
             hours = [_cell(row, i) for i in (5, 6, 7) if _cell(row, i)]
             status_val = (_cell(row, 8) or "ativo").lower()
             is_active = status_val in ACTIVE_VALUES
+            # LGPD Art. 14 (P1.1): colunas OPCIONAIS no fim da aba (planilhas
+            # antigas sem elas seguem valendo). "Responsável" = telefone do
+            # responsável; "Menor" (sim/true/1) = criança (<12), exige opt-in.
+            guardian_phone = clean_phone(_cell(row, 9)) or None
+            menor_val = (_cell(row, 10) or "").strip().lower()
+            is_child = menor_val in ("sim", "s", "true", "1", "menor")
 
             if not phone:
                 continue
@@ -206,15 +218,18 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
             student_id = generate_id("stu", phone)
             res = await session.execute(
                 text("""
-                    INSERT INTO "Students" (id, name, phone, is_active)
-                    VALUES (:id, :name, :phone, :is_active)
+                    INSERT INTO "Students" (id, name, phone, is_active, guardian_phone, is_child)
+                    VALUES (:id, :name, :phone, :is_active, :gphone, :is_child)
                     ON CONFLICT(phone) DO UPDATE SET
                         name = excluded.name,
                         is_active = excluded.is_active,
+                        guardian_phone = excluded.guardian_phone,
+                        is_child = excluded.is_child,
                         updated_at = CURRENT_TIMESTAMP
                     RETURNING id
                 """),
-                {"id": student_id, "name": name, "phone": phone, "is_active": is_active},
+                {"id": student_id, "name": name, "phone": phone, "is_active": is_active,
+                 "gphone": guardian_phone, "is_child": is_child},
             )
             student_id = cast(str, res.scalar())
             stats["students_upserted"] = cast(int, stats["students_upserted"]) + 1
@@ -250,7 +265,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
             class_tid = resolve_class_teacher(course_name, class_name)
             if (course_name, class_name) not in class_owner:
                 classes_sem_professor.add(f"{course_name} / {class_name}")
-            class_id = generate_id("cls", f"{course_id}_{class_name}")
+            class_id: str | None = generate_id("cls", f"{course_id}_{class_name}")
             await session.execute(
                 text("""
                     INSERT INTO "Classes" (id, course_id, subject_id, teacher_id, name, current_lesson_number)
@@ -303,13 +318,16 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
 
         # ===== Pass 2: Turmas → calendário das Classes + Disciplina AUTORITATIVA =====
         try:
-            turmas_rows = await drive_client.get_spreadsheet_data(sheet_id, "Turmas!A2:K1000")
+            turmas_rows = await drive_client.get_spreadsheet_data(sheet_id, "Turmas!A2:M1000")
         except Exception as e:
             turmas_rows = []
             logger.warning("Aba 'Turmas' não encontrada", error=str(e)[:200])
 
+        from src.shared.language import normalize_level
         for row in turmas_rows:
-            # Layout novo: Turma | Disciplina | Curso | Data Início | Seg..Dom
+            # Layout: Turma | Disciplina | Curso | Data Início | Seg..Dom | Idioma | Nível
+            # (Vertical de Idiomas: Idioma/Nível são as 2 ÚLTIMAS colunas, opcionais —
+            #  acrescentadas ao FINAL para não deslocar Data/dias do layout existente.)
             class_name = _cell(row, 0)
             subject_name = _cell(row, 1)
             course_name = _cell(row, 2)
@@ -327,6 +345,11 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 if val and val.lower() not in ("sem aula", "-"):
                     schedule_map[str(i)] = val
             schedule_map_json = json.dumps(schedule_map) if schedule_map else None
+
+            # Vertical de Idiomas (opcional): Idioma=Sim → turma de idioma; Nível →
+            # proficiência. Ausentes/'-' ⇒ is_language=false / nível NULL (intocado).
+            is_language = (_cell(row, 11) or "").strip().lower() in ("sim", "yes", "true", "1")
+            proficiency_level = normalize_level(_cell(row, 12))
 
             course_id = generate_id("crs", course_name)
             owner_tid = course_owner.get(course_name, BOOTSTRAP_ADMIN_ID)
@@ -362,13 +385,15 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
 
             await session.execute(
                 text("""
-                    INSERT INTO "Classes" (id, course_id, subject_id, teacher_id, name, current_lesson_number, start_date, schedule_map)
-                    VALUES (:id, :cid, :sid, :tid, :name, :lesson, :start_date, :sched_map)
+                    INSERT INTO "Classes" (id, course_id, subject_id, teacher_id, name, current_lesson_number, start_date, schedule_map, is_language, proficiency_level)
+                    VALUES (:id, :cid, :sid, :tid, :name, :lesson, :start_date, :sched_map, :is_lang, :level)
                     ON CONFLICT(id) DO UPDATE SET
                         teacher_id = excluded.teacher_id,
                         subject_id = COALESCE(excluded.subject_id, "Classes".subject_id),
                         start_date = excluded.start_date,
                         schedule_map = excluded.schedule_map,
+                        is_language = excluded.is_language,
+                        proficiency_level = excluded.proficiency_level,
                         current_lesson_number = CASE WHEN excluded.start_date > CURRENT_DATE THEN 0 ELSE "Classes".current_lesson_number END,
                         updated_at = CURRENT_TIMESTAMP
                 """),
@@ -381,6 +406,8 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                     "lesson": current_lesson,
                     "start_date": start_date_obj,
                     "sched_map": schedule_map_json,
+                    "is_lang": is_language,
+                    "level": proficiency_level,
                 },
             )
 
@@ -402,20 +429,102 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                     f"{course_name} / {class_name} (Alunos: {alunos_str} | Turmas: {turmas_str})"
                 )
 
+        # ===== Pass 2.5: Chaves de ativação (H2.1 — aba "Chaves", opcional) =====
+        # Layout: Chave | Curso | Turma | Lote | MaxAtivacoes | Ativa
+        # A planilha é a fonte AUTORITATIVA das chaves (o escopo Google é
+        # readonly; o bot nunca escreve lá). Regras do upsert:
+        #   - Ativa=FALSE (ou linha removida → professor zera a coluna) → 'revoked'
+        #   - status 'activated' NUNCA é sobrescrito (histórico é do banco)
+        #   - turma inexistente: cria Course/Class mínimos (coorte de leitores)
+        keys_upserted = 0
+        try:
+            chaves_rows = await drive_client.get_spreadsheet_data(sheet_id, "Chaves!A2:F10000")
+        except Exception:
+            chaves_rows = []  # aba opcional
+
+        for row in chaves_rows:
+            key = _cell(row, 0).upper()
+            course_name = _cell(row, 1)
+            class_name = _cell(row, 2)
+            batch = _cell(row, 3) or None
+            try:
+                max_activations = max(1, int(_cell(row, 4) or "1"))
+            except ValueError:
+                max_activations = 1
+            is_key_active = (_cell(row, 5) or "TRUE").strip().lower() in ("true", "1", "sim", "verdadeiro")
+
+            if not key or "-" not in key:
+                continue
+
+            kind = "teacher" if key.startswith("PROF-") else "reader"
+            class_id = None
+            if kind == "reader":
+                if not course_name or not class_name:
+                    logger.warning("chave_sem_turma_ignorada", key=key)
+                    continue
+                # Garante a turma-coorte (Course/Class mínimos, mesmo padrão do Pass 2)
+                course_id = generate_id("crs", course_name)
+                owner_tid = course_owner.get(course_name, BOOTSTRAP_ADMIN_ID)
+                await session.execute(
+                    text("""
+                        INSERT INTO "Courses" (id, teacher_id, name, is_active)
+                        VALUES (:id, :tid, :name, true)
+                        ON CONFLICT(id) DO NOTHING
+                    """),
+                    {"id": course_id, "tid": owner_tid, "name": course_name},
+                )
+                class_id = generate_id("cls", f"{course_id}_{class_name}")
+                class_tid = resolve_class_teacher(course_name, class_name)
+                await session.execute(
+                    text("""
+                        INSERT INTO "Classes" (id, course_id, teacher_id, name, current_lesson_number)
+                        VALUES (:id, :cid, :tid, :name, 1)
+                        ON CONFLICT(id) DO NOTHING
+                    """),
+                    {"id": class_id, "cid": course_id, "tid": class_tid, "name": class_name},
+                )
+
+            await session.execute(
+                text("""
+                    INSERT INTO "ActivationKeys" (key, kind, class_id, batch, max_activations, status)
+                    VALUES (:key, :kind, :cid, :batch, :max_act, :status)
+                    ON CONFLICT(key) DO UPDATE SET
+                        class_id = excluded.class_id,
+                        batch = excluded.batch,
+                        max_activations = excluded.max_activations,
+                        status = CASE
+                            WHEN excluded.status = 'revoked' THEN 'revoked'
+                            WHEN "ActivationKeys".status = 'activated' THEN 'activated'
+                            ELSE 'available'
+                        END,
+                        updated_at = CURRENT_TIMESTAMP
+                """),
+                {"key": key, "kind": kind, "cid": class_id, "batch": batch,
+                 "max_act": max_activations,
+                 "status": "available" if is_key_active else "revoked"},
+            )
+            keys_upserted += 1
+
+        stats["keys_upserted"] = keys_upserted
+
         # ===== Pass 3: Limpeza de matrículas/agendamentos órfãos (alunos sincronizados) =====
+        from sqlalchemy import delete
+        from src.db.models.course import StudentEnrollment
+        from src.db.models.messaging import StudentSchedule
+
         for sid, class_ids in student_active_classes.items():
             if class_ids:
-                placeholders = ",".join(f"'{cid}'" for cid in class_ids)
-                await session.execute(text(f"DELETE FROM \"StudentEnrollment\" WHERE student_id = '{sid}' AND class_id NOT IN ({placeholders})"))
+                stmt = delete(StudentEnrollment).where(StudentEnrollment.student_id == sid).where(StudentEnrollment.class_id.not_in(class_ids))
             else:
-                await session.execute(text(f"DELETE FROM \"StudentEnrollment\" WHERE student_id = '{sid}'"))
+                stmt = delete(StudentEnrollment).where(StudentEnrollment.student_id == sid)
+            await session.execute(stmt)
 
         for sid, sched_ids in student_active_schedules.items():
             if sched_ids:
-                placeholders = ",".join(f"'{sch}'" for sch in sched_ids)
-                await session.execute(text(f"DELETE FROM \"StudentSchedule\" WHERE student_id = '{sid}' AND schedule_id NOT IN ({placeholders})"))
+                stmt = delete(StudentSchedule).where(StudentSchedule.student_id == sid).where(StudentSchedule.schedule_id.not_in(sched_ids))
             else:
-                await session.execute(text(f"DELETE FROM \"StudentSchedule\" WHERE student_id = '{sid}'"))
+                stmt = delete(StudentSchedule).where(StudentSchedule.student_id == sid)
+            await session.execute(stmt)
 
         await session.commit()
 

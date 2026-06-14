@@ -232,8 +232,12 @@ class AzureEmbeddingProvider(EmbeddingProvider):
 
 
 from src.llm.factory import register_provider, register_embedder  # noqa: E402
+from src.llm.bge_m3 import BGEM3EmbeddingProvider  # noqa: E402
 register_provider("openai", OpenAILLMProvider)
 register_embedder("openai", OpenAIEmbeddingProvider)
 register_provider("gemini", GeminiLLMProvider)
 register_provider("deepseek", DeepSeekLLMProvider)
 register_embedder("azure", AzureEmbeddingProvider)
+# F3a (RAG Preciso): embedder híbrido (denso 1024 + esparso em 1 passo).
+# Trocar exige EMBEDDING_DIMENSIONS=1024 + reindexação (janela única da F8).
+register_embedder("bge-m3", BGEM3EmbeddingProvider)

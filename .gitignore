@@ -98,6 +98,16 @@ service_account.json
 envs.json
 emulator_config.json
 
+# Exports de Container App (`az containerapp show`) — contêm segredos inline (SEGURANÇA).
+# A fonte da verdade da infra é o Bicep (infra/azure/bicep/). Estes dumps NÃO devem
+# ser versionados. Para remover os já rastreados: `git rm --cached infra/azure/worker-*.yaml`
+# (mantém a cópia local) — e ROTACIONE as chaves expostas, pois já estão no histórico.
+infra/azure/worker-*.yaml
+
+# Bicep compilado (artefato de build — gerar no pipeline, não commitar à mão;
+# evita divergência silenciosa main.json ↔ main.bicep).
+infra/azure/bicep/main.json
+
 # Volumes Docker Locais
 data/
 azure_secrets.json

@@ -8,9 +8,12 @@ class InboundMessage:
     sender_id: str          # phone (WhatsApp) ou chat_id (Telegram)
     text: str
     message_id: str
-    message_type: str       # "text" | "interactive" | "command" | "unknown"
+    message_type: str       # "text" | "interactive" | "image" | "command" | "unknown"
     interactive_payload: dict | None = None
     sender_name: str = ""
+    # H2.2: id da mídia no provedor (imagem de redação). O download acontece
+    # SEMPRE no worker (download_media), nunca no webhook (SLA 200ms).
+    media_id: str | None = None
 
 
 class IMessagingChannel(ABC):
@@ -58,6 +61,16 @@ class IMessagingChannel(ABC):
     @abstractmethod
     async def send_typing(self, user_id: str) -> None:
         """Envia um indicador visual de 'digitando...'."""
+        pass
+
+    @abstractmethod
+    async def send_audio(self, user_id: str, audio_bytes: bytes, caption: str = "") -> dict:
+        """Envia um áudio (MP3) — Pílulas de Áudio (H1.3)."""
+        pass
+
+    @abstractmethod
+    async def download_media(self, media_id: str) -> bytes:
+        """Baixa uma mídia recebida (H2.2 — foto de redação)."""
         pass
 
     @abstractmethod

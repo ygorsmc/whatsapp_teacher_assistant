@@ -20,7 +20,7 @@ spec:
     metadata:
       address: redis-master.redis.svc.cluster.local:6379 # Atualizar para endereço do Azure Cache for Redis se usar PaaS
       stream: inbound_messages
-      consumerGroup: whatsapp_workers
+      consumerGroup: messaging_workers
       pendingEntriesCount: "5"
     # authenticationRef: 
     #   name: keda-redis-auth

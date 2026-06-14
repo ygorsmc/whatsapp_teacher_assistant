@@ -161,6 +161,42 @@ class WhatsAppChannel(IMessagingChannel):
         # WhatsApp Cloud API não suporta indicador de typing direto.
         pass
 
+    async def send_audio(self, user_id: str, audio_bytes: bytes, caption: str = "") -> dict:
+        """Pílula de áudio (H1.3): upload do MP3 na Media API + envio.
+        WhatsApp não suporta caption em áudio — se houver, vai em texto antes."""
+        async with httpx.AsyncClient() as client:
+            upload = await client.post(
+                url=f"{self.api_url}/{self.phone_number_id}/media",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                data={"messaging_product": "whatsapp", "type": "audio/mpeg"},
+                files={"file": ("pilula.mp3", audio_bytes, "audio/mpeg")},
+                timeout=60.0,
+            )
+            upload.raise_for_status()
+            media_id = upload.json()["id"]
+
+        if caption:
+            await self.send_text(user_id, caption)
+
+        return await self._send_request({
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": user_id,
+            "type": "audio",
+            "audio": {"id": media_id},
+        })
+
+    async def download_media(self, media_id: str) -> bytes:
+        """Baixa uma mídia recebida (H2.2): GET /media_id → url assinada → bytes."""
+        headers = {"Authorization": f"Bearer {self.access_token}"}
+        async with httpx.AsyncClient() as client:
+            meta = await client.get(f"{self.api_url}/{media_id}", headers=headers, timeout=30.0)
+            meta.raise_for_status()
+            url = meta.json()["url"]
+            resp = await client.get(url, headers=headers, timeout=60.0)
+            resp.raise_for_status()
+            return resp.content
+
     def parse_inbound(self, raw_payload: dict) -> InboundMessage | None:
         try:
             entry = raw_payload.get("entry", [{}])[0]
@@ -183,6 +219,17 @@ class WhatsAppChannel(IMessagingChannel):
             
             text = msg_data.get("text", {}).get("body", "") if msg_type == "text" else ""
             interactive_payload = None
+            media_id = None
+
+            # H2.2: foto (redação) — o caption vira o text; download no worker.
+            if msg_type == "image":
+                media_id = msg_data.get("image", {}).get("id")
+                text = msg_data.get("image", {}).get("caption", "")
+
+            # F3 (Idiomas): nota de voz / áudio — o media_id segue; STT no worker.
+            # WhatsApp envia voice note como type "audio" (audio.voice=true).
+            if msg_type == "audio":
+                media_id = msg_data.get("audio", {}).get("id")
 
             if msg_type == "interactive":
                 interactive = msg_data.get("interactive", {})
@@ -204,16 +251,17 @@ class WhatsAppChannel(IMessagingChannel):
                 sender_id=phone,
                 text=text,
                 message_id=msg_id,
-                message_type=msg_type if msg_type in ["text", "interactive"] else "unknown",
+                message_type=msg_type if msg_type in ["text", "interactive", "image", "audio"] else "unknown",
                 interactive_payload=interactive_payload,
-                sender_name=sender_name
+                sender_name=sender_name,
+                media_id=media_id,
             )
             
         except (KeyError, IndexError):
             return None
 
     async def verify_signature(self, body: bytes, headers: Mapping[str, str]) -> bool:
-        if settings.ENVIRONMENT in ["development", "dev"]:
+        if settings.ENVIRONMENT == "local":
             return True
             
         signature = headers.get("X-Hub-Signature-256", "")

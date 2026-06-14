@@ -148,7 +148,18 @@ class AzureDocIntelParser(IDocumentParser):
                                 result = await poller.result()
                         
                         if result.paragraphs:
-                            raw_paragraphs.extend([p.content.strip() for p in result.paragraphs if p.content and len(p.content.strip()) > 30])
+                            for p in result.paragraphs:
+                                content = (p.content or "").strip()
+                                if not content:
+                                    continue
+                                # F1 (Chunking Estrutural): títulos/headings do layout
+                                # viram blocos markdown — fronteiras preferenciais de
+                                # chunk e metadado section_title na ingestão. Sem o
+                                # marcador, o filtro de 30 chars descartaria headings.
+                                if getattr(p, "role", None) in ("title", "sectionHeading"):
+                                    raw_paragraphs.append(f"## {content}")
+                                elif len(content) > 30:
+                                    raw_paragraphs.append(content)
                         
                         # THROTTLE: 3.5s entre chamadas = ~17 calls/min (margem de segurança para o limite de 20/min do F0)
                         if page_idx < total_pages - 1:

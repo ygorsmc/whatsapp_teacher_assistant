@@ -36,7 +36,7 @@ class AzureServiceBusQueue(IMessageQueue):
     async def get_client(self) -> ServiceBusClient:
         if not self.client:
             if settings.SERVICEBUS_CONNECTION_STRING:
-                logger.info("sb_using_connection_string", cs_prefix=settings.SERVICEBUS_CONNECTION_STRING[:60])
+                logger.info("sb_using_connection_string")
                 self.client = ServiceBusClient.from_connection_string(
                     conn_str=settings.SERVICEBUS_CONNECTION_STRING,
                     retry_total=10,

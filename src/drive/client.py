@@ -1,5 +1,6 @@
 import os
 import io
+import re as _re
 import structlog
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -13,6 +14,43 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive.readonly',
     'https://www.googleapis.com/auth/spreadsheets.readonly'
 ]
+
+# ── Addon de Livros: tipos de material por pasta ────────────────────────────
+# Dentro da pasta da Disciplina, pastas com estes nomes agrupam materiais de
+# tipos diferentes (Curso > Disciplina > {Aulas | Livro | Apostila} > Seções).
+# Pastas de aula soltas direto na Disciplina continuam valendo como 'lesson'
+# (compatibilidade total com a estrutura antiga).
+MATERIAL_TYPE_FOLDERS = {
+    "aulas": "lesson",
+    "aula": "lesson",
+    "livro": "book",
+    "livros": "book",
+    "apostila": "workbook",
+    "apostilas": "workbook",
+}
+
+# "1 - Introdução" (formato legado das aulas) tem precedência; senão, o
+# primeiro número do nome ("Cap 3", "Capítulo 3", "Módulo 2") vale como seção.
+_LEGACY_SECTION_REGEX = _re.compile(r"^(\d+)\s*-")
+_ANY_NUMBER_REGEX = _re.compile(r"(\d+)")
+
+
+def material_type_for_folder(folder_name: str) -> str | None:
+    """Mapeia o nome de uma pasta para um material_type ('lesson' | 'book' |
+    'workbook'). None se a pasta não for um agrupador de material conhecido."""
+    return MATERIAL_TYPE_FOLDERS.get(folder_name.strip().lower())
+
+
+def extract_section_number(folder_name: str) -> int:
+    """Extrai o número da seção/aula/capítulo do nome da pasta.
+
+    Exemplos: "1 - Introdução" → 1, "Cap 3" → 3, "Módulo 12" → 12.
+    Default 1 quando não há número (mesmo comportamento legado).
+    """
+    match = _LEGACY_SECTION_REGEX.match(folder_name)
+    if not match:
+        match = _ANY_NUMBER_REGEX.search(folder_name)
+    return int(match.group(1)) if match else 1
 
 class GoogleDriveClient:
     def __init__(self):
@@ -55,17 +93,23 @@ class GoogleDriveClient:
     async def list_course_files(self, folder_id: str):
         """
         Lists multiformat files (PDF, DOCX, PPTX, TXT, MD) following the hierarchy:
-        Root -> CourseFolder -> SubjectFolder -> LessonFolder -> Files
-        Returns a list of dicts with id, name, mimeType, modifiedTime, course_name,
-        subject_name, and lesson_number.
+        Root -> CourseFolder -> SubjectFolder -> [MaterialFolder] -> SectionFolder -> Files
+
+        O nível MaterialFolder é OPCIONAL (Addon de Livros): pastas chamadas
+        "Aulas", "Livro" ou "Apostila" dentro da Disciplina agrupam materiais
+        por tipo. Pastas de seção soltas direto na Disciplina continuam sendo
+        tratadas como aulas ('lesson'), preservando o fluxo antigo.
+
+        Returns a list of dicts with id, name, mimeType, modifiedTime,
+        course_name, subject_name, lesson_number and material_type
+        ('lesson' | 'book' | 'workbook').
         """
         if not self.service:
             raise ValueError("Google Drive Service is not initialized.")
-            
+
         import asyncio
         loop = asyncio.get_running_loop()
-        import re
-        
+
         ALLOWED_MIMES = [
             "application/pdf",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -76,53 +120,54 @@ class GoogleDriveClient:
             "application/vnd.google-apps.presentation"
         ]
         mime_query = " or ".join([f"mimeType='{m}'" for m in ALLOWED_MIMES])
-        
+
         def _fetch():
             all_files = []
-            
+
+            def _list_folders(parent_id: str) -> list[dict]:
+                query = f"'{parent_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+                result = self.service.files().list(q=query, fields="files(id, name)", spaces='drive').execute()
+                return result.get('files', [])
+
+            def _collect_section_files(section_folder: dict, c_name: str, s_name: str, mat_type: str):
+                """Coleta os arquivos de uma pasta de seção/aula, rotulando o material."""
+                section_num = extract_section_number(section_folder['name'])
+                f_query = f"'{section_folder['id']}' in parents and ({mime_query}) and trashed=false"
+                f_result = self.service.files().list(q=f_query, fields="files(id, name, mimeType, modifiedTime)", spaces='drive').execute()
+
+                for f in f_result.get('files', []):
+                    f['course_name'] = c_name
+                    f['subject_name'] = s_name
+                    # Para 'lesson' = número da aula; para 'book'/'workbook' =
+                    # capítulo/módulo (mesma coluna, semântica por material).
+                    f['lesson_number'] = section_num
+                    f['material_type'] = mat_type
+                    all_files.append(f)
+
             # 1. Fetch Course Folders inside Root
-            c_query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
-            c_result = self.service.files().list(q=c_query, fields="files(id, name)", spaces='drive').execute()
-            courses = c_result.get('files', [])
-            
-            for course in courses:
+            for course in _list_folders(folder_id):
                 c_name = course['name']
-                c_id = course['id']
 
                 # 2. Fetch Subject Folders (Disciplinas) inside each Course Folder
-                s_query = f"'{c_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
-                s_result = self.service.files().list(q=s_query, fields="files(id, name)", spaces='drive').execute()
-                subjects = s_result.get('files', [])
-
-                for subject in subjects:
+                for subject in _list_folders(course['id']):
                     s_name = subject['name']
-                    s_id = subject['id']
 
-                    # 3. Fetch Lesson Folders inside each Subject Folder
-                    l_query = f"'{s_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
-                    l_result = self.service.files().list(q=l_query, fields="files(id, name)", spaces='drive').execute()
-                    lessons = l_result.get('files', [])
+                    # 3. Children da Disciplina: ou agrupadores de material
+                    #    (Aulas/Livro/Apostila), ou pastas de aula soltas (legado).
+                    for child in _list_folders(subject['id']):
+                        mat_type = material_type_for_folder(child['name'])
 
-                    for lesson in lessons:
-                        l_name = lesson['name']
-                        l_id = lesson['id']
-
-                        # Extract lesson number from folder name (ex: "1 - Introdução")
-                        match = re.match(r"^(\d+)\s*-", l_name)
-                        lesson_num = int(match.group(1)) if match else 1
-
-                        # 4. Fetch allowed files inside each Lesson Folder
-                        f_query = f"'{l_id}' in parents and ({mime_query}) and trashed=false"
-                        f_result = self.service.files().list(q=f_query, fields="files(id, name, mimeType, modifiedTime)", spaces='drive').execute()
-
-                        for f in f_result.get('files', []):
-                            f['course_name'] = c_name
-                            f['subject_name'] = s_name
-                            f['lesson_number'] = lesson_num
-                            all_files.append(f)
+                        if mat_type:
+                            # 3a. Agrupador: desce um nível para as seções
+                            for section in _list_folders(child['id']):
+                                _collect_section_files(section, c_name, s_name, mat_type)
+                        else:
+                            # 3b. Compatibilidade total: pasta de aula direto
+                            # na Disciplina funciona exatamente como antes.
+                            _collect_section_files(child, c_name, s_name, "lesson")
 
             return all_files
-            
+
         files = await loop.run_in_executor(None, _fetch)
         return files
 

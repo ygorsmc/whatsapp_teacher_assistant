@@ -3,9 +3,11 @@ from typing import Optional
 from uuid import uuid4
 import json
 import re
+import structlog
 from sqlalchemy import text as sql_text
 
 from src.webhook.security import check_rate_limit
+from src.shared.config import settings
 from src.queue.factory import get_queue
 from src.shared.telemetry import track_event
 from src.cache.redis_client import get_redis
@@ -13,12 +15,21 @@ from src.db.database import AsyncSessionLocal
 from src.shared.constants.messages import (
     UNSUPPORTED_MESSAGE_TYPE, ERROR_UNAUTHORIZED
 )
+from src.shared.constants.commands import (
+    MANAGEMENT_COMMAND_REGEX, STUDENT_COMMAND_REGEX, ACTIVATION_CODE_REGEX,
+    GUARDIAN_REVOKE_REGEX,
+)
 
 from src.channel.interfaces import IMessagingChannel, InboundMessage
 from src.channel.whatsapp import WhatsAppChannel
 from src.channel.telegram import TelegramChannel
 
 router = APIRouter()
+
+# LGPD P1.4: logger estruturado — `sender_id`/contatos são mascarados pelo
+# `mask_pii_processor` (telemetry.py). Substitui os `print()` de diagnóstico,
+# que iam em claro (com PII) para o stdout/Log Analytics.
+logger = structlog.get_logger(__name__)
 
 whatsapp_channel = WhatsAppChannel()
 telegram_channel = TelegramChannel()
@@ -31,8 +42,8 @@ async def get_user_role(sender_id: str, query_column: str) -> Optional[str]:
     redis = await get_redis()
     cache_key = f"role:{sender_id}"
     
-    # --- HARDCODED ADMIN (First setup) ---
-    if sender_id == "5513974033349" or sender_id == "13974033349":
+    # --- BOOTSTRAP ADMIN (First setup) ---
+    if settings.BOOTSTRAP_ADMIN_PHONE and (sender_id == settings.BOOTSTRAP_ADMIN_PHONE or sender_id == settings.BOOTSTRAP_ADMIN_PHONE[2:]):
         return "teacher"
     # -------------------------------------
 
@@ -149,24 +160,73 @@ async def _process_message(msg: InboundMessage, channel: IMessagingChannel):
     redis = await get_redis()
     is_new = await redis.set(lock_key, "1", nx=True, ex=300)
     if not is_new:
-        print(f"[DIAG] Duplicate webhook dropped: {msg.message_id}")
+        logger.info("webhook_duplicate_dropped", message_id=msg.message_id, sender_id=sender_id)
         return Response(status_code=200)
 
     # 1. Whitelist + role - Cache-Aside
     user_role = await get_user_role(sender_id, query_column)
-    
+
+    # ── H2.1: ATIVAÇÃO POR QR CODE (fast-path, SLA 200ms) ────────────────────
+    # O QR é um deep link wa.me → o fluxo é exclusivo do WhatsApp. Mensagem de
+    # texto com chave (LIVRO-/PROF-) é roteada para a fila de ativação — de
+    # remetente CONHECIDO (2º livro) ou DESCONHECIDO (que o edge descartaria).
+    # Custo aqui: 1 regex pré-compilado (+1 EXISTS no Redis só p/ desconhecidos).
+    if msg.message_type == "text" and isinstance(channel, WhatsAppChannel):
+        has_code = bool(ACTIVATION_CODE_REGEX.search(msg.text or ""))
+        pending = False
+        if not has_code and user_role is None:
+            # Desconhecido SEM código: só passa se estiver no meio de uma
+            # ativação (respondendo o nome). Estado no Redis, TTL 1h.
+            from src.workers.activation_worker import has_pending_activation
+            pending = await has_pending_activation(sender_id)
+        if has_code or pending:
+            await get_queue().enqueue("command_messages", {
+                "sender_id": sender_id,
+                "text": msg.text,
+                "message_id": msg.message_id,
+                "channel": channel.channel_name,
+                "role": "activation",
+            })
+            track_event("activation_routed", {"sender_id": sender_id, "step": "code" if has_code else "name"})
+            return Response(status_code=200)
+
+    # ── LGPD Art. 14: CONSENTIMENTO DO RESPONSÁVEL (fast-path, SLA 200ms) ─────
+    # O responsável NÃO é usuário do bot. O clique de Autorizo/Não autorizo
+    # (payload `guardian_consent_*`) ou o texto REVOGAR de um remetente
+    # DESCONHECIDO são roteados para o worker de consentimento, que valida o
+    # telefone contra guardian_phone. Custo aqui: prefixo de payload / 1 regex.
+    if settings.GUARDIAN_CONSENT_ENABLED:
+        reply_id = (msg.interactive_payload or {}).get("id", "") if msg.interactive_payload else ""
+        is_consent_button = reply_id.startswith("guardian_consent_")
+        is_revoke_text = (
+            user_role is None
+            and msg.message_type == "text"
+            and bool(GUARDIAN_REVOKE_REGEX.match((msg.text or "").strip()))
+        )
+        if is_consent_button or is_revoke_text:
+            await get_queue().enqueue("command_messages", {
+                "sender_id": sender_id,
+                "text": msg.text,
+                "message_id": msg.message_id,
+                "channel": channel.channel_name,
+                "interactive_payload": msg.interactive_payload,
+                "role": "guardian",
+            })
+            track_event("guardian_routed", {"sender_id": sender_id, "kind": "button" if is_consent_button else "revoke"})
+            return Response(status_code=200)
+
     if user_role is None:
         # Se for Telegram, ativa a Trava de Segurança (Vinculação)
         if isinstance(channel, TelegramChannel):
             return await handle_telegram_linking(sender_id, msg.text)
         else:
             # WhatsApp
-            print(f"[DIAG] REJECTED: user_role is None for {sender_id}")
+            logger.info("webhook_rejected_unknown_sender", sender_id=sender_id)
             return Response(status_code=200)
 
     # 2. Rate limiting
     if not await check_rate_limit(sender_id):
-        print(f"[DIAG] REJECTED: rate limited {sender_id}")
+        logger.info("webhook_rejected_rate_limited", sender_id=sender_id)
         return Response(status_code=200)
 
     # Validação de tipo de mensagem
@@ -174,52 +234,61 @@ async def _process_message(msg: InboundMessage, channel: IMessagingChannel):
         await channel.send_text(sender_id, UNSUPPORTED_MESSAGE_TYPE)
         return Response(status_code=200)
 
-    # 3.1. Log interaction in DB
-    async with AsyncSessionLocal() as session:
-        res = await session.execute(
-            sql_text(f'SELECT id FROM \"Students\" WHERE {query_column} = :p'), 
-            {"p": sender_id}
-        )
-        student_row = res.fetchone()
-        if student_row:
-            student_id = student_row[0]
+    # H2.2 / F3: imagem (redação) e áudio (fala/pronúncia) — só de ALUNOS; seguem
+    # para o worker com o media_id (o download NUNCA acontece no webhook, SLA 200ms).
+    if msg.message_type in ("image", "audio") and user_role != "student":
+        await channel.send_text(sender_id, UNSUPPORTED_MESSAGE_TYPE)
+        return Response(status_code=200)
 
-            # Roteamento dinâmico "follow-the-user": grava o canal onde o aluno
-            # mandou a última mensagem. O scheduler entrega o próximo quiz por aqui.
-            await session.execute(
-                sql_text('UPDATE "Students" SET preferred_channel = :ch WHERE id = :sid'),
-                {"ch": channel.channel_name, "sid": student_id}
-            )
-
-            interaction_type = "message_received"
-            if msg.message_type == "interactive" and msg.interactive_payload and msg.interactive_payload.get("id", "").startswith("quiz_"):
-                interaction_type = "quiz_answered"
-            
-            await session.execute(
-                sql_text("""
-                    INSERT INTO "StudentInteractions" (id, student_id, interaction_type, message_content) 
-                    VALUES (:id, :sid, :itype, :msg)
-                """),
-                {
-                    "id": str(uuid4()),
-                    "sid": student_id,
-                    "itype": interaction_type,
-                    "msg": msg.text or (msg.interactive_payload.get("title", "") if msg.interactive_payload else "")
-                }
-            )
-            await session.commit()
+    # Removido bloco 3.1 síncrono de banco de dados para não quebrar SLA da Meta (200ms)
 
     # 4. Command routing (only for text messages)
     if msg.message_type == "text" and msg.text.startswith("/"):
         if user_role != "teacher":
+            # ── Comandos de ALUNO (Addon de Livros) ──────────────────────
+            # Allowlist explícita via regex pré-compilado (O(µs), sem I/O):
+            # /pausar_leitura, /retomar_leitura, /meu_progresso, /flashcards.
+            # REGRA DE OURO (SLA Meta 200ms): nada é executado aqui — apenas
+            # rotulamos e enfileiramos para o command_worker. Qualquer outro
+            # comando de aluno continua rejeitado na borda, como sempre.
+            student_match = STUDENT_COMMAND_REGEX.match(msg.text.strip())
+            if student_match:
+                await get_queue().enqueue("command_messages", {
+                    "sender_id": sender_id,
+                    "text": msg.text,
+                    "message_id": msg.message_id,
+                    "channel": channel.channel_name,
+                    "role": "student",  # validado acima via cache-aside (Redis)
+                })
+                track_event("student_command_routed", {
+                    "sender_id": sender_id,
+                    "command": student_match.group("cmd").lower(),
+                })
+                return Response(status_code=200)
+
             await channel.send_text(sender_id, ERROR_UNAUTHORIZED)
             return Response(status_code=200)
-            
+
+        # ── Comandos gerenciais: /comando_[turma]_[arg] ──────────────────
+        # Regex pré-compilado e SEM I/O (O(µs)): identifica os comandos
+        # /engajamento, /acertos, /risco, /duvidas_frequentes, /ver_aluno,
+        # /resetar_aluno, /limpar_quizzes e /aviso e os rotula no payload.
+        # REGRA DE OURO (SLA Meta 200ms): NENHUM comando é executado aqui de
+        # forma síncrona — o webhook apenas roteia para a fila
+        # `command_messages`, onde o command_worker fará o trabalho pesado.
+        mgmt_match = MANAGEMENT_COMMAND_REGEX.match(msg.text.strip())
+
         await get_queue().enqueue("command_messages", {
             "sender_id": sender_id,
             "text": msg.text,
             "message_id": msg.message_id,
-            "channel": channel.channel_name
+            "channel": channel.channel_name,
+            "role": "teacher",  # já validado acima via cache-aside (Redis)
+            "management_command": mgmt_match.group("cmd").lower() if mgmt_match else None,
+        })
+        track_event("command_routed", {
+            "sender_id": sender_id,
+            "management_command": mgmt_match.group("cmd").lower() if mgmt_match else "legacy",
         })
         return Response(status_code=200)
 
@@ -234,17 +303,11 @@ async def _process_message(msg: InboundMessage, channel: IMessagingChannel):
             "interactive_payload": msg.interactive_payload,
             "correlation_id": correlation_id,
             "message_id": msg.message_id,
-            "channel": channel.channel_name
+            "channel": channel.channel_name,
+            "media_id": msg.media_id,
         },
         session_id=sender_id # Garantia FIFO local por chat
     )
-
-    # 7. WAKE UP HACK FOR KEDA
-    await get_queue().enqueue("command_messages", {
-        "sender_id": sender_id,
-        "text": "/wakeup",
-        "message_id": f"wakeup_{msg.message_id}"
-    })
 
     return Response(status_code=200)
 
@@ -293,4 +356,3 @@ async def webhook_telegram(request: Request):
         return Response(status_code=200)
         
     return await _process_message(msg, telegram_channel)
-

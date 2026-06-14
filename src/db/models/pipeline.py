@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Index
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Index, Integer
 from sqlalchemy.sql import func
 from src.db.database import Base
 
@@ -14,6 +14,7 @@ class FileSyncState(Base):
     error_message = Column(String(500))
     last_synced = Column(DateTime)
     processing_started_at = Column(DateTime)
+    attempts = Column(Integer, default=0)
     
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

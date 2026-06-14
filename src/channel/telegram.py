@@ -1,3 +1,4 @@
+import hmac
 import httpx
 from typing import Any, Mapping
 from fastapi import Response
@@ -30,7 +31,7 @@ class TelegramChannel(IMessagingChannel):
             return response.json()
 
     async def send_text(self, user_id: str, text: str, reply_to: str | None = None) -> dict:
-        payload = {
+        payload: dict[str, Any] = {
             "chat_id": user_id,
             "text": text,
             "parse_mode": "Markdown",  # Suporta *bold*, _italic_, etc.
@@ -129,6 +130,32 @@ class TelegramChannel(IMessagingChannel):
         }
         await self._send_request("sendChatAction", payload)
 
+    async def send_audio(self, user_id: str, audio_bytes: bytes, caption: str = "") -> dict:
+        """Pílula de áudio (H1.3): sendAudio aceita MP3 via multipart."""
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url=f"{self.api_url}/sendAudio",
+                data={"chat_id": user_id, **({"caption": caption} if caption else {})},
+                files={"audio": ("pilula.mp3", audio_bytes, "audio/mpeg")},
+                timeout=60.0,
+            )
+            response.raise_for_status()
+            return response.json()
+
+    async def download_media(self, media_id: str) -> bytes:
+        """Baixa uma mídia recebida (H2.2): getFile → file_path → bytes."""
+        async with httpx.AsyncClient() as client:
+            meta = await client.post(
+                url=f"{self.api_url}/getFile", json={"file_id": media_id}, timeout=30.0
+            )
+            meta.raise_for_status()
+            file_path = meta.json()["result"]["file_path"]
+            resp = await client.get(
+                url=f"https://api.telegram.org/file/bot{self.bot_token}/{file_path}", timeout=60.0
+            )
+            resp.raise_for_status()
+            return resp.content
+
     def parse_inbound(self, raw_payload: dict) -> InboundMessage | None:
         try:
             # Update pode ser Message ou CallbackQuery (botões)
@@ -143,7 +170,31 @@ class TelegramChannel(IMessagingChannel):
                 sender_name = f"{first_name} {last_name}".strip()
 
                 text = msg.get("text", "")
-                
+
+                # H2.2: foto (redação) — pega a maior resolução; caption vira text.
+                if "photo" in msg and msg["photo"]:
+                    media_id = msg["photo"][-1].get("file_id")
+                    return InboundMessage(
+                        sender_id=chat_id,
+                        text=msg.get("caption", ""),
+                        message_id=msg_id,
+                        message_type="image",
+                        sender_name=sender_name,
+                        media_id=media_id,
+                    )
+
+                # F3 (Idiomas): nota de voz / áudio — file_id segue; STT no worker.
+                voice = msg.get("voice") or msg.get("audio")
+                if voice and voice.get("file_id"):
+                    return InboundMessage(
+                        sender_id=chat_id,
+                        text=msg.get("caption", ""),
+                        message_id=msg_id,
+                        message_type="audio",
+                        sender_name=sender_name,
+                        media_id=voice["file_id"],
+                    )
+
                 return InboundMessage(
                     sender_id=chat_id,
                     text=text,
@@ -185,15 +236,16 @@ class TelegramChannel(IMessagingChannel):
         return None
 
     async def verify_signature(self, body: bytes, headers: Mapping[str, str]) -> bool:
-        if settings.ENVIRONMENT in ["development", "dev"]:
+        if settings.ENVIRONMENT == "local":
             return True
             
         # Telegram manda o secret token no header
         token = headers.get("X-Telegram-Bot-Api-Secret-Token", "")
         if not token or not self.secret_token:
             return False
-            
-        return token == self.secret_token
+
+        # Comparação em tempo constante (evita timing side-channel no secret).
+        return hmac.compare_digest(token, self.secret_token)
 
     def build_verification_response(self, query_params: Mapping[str, str]) -> Any:
         # Telegram não faz challenge get, ele só manda os POSTs.

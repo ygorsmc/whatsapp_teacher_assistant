@@ -22,7 +22,7 @@ from sqlalchemy import text
 from src.shared.config import settings
 from src.shared.telemetry import track_event
 from src.channel.factory import get_channel
-from src.shared.constants.messages import REVIEW_INVITE_BODY, REVIEW_INVITE_FOOTER, REVIEW_ACCEPT_TITLE, REVIEW_LATER_TITLE
+from src.shared.constants.messages import REVIEW_ACCEPT_TITLE
 from src.db.database import AsyncSessionLocal, init_db
 
 logger = structlog.get_logger(__name__)
@@ -91,11 +91,16 @@ async def process_pending_schedules():
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
 
     default_ct = settings.CHANNEL_BACKEND.lower()
+    # LGPD Art. 14 (P1.1): exclui criança sem opt-in do responsável das
+    # entregas proativas (string vazia com a flag off — comportamento atual).
+    from src.shared.privacy import guardian_consent_sql_clause
+    consent_clause = guardian_consent_sql_clause("s")
+
     async with AsyncSessionLocal() as session:
         # Busca os agendamentos vencidos com os DOIS endereços do aluno + o canal preferido.
         # O canal de entrega é resolvido por aluno (roteamento "follow-the-user").
         result = await session.execute(
-            text("""
+            text(f"""
                 SELECT ss.schedule_id, ss.student_id, ss.class_id, cl.course_id AS course_id,
                        ss.template_name, ss.preferred_hour, ss.content_type,
                        s.name AS student_name, s.phone, s.telegram_chat_id, s.preferred_channel,
@@ -109,6 +114,8 @@ async def process_pending_schedules():
                   AND ss.is_active = true
                   AND s.is_active = true
                   AND c.is_active = true
+                  {consent_clause}
+                FOR UPDATE OF ss SKIP LOCKED
             """),
             {"now": now_utc},
         )
@@ -126,7 +133,6 @@ async def process_pending_schedules():
             # Roteamento "follow-the-user": entrega no canal onde o aluno falou por
             # último (preferred_channel); na ausência, usa o canal global.
             ct = (row.preferred_channel or default_ct).lower()
-            channel = get_channel(ct)
             sender_id = row.telegram_chat_id if ct == "telegram" else row.phone
 
             if not sender_id:
@@ -179,7 +185,6 @@ async def process_pending_schedules():
                 # Torna o título único (encurta o nome do curso se necessário)
                 course_short = row.course_name[:10]
                 accept_title = f"{REVIEW_ACCEPT_TITLE} {course_short}"
-                later_title = f"{REVIEW_LATER_TITLE} {course_short}"
 
                 if ct == "telegram" or window_active:
                     logger.info("scheduler_window_active_direct_send", sender_id=sender_id, schedule_id=schedule_id, channel=ct)
@@ -417,13 +422,13 @@ async def process_window_extensions():
                         footer="Mantenha seus estudos em dia!"
                     )
                     
-                    # Registra que avisamos
+                    from uuid import uuid4
                     await session.execute(
                         text("""
-                            INSERT INTO "StudentInteractions" (student_id, interaction_type)
-                            VALUES (:sid, 'window_closing_warning_sent')
+                            INSERT INTO "StudentInteractions" (id, student_id, interaction_type)
+                            VALUES (:id, :sid, 'window_closing_warning_sent')
                         """),
-                        {"sid": student.student_id}
+                        {"id": str(uuid4()), "sid": student.student_id}
                     )
                     await session.commit()
                     
@@ -440,6 +445,20 @@ async def scheduler_loop():
     # Ensure DB tables exist (for local dev)
     await init_db()
 
+    # Addon de Livros + Horizontes H1-H3: cada etapa é isolada em try/except
+    # próprio — uma falha em qualquer feature nova NUNCA derruba o fluxo
+    # clássico de revisões/quizzes.
+    from src.workers.reading_journey import process_reading_plans, process_reading_checkins
+    from src.workers.spaced_repetition import process_spaced_repetition
+    from src.workers.challenges import process_challenge_closures
+    from src.workers.sentinel import process_sentinel_alerts
+    from src.workers.editorial_report import process_monthly_editorial_report
+    from src.workers.proficiency_report import process_monthly_proficiency_report  # F6 idiomas
+    # LGPD (Plano P1.1/P1.3): consentimento parental e retenção — ambos atrás
+    # de flag própria (no-op com a flag off; padrão da casa).
+    from src.workers.guardian_consent import process_guardian_consent_requests
+    from src.workers.retention import run_data_retention
+
     while True:
         try:
             await perform_daily_user_sync()
@@ -448,6 +467,22 @@ async def scheduler_loop():
             await process_window_extensions()
         except Exception as e:
             logger.error("scheduler_loop_error", error=str(e)[:500])
+
+        for step_name, step in (
+            ("reading_plans", process_reading_plans),
+            ("reading_checkins", process_reading_checkins),
+            ("spaced_repetition", process_spaced_repetition),
+            ("challenge_closures", process_challenge_closures),     # H1.1/H2.3
+            ("sentinel_alerts", process_sentinel_alerts),           # H1.2 (1x/dia)
+            ("editorial_report", process_monthly_editorial_report), # H2.4 (1x/mês)
+            ("proficiency_report", process_monthly_proficiency_report), # F6 idiomas (1x/mês, flag)
+            ("guardian_consent", process_guardian_consent_requests),# LGPD P1.1 (flag)
+            ("data_retention", run_data_retention),                 # LGPD P1.3 (1x/mês, flag)
+        ):
+            try:
+                await step()
+            except Exception as e:
+                logger.error("scheduler_addon_step_error", step=step_name, error=str(e)[:500])
 
         await asyncio.sleep(SCHEDULER_INTERVAL)
 

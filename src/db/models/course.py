@@ -56,7 +56,20 @@ class CourseClass(Base):
     start_date = Column(DateTime, nullable=True)  # Store as DateTime for simpler SQLite compat
     schedule_map = Column(Text, nullable=True)    # JSON string mapping weekday(0-6) -> "19:00"
     last_advanced_date = Column(DateTime, nullable=True) # To prevent double advancement on the same day
-    
+
+    # Modo Professor Curador (Addon de Livros): JSON string com a lista de
+    # capítulos ativos do livro/apostila (ex: "[1, 3, 5, 7]"). NULL = todos
+    # ativos. Capítulos fora da lista são ignorados pelo scheduler da Jornada
+    # de Leitura e pelo RAG de materiais densos.
+    active_chapters = Column(Text, nullable=True)
+
+    # Vertical de Idiomas — perfil por turma (aba "Turmas": colunas Idioma/Nível).
+    # is_language: turma de curso de idioma (switch autoritativo do recurso de
+    # áudio/idioma). proficiency_level: Iniciante|Intermediário|Avançado|Fluente
+    # (NULL = não informado). O idioma-alvo é inferido pelo NOME do curso (§1.4).
+    is_language = Column(Boolean, nullable=False, default=False, server_default="false")
+    proficiency_level = Column(String(20), nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -67,7 +80,10 @@ class StudentEnrollment(Base):
     enrollment_id = Column(String(255), primary_key=True)
     student_id = Column(String(255), ForeignKey("Students.id"), nullable=False)
     class_id = Column(String(255), ForeignKey("Classes.id"), nullable=False)
-    
+    # Vertical de Idiomas (F5): nível CEFR (A1–C2) do aluno NESTA turma, definido
+    # pelo teste de nivelamento. NULL = ainda não nivelado.
+    cefr_level = Column(String(10), nullable=True)
+
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
     

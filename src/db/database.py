@@ -23,7 +23,11 @@ engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
     future=True,
-    pool_pre_ping=True
+    pool_pre_ping=True,
+    pool_size=5,
+    max_overflow=5,
+    pool_recycle=300,
+    pool_timeout=10
 )
 
 AsyncSessionLocal = async_sessionmaker(
@@ -63,7 +67,8 @@ async def ensure_bootstrap_admin():
 
 
 async def init_db():
-    """Create all tables. Useful for local dev with SQLite or initial Azure SQL setup."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Create all tables if in development. In production, rely on Alembic migrations."""
+    if settings.ENVIRONMENT in ("development", "dev", "local"):
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
     await ensure_bootstrap_admin()

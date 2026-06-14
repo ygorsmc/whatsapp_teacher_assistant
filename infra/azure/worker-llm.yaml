@@ -269,7 +269,7 @@ properties:
             triggerParameter: address
           metadata:
             stream: inbound_messages
-            consumerGroup: whatsapp_workers
+            consumerGroup: messaging_workers
             pendingEntriesCount: '5'
           type: redis-streams
         name: inbound-messages-rule
@@ -279,7 +279,7 @@ properties:
             triggerParameter: address
           metadata:
             stream: command_messages
-            consumerGroup: whatsapp_workers
+            consumerGroup: messaging_workers
             pendingEntriesCount: '1'
           type: redis-streams
         name: command-messages-rule

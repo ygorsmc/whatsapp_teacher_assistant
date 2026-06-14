@@ -15,12 +15,15 @@ def load_azure_secrets(settings) -> None:
         credential = DefaultAzureCredential()
         client = SecretClient(vault_url=settings.AZURE_KEY_VAULT_URL, credential=credential)
         
-        # Mapeia as variáveis sensíveis que devem vir do Key Vault
+        # Mapeia as variáveis sensíveis que devem vir do Key Vault.
+        # Toda secret aqui deve existir no KV (Bicep) para que o app NÃO dependa
+        # de env var em claro no Container App (vetor do vazamento F01/F02).
         keys_to_fetch = [
             "META-APP-SECRET", "META-VERIFY-TOKEN", "WHATSAPP-TOKEN",
             "DOCUMENT-INTELLIGENCE-KEY", "OPENAI-API-KEY", "GOOGLE-API-KEY", "DEEPSEEK-API-KEY",
             "AZURE-OPENAI-API-KEY", "AZURE-OPENAI-ENDPOINT", "SERVICEBUS-CONNECTION-STRING", "DATABASE-URL",
-            "QDRANT-URL", "QDRANT-API-KEY", "REDIS-URL"
+            "QDRANT-URL", "QDRANT-API-KEY", "REDIS-URL",
+            "TELEGRAM-BOT-TOKEN", "TELEGRAM-WEBHOOK-SECRET",
         ]
         
         for kv_key in keys_to_fetch:
