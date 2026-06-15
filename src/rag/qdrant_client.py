@@ -43,6 +43,9 @@ PAYLOAD_INDEXES: list[tuple[str, PayloadSchemaType]] = [
     ("subject_name", PayloadSchemaType.KEYWORD),
     ("lesson_number", PayloadSchemaType.INTEGER),
     ("material_type", PayloadSchemaType.KEYWORD),
+    # file_id do Drive: usado pelo /delete para apagar os chunks de um arquivo
+    # com precisão (filtro indexado, à prova de homônimos).
+    ("file_id", PayloadSchemaType.KEYWORD),
 ]
 
 
@@ -158,6 +161,17 @@ async def init_qdrant_collection(collection_name: str | None = None):
         await qdrant_client.create_payload_index(
             collection_name=collection_name,
             field_name="material_type",
+            field_schema=PayloadSchemaType.KEYWORD
+        )
+    except Exception:
+        pass
+
+    # /delete: índice de file_id também roda SEMPRE (fora do if) para equipar
+    # coleções criadas antes desta feature — idempotente e best-effort.
+    try:
+        await qdrant_client.create_payload_index(
+            collection_name=collection_name,
+            field_name="file_id",
             field_schema=PayloadSchemaType.KEYWORD
         )
     except Exception:

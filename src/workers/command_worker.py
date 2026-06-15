@@ -1,4 +1,5 @@
 import re
+import json
 from src.queue.interfaces import MessageContext
 from datetime import datetime, timezone, timedelta
 from src.shared.config import settings
@@ -12,6 +13,9 @@ from src.shared.constants.messages import (
     CMD_SYNC_UNLINKED_WARNING, CMD_SYNC_NO_TEACHER_WARNING, CMD_SYNC_DISCIPLINA_WARNING,
     CMD_HELP_TEXT, CMD_CLASS_NOT_FOUND, CMD_TEACHER_NOT_FOUND, CMD_AVISO_USAGE,
     CMD_STUDENT_PHONE_USAGE, CMD_STUDENT_NOT_FOUND, CMD_STUDENT_NOT_OWNED,
+    CMD_DELETE_USAGE, CMD_DELETE_NEED_LIST, CMD_DELETE_NOT_FOUND, CMD_DELETE_EMPTY,
+    CMD_DELETE_CONFIRM, CMD_DELETE_CONFIRM_YES, CMD_DELETE_CONFIRM_NO,
+    CMD_DELETE_EXPIRED, CMD_DELETE_CANCELLED, CMD_DELETE_SUCCESS,
 )
 from src.shared.constants.commands import (
     parse_command, parse_management_command, parse_student_command, CommandType,
@@ -199,54 +203,251 @@ async def run_list_cursos_command(channel, sender_id: str):
     except Exception:
         await channel.send_text(sender_id, "❌ Erro ao buscar cursos.")
 
+# ── /listar_materiais + /delete (exclusão de material indexado) ──────────────
+# A lista numerada memoriza, no Redis, o vínculo  nº → arquivo  (TTL 1h). O
+# professor lida só com o número; por baixo, o /delete apaga por `file_id` do
+# Drive (à prova de homônimos), com fallback para `source`+escopo nos vetores
+# legados (ingeridos antes do file_id no payload). TODO filtro inclui teacher_id.
+
+_MATERIALS_INDEX_TTL = 3600        # validade da numeração do /listar_materiais
+_DELETE_PENDING_TTL = 300          # validade da confirmação do /delete
+
+_SECTION_LABELS = {"lesson": "Aula", "book": "Cap.", "workbook": "Módulo"}
+
+
+def _materials_index_key(teacher_id: str) -> str:
+    return f"materials_index:{teacher_id}"
+
+
+def _delete_pending_key(sender_id: str) -> str:
+    return f"material_delete_pending:{sender_id}"
+
+
+def _section_label(material_type: str, lesson_number: int) -> str:
+    return f"{_SECTION_LABELS.get(material_type, 'Seção')} {lesson_number}"
+
+
+def _material_path(course_name, subject_name, material_type, lesson_number, name) -> str:
+    """Caminho lógico legível: Curso › Disciplina › <Seção> › arquivo."""
+    parts = [p for p in (course_name, subject_name,
+                         _section_label(material_type, lesson_number), name) if p]
+    return " › ".join(parts)
+
+
+def _material_primary_filter(file_id: str, teacher_id: str):
+    """Filtro preciso por file_id (vetores novos) — sempre escopado por teacher."""
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+    must: list = [
+        FieldCondition(key="file_id", match=MatchValue(value=file_id)),
+        FieldCondition(key="teacher_id", match=MatchValue(value=teacher_id)),
+    ]
+    return Filter(must=must)
+
+
+def _material_legacy_filter(ref: dict, teacher_id: str):
+    """Fallback por source+escopo (vetores legados, sem file_id no payload).
+    Mantém o isolamento por teacher_id+course_id (regra inviolável)."""
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+    must: list = [
+        FieldCondition(key="source", match=MatchValue(value=ref["source"])),
+        FieldCondition(key="teacher_id", match=MatchValue(value=teacher_id)),
+    ]
+    if ref.get("course_id"):
+        must.append(FieldCondition(key="course_id", match=MatchValue(value=ref["course_id"])))
+    if ref.get("subject_name"):
+        must.append(FieldCondition(key="subject_name", match=MatchValue(value=ref["subject_name"])))
+    if ref.get("lesson_number") is not None:
+        must.append(FieldCondition(key="lesson_number", match=MatchValue(value=ref["lesson_number"])))
+    if ref.get("material_type"):
+        must.append(FieldCondition(key="material_type", match=MatchValue(value=ref["material_type"])))
+    return Filter(must=must)
+
+
+async def _count_material_chunks(ref: dict, teacher_id: str) -> tuple[int, str]:
+    """Conta os trechos do arquivo. Tenta por file_id; se 0 (vetores legados),
+    conta por source+escopo. Retorna (quantidade, modo usado)."""
+    from src.rag.qdrant_client import get_qdrant
+    qdrant = await get_qdrant()
+    primary = await qdrant.count(
+        collection_name=settings.QDRANT_COLLECTION,
+        count_filter=_material_primary_filter(ref["file_id"], teacher_id),
+        exact=True,
+    )
+    if primary.count > 0:
+        return primary.count, "file_id"
+    legacy = await qdrant.count(
+        collection_name=settings.QDRANT_COLLECTION,
+        count_filter=_material_legacy_filter(ref, teacher_id),
+        exact=True,
+    )
+    return legacy.count, "legacy"
+
+
 async def run_list_materiais_command(channel, sender_id: str, course_query: str):
-    from src.drive.client import drive_client
+    from src.drive.factory import get_material_source
     try:
         async with AsyncSessionLocal() as session:
-            result = await session.execute(text('SELECT id FROM \"Teachers\" WHERE phone = :phone'), {"phone": sender_id})
-            teacher = result.fetchone()
+            teacher = await _resolve_teacher(session, channel, sender_id)
             if not teacher:
                 await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
                 return
-                
+            teacher_id = teacher[0]
+
             folder_id = settings.GOOGLE_DRIVE_FOLDER_ID
             if not folder_id:
                 await channel.send_text(sender_id, "❌ O Google Drive não está configurado.")
                 return
-                
-            files = await drive_client.list_course_files(folder_id)
+
+            files = await get_material_source().list_materials(folder_id)
             if not files:
                 await channel.send_text(sender_id, "📂 A pasta do Google Drive está vazia.")
                 return
-                
-            # Fetch statuses from DB
-            result = await session.execute(
+
+            statuses = {row[0]: row[1] for row in (await session.execute(
                 text("SELECT file_id, status FROM file_sync_state WHERE teacher_id = :tid"),
-                {"tid": teacher[0]}
-            )
-            statuses = {row[0]: row[1] for row in result.fetchall()}
-            
-            msg = "📂 *Materiais no Google Drive:*\n\n"
-            
-            # Filter by course query if provided
-            filtered_files = files
-            if course_query:
-                query_lower = course_query.lower()
-                filtered_files = [f for f in files if query_lower in f['name'].lower()]
-                msg = f"📂 *Materiais (Filtro: {course_query}):*\n\n"
-                
-            if not filtered_files:
-                msg += "Nenhum material encontrado com esse filtro."
-            
-            for f in filtered_files:
-                status = statuses.get(f['id'], "não sincronizado")
-                emoji = "✅" if status == "concluído" else "⏳" if status == "processando" else "❌"
-                c_name = f.get('course_name', 'Pasta Raiz')
-                msg += f"{emoji} *{f['name']}*\nCurso: {c_name}\nStatus: {status}\n\n"
-                
-            await channel.send_text(sender_id, msg[:4000])
+                {"tid": teacher_id},
+            )).fetchall()}
+            course_ids = {row[1]: row[0] for row in (await session.execute(
+                text('SELECT id, name FROM "Courses"')
+            )).fetchall()}
+
+        # Filtro opcional por nome + ordenação determinística (numeração estável).
+        filtered = files
+        header = "📂 *Materiais no Google Drive:*"
+        if course_query:
+            q = course_query.lower()
+            filtered = [f for f in files if q in f.name.lower()]
+            header = f"📂 *Materiais (Filtro: {course_query}):*"
+        filtered = sorted(filtered, key=lambda f: (
+            f.course_name or "", f.subject_name or "", f.material_type or "",
+            f.lesson_number or 0, f.name,
+        ))
+
+        if not filtered:
+            await channel.send_text(sender_id, f"{header}\n\nNenhum material encontrado com esse filtro.")
+            return
+
+        index: dict[str, dict] = {}
+        lines = [header, ""]
+        for n, f in enumerate(filtered, start=1):
+            status = statuses.get(f.id, "não sincronizado")
+            emoji = ("✅" if status == "concluído" else "⏳" if status == "processando"
+                     else "🗑️" if status == "excluído" else "❌")
+            path = _material_path(f.course_name, f.subject_name, f.material_type, f.lesson_number, f.name)
+            lines.append(f"*{n}.* {emoji} {path}\n     _{status}_")
+            index[str(n)] = {
+                "file_id": f.id,
+                "source": f.name,
+                "course_id": course_ids.get(f.course_name),
+                "subject_name": f.subject_name,
+                "lesson_number": f.lesson_number,
+                "material_type": f.material_type,
+                "path": path,
+            }
+
+        redis = await get_redis()
+        await redis.set(_materials_index_key(teacher_id), json.dumps(index), ex=_MATERIALS_INDEX_TTL)
+
+        lines.append("\n🗑️ Para remover um material do bot: `/delete_<nº>` (ex.: `/delete_1`).")
+        await channel.send_text(sender_id, "\n".join(lines)[:4000])
     except Exception as e:
+        logger.error("list_materiais_command_failed", error=str(e)[:300])
         await channel.send_text(sender_id, f"❌ Erro ao buscar materiais: {str(e)[:100]}")
+
+
+async def run_delete_material_command(channel, sender_id: str, arg: str):
+    """/delete_<nº> — passo 1: resolve o nº da última listagem, conta os trechos
+    e pede confirmação por botões (o clique é tratado no llm_worker)."""
+    num = (arg or "").strip()
+    if not num.isdigit():
+        await channel.send_text(sender_id, CMD_DELETE_USAGE)
+        return
+    try:
+        async with AsyncSessionLocal() as session:
+            teacher = await _resolve_teacher(session, channel, sender_id)
+            if not teacher:
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
+                return
+            teacher_id = teacher[0]
+
+        redis = await get_redis()
+        index_raw = await redis.get(_materials_index_key(teacher_id))
+        if not index_raw:
+            await channel.send_text(sender_id, CMD_DELETE_NEED_LIST)
+            return
+        ref = json.loads(index_raw).get(num)
+        if not ref:
+            await channel.send_text(sender_id, CMD_DELETE_NOT_FOUND.format(num=num))
+            return
+
+        count, mode = await _count_material_chunks(ref, teacher_id)
+        if count == 0:
+            await channel.send_text(sender_id, CMD_DELETE_EMPTY.format(path=ref["path"]))
+            return
+
+        pending = {**ref, "teacher_id": teacher_id, "mode": mode, "count": count}
+        await redis.set(_delete_pending_key(sender_id), json.dumps(pending), ex=_DELETE_PENDING_TTL)
+        await channel.send_buttons(
+            sender_id,
+            CMD_DELETE_CONFIRM.format(path=ref["path"], count=count),
+            buttons=[
+                {"id": "material_delete_confirm", "title": CMD_DELETE_CONFIRM_YES},
+                {"id": "material_delete_cancel", "title": CMD_DELETE_CONFIRM_NO},
+            ],
+        )
+    except Exception as e:
+        logger.error("delete_material_command_failed", error=str(e)[:300])
+        await channel.send_text(sender_id, f"❌ Erro ao preparar a exclusão: {str(e)[:100]}")
+
+
+async def handle_material_delete_decision(channel, sender_id: str, confirmed: bool) -> None:
+    """/delete passo 2: clique do botão (roteado pelo llm_worker). Executa a
+    exclusão escopada (vetores + QuizBank/tópicos + marca file_sync_state)."""
+    redis = await get_redis()
+    pending_key = _delete_pending_key(sender_id)
+    raw = await redis.get(pending_key)
+    if not raw:
+        await channel.send_text(sender_id, CMD_DELETE_EXPIRED)
+        return
+    await redis.delete(pending_key)  # consome a confirmação (idempotente)
+
+    if not confirmed:
+        await channel.send_text(sender_id, CMD_DELETE_CANCELLED)
+        return
+
+    ref = json.loads(raw)
+    teacher_id = ref["teacher_id"]
+    try:
+        from src.rag.qdrant_client import get_qdrant
+        qdrant = await get_qdrant()
+        flt = (_material_primary_filter(ref["file_id"], teacher_id) if ref.get("mode") == "file_id"
+               else _material_legacy_filter(ref, teacher_id))
+        await qdrant.delete(collection_name=settings.QDRANT_COLLECTION, points_selector=flt)
+
+        # Dados derivados: questões do QuizBank + cache de tópicos do escopo.
+        if ref.get("course_id") and ref.get("lesson_number") is not None:
+            from src.workers.ingestion_worker import invalidate_quiz_cache_for_lesson
+            await invalidate_quiz_cache_for_lesson(
+                course_id=ref["course_id"],
+                subject_name=ref.get("subject_name"),
+                lesson_number=int(ref["lesson_number"]),
+                material_type=ref.get("material_type", "lesson"),
+            )
+
+        # Marca o arquivo como 'excluído' p/ a sync NÃO o ressuscitar.
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                text("UPDATE file_sync_state SET status='excluído' WHERE file_id=:fid AND teacher_id=:tid"),
+                {"fid": ref["file_id"], "tid": teacher_id},
+            )
+            await session.commit()
+
+        logger.info("material_deleted", teacher_id=teacher_id, file_id=ref["file_id"],
+                    chunks=ref.get("count"), mode=ref.get("mode"))
+        await channel.send_text(sender_id, CMD_DELETE_SUCCESS.format(path=ref["path"], count=ref.get("count", 0)))
+    except Exception as e:
+        logger.error("material_delete_execution_failed", error=str(e)[:300])
+        await channel.send_text(sender_id, f"❌ Erro ao apagar: {str(e)[:100]}")
 
 async def run_update_lesson_command(channel, sender_id: str, args: str):
     try:
@@ -1173,6 +1374,8 @@ async def process_command_message(message_body: dict):
             await run_reset_student_command(channel, sender_id, target)
         elif cmd_type == CommandType.CLEAR_QUIZ_BANK:
             await run_clear_quiz_bank_command(channel, sender_id, target)
+        elif cmd_type == CommandType.DELETE_MATERIAL:
+            await run_delete_material_command(channel, sender_id, target)
         elif cmd_type == CommandType.BROADCAST_NOTICE:
             await run_broadcast_notice_command(channel, sender_id, target, extra)
         else:

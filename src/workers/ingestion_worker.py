@@ -5,7 +5,7 @@ from sqlalchemy import text
 from tenacity import retry, wait_exponential, stop_after_attempt
 from src.shared.config import settings
 from src.db.database import AsyncSessionLocal
-from src.drive.client import drive_client
+from src.drive.factory import get_material_source
 from src.rag.qdrant_client import get_qdrant, init_qdrant_collection, get_collection_mode
 from src.rag.text_splitter import (
     StructuredChunk,
@@ -101,7 +101,7 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
     try:
         @retry(wait=wait_exponential(multiplier=2, min=3, max=30), stop=stop_after_attempt(3), reraise=True)
         async def _download_with_retry():
-            return await drive_client.download_file(file_id)
+            return await get_material_source().download(file_id)
         
         file_bytes = await _download_with_retry()
         logger.info(f"Downloaded {len(file_bytes)} bytes from Drive.")
@@ -257,6 +257,9 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
             "material_type": material_type,
             "content": chunk.text,
             "source": file_name,
+            # file_id do Drive (único e estável) — permite ao /delete apagar os
+            # chunks deste arquivo com precisão, à prova de homônimos.
+            "file_id": file_id,
             "chunk_index": idx,
             "total_chunks": len(chunks),
             # F1: rastreabilidade estrutural — o contexto cita a seção.
@@ -344,7 +347,7 @@ async def sync_google_drive():
         
     logger.info(f"Checking Google Drive folder: {folder_id}")
     try:
-        files = await drive_client.list_course_files(folder_id)
+        files = await get_material_source().list_materials(folder_id)
     except Exception as e:
         logger.error("Failed to list Google Drive files", error=str(e))
         return
@@ -364,13 +367,13 @@ async def sync_google_drive():
         skipped_count = 0
         
         for f in files:
-            file_id = f['id']
-            file_name = f['name']
-            mime_type = f.get('mimeType', '')
-            course_name = f.get('course_name')
-            subject_name = f.get('subject_name')
-            lesson_number = f.get('lesson_number', 1)
-            material_type = f.get('material_type', 'lesson')
+            file_id = f.id
+            file_name = f.name
+            mime_type = f.mime_type
+            course_name = f.course_name
+            subject_name = f.subject_name
+            lesson_number = f.lesson_number
+            material_type = f.material_type
 
             if not course_name:
                 logger.debug(f"Skipping '{file_name}': no course_name")
@@ -399,7 +402,9 @@ async def sync_google_drive():
             )
             row = result.fetchone()
             
-            if row and row[0] in ('concluído', 'dead_letter'):
+            # 'excluído' = material removido por /delete — a sync NÃO o ressuscita
+            # (o professor o apagou de propósito; reaparece só se re-adicionado).
+            if row and row[0] in ('concluído', 'dead_letter', 'excluído'):
                 skipped_count += 1
                 continue
             

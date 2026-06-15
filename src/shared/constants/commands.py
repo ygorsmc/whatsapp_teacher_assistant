@@ -11,6 +11,7 @@ class CommandType:
     HELP = "help"
     LIST_COURSES = "list_courses"
     LIST_MATERIALS = "list_materials"
+    DELETE_MATERIAL = "delete_material"  # /delete_[nº da lista do /listar_materiais]
     UPDATE_LESSON = "update_lesson"
     WAKEUP = "wakeup"
     SEND_QUIZ = "send_quiz"
@@ -101,7 +102,7 @@ MANAGEMENT_COMMAND_REGEX = re.compile(
     r"resetar_aluno|limpar_quizzes|aviso|"
     r"plano_leitura|simulado|vincular_aula|errata|ativar_capitulos|gabarito|"
     r"mapa_dificuldade|funil_conclusao|corpus_duvidas|"
-    r"desafio|chaves|rubrica|criar_turma|adicionar_alunos)"
+    r"desafio|chaves|rubrica|criar_turma|adicionar_alunos|delete)"
     r"_(?P<arg>.+)$",
     re.IGNORECASE | re.DOTALL,
 )
@@ -120,6 +121,7 @@ _MANAGEMENT_MAP = {
     "ver_aluno": CommandType.VIEW_STUDENT,
     "resetar_aluno": CommandType.RESET_STUDENT,
     "limpar_quizzes": CommandType.CLEAR_QUIZ_BANK,
+    "delete": CommandType.DELETE_MATERIAL,
     "aviso": CommandType.BROADCAST_NOTICE,
     # Addon de Livros
     "plano_leitura": CommandType.READING_PLAN,

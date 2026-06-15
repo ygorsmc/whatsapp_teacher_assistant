@@ -31,7 +31,7 @@ from collections import defaultdict
 from datetime import datetime, timezone, timedelta, date
 from sqlalchemy import text
 from src.db.database import AsyncSessionLocal, BOOTSTRAP_ADMIN_ID
-from src.drive.client import drive_client
+from src.drive.factory import get_registry_source
 from src.shared.config import settings
 
 logger = structlog.get_logger(__name__)
@@ -83,13 +83,16 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
     Retorna um resumo das operações.
     """
     sheet_id = sheet_id or settings.GOOGLE_SHEET_ID
-    if not sheet_id:
+    registry = get_registry_source()
+    # Guard do Google Sheets: só exige o ID quando a fonte é o Drive (default).
+    # Fontes locais (CSV) resolvem o diretório por LOCAL_REGISTRY_DIR.
+    if settings.REGISTRY_BACKEND.lower() == "gdrive" and not sheet_id:
         logger.error("No GOOGLE_SHEET_ID configured.")
         return {"error": "Missing GOOGLE_SHEET_ID"}
 
-    # --- Leitura das abas ---
+    # --- Leitura das abas (tabelas lógicas, agnóstico de fonte) ---
     try:
-        prof_rows = await drive_client.get_spreadsheet_data(sheet_id, "Professores!A2:F1000")
+        prof_rows = await registry.read_table(sheet_id, "Professores")
     except Exception as e:
         prof_rows = []
         logger.warning("Aba 'Professores' não encontrada ou ilegível", error=str(e)[:200])
@@ -98,7 +101,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
         # A:K cobre Nome..Status (A-I) + Responsável (J) + Menor (K) — as duas
         # últimas são LGPD P1.1 (Art. 14), opcionais. Sem elas, as células vêm
         # vazias e o aluno nasce sem responsável/não-criança (compat. total).
-        alunos_rows = await drive_client.get_spreadsheet_data(sheet_id, "Alunos!A2:K1000")
+        alunos_rows = await registry.read_table(sheet_id, "Alunos")
     except Exception as e:
         logger.error("Falha ao ler a aba 'Alunos'", error=str(e))
         return {"error": f"Drive API Error (Alunos): {str(e)}"}
@@ -318,7 +321,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
 
         # ===== Pass 2: Turmas → calendário das Classes + Disciplina AUTORITATIVA =====
         try:
-            turmas_rows = await drive_client.get_spreadsheet_data(sheet_id, "Turmas!A2:M1000")
+            turmas_rows = await registry.read_table(sheet_id, "Turmas")
         except Exception as e:
             turmas_rows = []
             logger.warning("Aba 'Turmas' não encontrada", error=str(e)[:200])
@@ -438,7 +441,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
         #   - turma inexistente: cria Course/Class mínimos (coorte de leitores)
         keys_upserted = 0
         try:
-            chaves_rows = await drive_client.get_spreadsheet_data(sheet_id, "Chaves!A2:F10000")
+            chaves_rows = await registry.read_table(sheet_id, "Chaves")
         except Exception:
             chaves_rows = []  # aba opcional
 

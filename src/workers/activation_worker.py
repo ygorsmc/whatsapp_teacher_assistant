@@ -108,14 +108,14 @@ async def _discover_material(course_id: str, course_name: str, subject_name: str
             return row.material_type, row.total_sections
 
     try:
-        from src.drive.client import drive_client
-        files = await drive_client.list_course_files(settings.GOOGLE_DRIVE_FOLDER_ID)
+        from src.drive.factory import get_material_source
+        files = await get_material_source().list_materials(settings.GOOGLE_DRIVE_FOLDER_ID)
         for wanted in ("book", "workbook"):
             sections = [
-                f.get("lesson_number", 0) for f in files
-                if f.get("material_type") == wanted
-                and f.get("course_name") == course_name
-                and (not subject_name or f.get("subject_name") == subject_name)
+                f.lesson_number for f in files
+                if f.material_type == wanted
+                and f.course_name == course_name
+                and (not subject_name or f.subject_name == subject_name)
             ]
             if sections:
                 return wanted, max(sections)

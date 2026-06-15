@@ -561,6 +561,20 @@ async def process_inbound(event: dict, ctx: MessageContext):
     query_column = channel.get_user_query_column()
     
     with structlog.contextvars.bound_contextvars(correlation_id=correlation_id, sender_id=sender_id):
+        # Fast-path: confirmação de exclusão de MATERIAL (comando de PROFESSOR).
+        # O clique do botão chega como inbound; o professor não tem
+        # student_context, então isto precisa vir ANTES do short-circuit de
+        # "não-aluno" (que devolveria TEACHER_CHAT_REPLY).
+        if message_type == "interactive" and interactive_payload:
+            _rid = interactive_payload.get("id", "")
+            if _rid in ("material_delete_confirm", "material_delete_cancel"):
+                from src.workers.command_worker import handle_material_delete_decision
+                await handle_material_delete_decision(
+                    channel, sender_id, confirmed=(_rid == "material_delete_confirm"),
+                )
+                await ctx.complete()
+                return
+
         student_contexts = await get_student_context(sender_id, query_column)
 
         # Guard clause: student may have been deactivated or not enrolled

@@ -128,6 +128,15 @@ class Settings(BaseSettings):
     AZURE_OPENAI_ENDPOINT: Optional[str] = Field(default=None)
     AZURE_OPENAI_API_VERSION: str = Field(default="2024-02-01")
     
+    # ── Fonte de material e de cadastro (Ports & Adapters — src/drive/) ───────
+    # Default = gdrive ⇒ comportamento atual. Trocar a fonte (Drive → Blob/S3/
+    # pasta local/CSV/banco) é só trocar estas env vars + registrar o adapter.
+    MATERIAL_SOURCE_BACKEND: str = Field(default="gdrive")  # gdrive | local
+    REGISTRY_BACKEND: str = Field(default="gdrive")         # gdrive | local_csv
+    # Usados pelos adapters locais (dev/teste sem Google).
+    LOCAL_MATERIAL_ROOT: str = Field(default="data/materials")
+    LOCAL_REGISTRY_DIR: str = Field(default="data/registry")
+
     # Google Drive & Sheets
     GOOGLE_SERVICE_ACCOUNT_FILE: str = Field(default="service_account.json")
     GOOGLE_DRIVE_FOLDER_ID: str = Field(default="")

@@ -135,9 +135,9 @@ async def run_reading_plan_command(channel, sender_id: str, class_query: str, pa
         # Descobre o material denso no Drive (estrutura Curso > Disciplina >
         # Livro/Apostila > Seções). Preferência: Livro > Apostila.
         await channel.send_text(sender_id, "⏳ Verificando o material (Livro/Apostila) no Google Drive...")
-        from src.drive.client import drive_client
+        from src.drive.factory import get_material_source
         try:
-            files = await drive_client.list_course_files(settings.GOOGLE_DRIVE_FOLDER_ID)
+            files = await get_material_source().list_materials(settings.GOOGLE_DRIVE_FOLDER_ID)
         except Exception as e:
             logger.error("reading_plan_drive_failed", error=str(e)[:300])
             files = []
@@ -145,10 +145,10 @@ async def run_reading_plan_command(channel, sender_id: str, class_query: str, pa
         material_type, total_sections = None, 0
         for wanted in ("book", "workbook"):
             sections = [
-                f.get("lesson_number", 0) for f in files
-                if f.get("material_type") == wanted
-                and f.get("course_name") == course_name
-                and (not subject_name or f.get("subject_name") == subject_name)
+                f.lesson_number for f in files
+                if f.material_type == wanted
+                and f.course_name == course_name
+                and (not subject_name or f.subject_name == subject_name)
             ]
             if sections:
                 material_type, total_sections = wanted, max(sections)

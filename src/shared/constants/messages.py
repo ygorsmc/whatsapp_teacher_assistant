@@ -235,6 +235,23 @@ CMD_STUDENT_PHONE_USAGE = "❌ Informe o telefone do aluno com DDD. Exemplo: `{c
 CMD_STUDENT_NOT_FOUND = "❌ Nenhum aluno encontrado com o telefone terminando em {digits}."
 CMD_STUDENT_NOT_OWNED = "🔒 Este aluno não está matriculado em nenhuma turma sua."
 
+# /delete_[nº] — exclusão de material indexado (vetores do Qdrant)
+CMD_DELETE_USAGE = "❌ Use `/delete_<nº>`, onde `<nº>` é o número que aparece em `/listar_materiais`. Exemplo: `/delete_3`"
+CMD_DELETE_NEED_LIST = "📋 Rode `/listar_materiais` primeiro — a lista numerada (que diz qual nº é cada arquivo) expira em 1 hora."
+CMD_DELETE_NOT_FOUND = "❓ Não encontrei o item *{num}* na sua última listagem. Rode `/listar_materiais` de novo e confira o número."
+CMD_DELETE_EMPTY = "ℹ️ *{path}* não tem trechos indexados no bot (talvez já tenha sido removido)."
+CMD_DELETE_CONFIRM = (
+    "🗑️ *Confirmar exclusão*\n\n"
+    "*{path}*\n\n"
+    "Vou apagar *{count}* trecho(s) deste arquivo + as questões geradas a partir dele. "
+    "Esta ação *não pode ser desfeita* (o arquivo continua no seu Drive, mas sai do bot)."
+)
+CMD_DELETE_CONFIRM_YES = "Sim, apagar"
+CMD_DELETE_CONFIRM_NO = "Cancelar"
+CMD_DELETE_EXPIRED = "⏳ A confirmação expirou. Rode `/listar_materiais` e `/delete_<nº>` de novo."
+CMD_DELETE_CANCELLED = "✖️ Exclusão cancelada. Nada foi apagado."
+CMD_DELETE_SUCCESS = "✅ *{path}* removido do bot ({count} trecho(s) + questões derivadas)."
+
 ERROR_MESSAGE_TOO_LONG = "Sua mensagem é muito longa. Por favor, seja mais conciso."
 ERROR_TECHNICAL = "Enfrentei um problema técnico para gerar sua resposta. Por favor, tente novamente."
 ERROR_INVALID_RESPONSE = "Resposta inválida."
