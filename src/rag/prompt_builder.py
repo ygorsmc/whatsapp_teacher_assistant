@@ -3,8 +3,15 @@ from typing import cast
 from src.db.models.user import Teacher, Student
 
 from src.shared.config import settings
-from src.shared.constants.prompts import SYSTEM_PROMPT_TEMPLATE, LANGUAGE_TUTOR_PERSONA, L1_SAFETY_DIRECTIVE
+from src.shared.constants.prompts import (
+    SYSTEM_PROMPT_TEMPLATE,
+    LANGUAGE_TUTOR_PERSONA,
+    L1_SAFETY_DIRECTIVE,
+    MATH_REASONING_DIRECTIVE,
+    CHART_DIRECTIVE,
+)
 from src.shared.language import detect_language_course, language_name
+from src.math.routing import detect_exatas_course
 from src.shared.privacy import llm_safe_name
 
 async def resolve_lesson_label(course_id: str, lesson_id: str) -> str:
@@ -58,5 +65,20 @@ async def build_system_prompt(teacher: Teacher, student: Student, course_id: str
                     target_language_name=target_name,
                     native_language_name=native_name,
                 )
+
+    # Vertical de Exatas (M5): SOMENTE com a flag ligada E a disciplina detectada
+    # como de exatas (pelo NOME/tag) anexa a diretiva de raciocínio matemático.
+    # Flag off OU disciplina não-exatas ⇒ prompt base intocado (a vertical SÓ
+    # anexa, nunca reescreve). Diretriz fixa: anexada sem .format (LaTeX literal).
+    is_exatas = detect_exatas_course(subject_name or "") or detect_exatas_course(course_name)
+    if settings.MATH_MODE_ENABLED and is_exatas:
+        base_prompt += MATH_REASONING_DIRECTIVE
+
+    # Vertical de Exatas (M7): gráfico de apoio. SOMENTE com a flag própria ligada
+    # E disciplina de exatas anexa a diretiva que AUTORIZA o bot a emitir um bloco
+    # ```grafico``` quando ajudar. Flag independente do M5 (entrega gráficos sem
+    # exigir o modo de raciocínio). Diretriz fixa: anexada sem .format (JSON literal).
+    if settings.CHART_GENERATION_ENABLED and is_exatas:
+        base_prompt += CHART_DIRECTIVE
 
     return base_prompt

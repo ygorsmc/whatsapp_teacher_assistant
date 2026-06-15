@@ -124,3 +124,12 @@ azure-monitor-opentelemetry==1.4.0
 alembic==1.13.1
 azure-keyvault-secrets==4.8.0
 PyMuPDF==1.24.4
+# M6 (entrega de matemática): transpila LaTeX linear → Unicode no WhatsApp.
+# Opcional/import-guarded — sem o pacote, src/math/segmenter.py usa o mapa embutido.
+pylatexenc==2.10
+# M6/M7 (render de fórmula e gráfico): import-guarded; default OFF (MATH_RENDERER=none /
+# CHART_RENDERER=none). numpy já é dependência; matplotlib rende fórmulas (M6) e gráficos
+# (M7); seaborn só estética (M7); sympy valida + lambdifica a expressão do gráfico (M7).
+matplotlib==3.11.0
+seaborn==0.13.2
+sympy==1.14.0

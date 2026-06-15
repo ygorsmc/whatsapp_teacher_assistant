@@ -12,10 +12,14 @@ from src.rag.text_splitter import (
     GLUE_HARD_CAP_FACTOR,
     StructuredChunk,
     assemble_structural_chunks,
+    contains_display_math,
     extract_heading_outline,
     heading_text,
     is_heading,
+    is_math_block,
     should_glue_paragraph,
+    split_document_text,
+    split_protecting_math,
 )
 from src.rag.query_router import route_query, sparse_query_text
 from src.rag.crag import (
@@ -148,6 +152,76 @@ def test_assemble_chunks_oversized_buffer_recursive_split_keeps_title():
     chunks = assemble_structural_chunks(paragraphs, chunk_size=300, chunk_overlap=50)
     assert len(chunks) > 1
     assert all(c.section_title == "Seção Única" for c in chunks)
+
+
+# ==============================================================================
+# M3 — Chunking ciente de matemática (fórmula em display nunca é partida)
+# ==============================================================================
+
+GAUSS = r"$$\int_{-\infty}^{\infty} e^{-x^2}\,dx = \sqrt{\pi}$$"
+
+
+@pytest.mark.parametrize("para", [
+    GAUSS,
+    r"\[ E = mc^2 \]",
+    r"\begin{equation} a^2 + b^2 = c^2 \end{equation}",
+    r"\begin{cases} x = 1 \\ y = 2 \end{cases}",
+])
+def test_is_math_block_detects_display(para):
+    assert is_math_block(para) is True
+    assert contains_display_math(para) is True
+
+
+@pytest.mark.parametrize("para", [
+    "A derivada mede a taxa de variação instantânea da função.",
+    "## Capítulo 3 — Integrais",
+    "O valor de $x$ é positivo neste intervalo.",   # math INLINE não é bloco
+    "Custa $$ caro $$? Não — aqui não há fórmula real, só prosa.",
+    "",
+])
+def test_is_math_block_rejects_prose_and_inline(para):
+    assert is_math_block(para) is False
+
+
+def test_should_glue_math_block_to_lead_in():
+    lead_in = "Considere a integral de Gauss, central na distribuição normal:"
+    assert should_glue_paragraph(lead_in, GAUSS) is True
+    # Sem enunciado anterior, nada a que colar.
+    assert should_glue_paragraph("", GAUSS) is False
+
+
+def test_assemble_chunks_keeps_formula_with_lead_in():
+    lead_in = "Considere a integral de Gauss, central na distribuição normal:"
+    chunks = assemble_structural_chunks([lead_in, GAUSS], chunk_size=2000, chunk_overlap=100)
+    # Enunciado e fórmula no MESMO chunk — a fórmula não fica órfã.
+    assert len(chunks) == 1
+    assert lead_in in chunks[0].text
+    assert GAUSS in chunks[0].text
+
+
+def test_split_protecting_math_without_math_is_identical_to_baseline():
+    text = "Parágrafo didático com conteúdo razoável. " * 30  # sem display math
+    assert split_protecting_math(text, 120, 20) == split_document_text(text, 120, 20)
+
+
+def test_split_protecting_math_never_breaks_a_formula():
+    text = ("A" * 80) + " " + GAUSS + " " + ("B" * 80)
+    chunks = split_protecting_math(text, chunk_size=60, chunk_overlap=10)
+    # A fórmula inteira sobrevive intacta em ALGUM chunk...
+    assert any(GAUSS in c for c in chunks)
+    # ...e nenhum chunk tem '$$' desbalanceado (= fórmula partida ao meio).
+    assert all(c.count("$$") % 2 == 0 for c in chunks)
+
+
+def test_assemble_chunks_oversized_paragraph_keeps_inline_formula_intact():
+    # Um único parágrafo (prosa + fórmula) maior que o teto duro → o flush passa
+    # pelo split_protecting_math, que mantém a fórmula inteira.
+    formula = r"$$\int_0^1 x^2\,dx = \frac{1}{3}$$"
+    para = ("A" * 80) + " " + formula + " " + ("B" * 80)
+    chunks = assemble_structural_chunks([para], chunk_size=60, chunk_overlap=10)
+    assert len(chunks) > 1  # foi de fato sub-fatiado
+    assert any(formula in c.text for c in chunks)
+    assert all(c.text.count("$$") % 2 == 0 for c in chunks)
 
 
 # ==============================================================================

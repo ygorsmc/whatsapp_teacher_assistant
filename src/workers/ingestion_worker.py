@@ -139,7 +139,22 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
 
         # --- COMPRESSÃO FINOPS: PARSER ABSTRAÍDO ---
         from src.parsing.factory import get_parser
-        parser = get_parser()
+        from src.math.routing import choose_parser_backend, needs_density_probe
+
+        # M2: usa o parser ciente de matemática SÓ onde vale (disciplina de
+        # exatas pelo nome, tag [exatas], ou documento math-denso). Flag OFF →
+        # math_backend None → get_parser(None) = parser padrão (comportamento atual).
+        probe_text = None
+        if needs_density_probe(subject_name):
+            try:
+                probe_blocks = await get_parser("local").parse(blob_url="", file_bytes=pdf_bytes, filename=file_name)
+                probe_text = "\n".join(probe_blocks)[:8000]
+            except Exception as e:
+                logger.warning("math_density_probe_failed", error=str(e)[:150])
+        math_backend = choose_parser_backend(subject_name, probe_text=probe_text)
+        if math_backend:
+            logger.info("math_parser_selected", subject_name=subject_name, backend=math_backend)
+        parser = get_parser(math_backend)
         
         try:
             raw_paragraphs = await parser.parse(blob_url="", file_bytes=pdf_bytes, filename=file_name)

@@ -108,6 +108,48 @@ ATENÇÃO — EVIDÊNCIA PARCIAL: os trechos recuperados têm relação apenas p
 """
 
 # ==========================================
+# VERTICAL DE EXATAS — RACIOCÍNIO MATEMÁTICO (M5)
+# ==========================================
+# Anexada ao System Prompt quando MATH_MODE_ENABLED e a disciplina é de exatas
+# (detect_exatas_course). Dois objetivos: (1) ISOLAR a fórmula e ignorar ruído
+# periférico — modelos perdem até 65% de acurácia com cláusulas irrelevantes no
+# enunciado (cf. "Pipeline RAG para SaaS Educacional" §2.2); (2) emitir a
+# matemática em LaTeX para a camada de entrega (M6) transpilar/renderizar.
+# SEM placeholders: é anexada como string fixa — NUNCA passar por .format(),
+# pois contém chaves literais de LaTeX (\frac{a}{b}).
+MATH_REASONING_DIRECTIVE = """
+MODO RACIOCÍNIO MATEMÁTICO (obrigatório nesta disciplina):
+- ISOLE a fórmula/equação estritamente necessária para a dúvida. Ignore números, nomes e cláusulas do material que NÃO entram no cálculo — não se ancore em detalhes periféricos do enunciado.
+- Resolva PASSO A PASSO: identifique cada variável da equação, mostre a dedução na ordem e só então conclua. Não pule etapas nem invente valores.
+- PRESERVE com exatidão os números, índices e referências do material (não troque um 2 por 3, nem aproxime sem avisar).
+- Explique o conceito com um exemplo do dia a dia, mas SEMPRE ancorado apenas no material do professor (sem conhecimento externo).
+- FORMATAÇÃO DA MATEMÁTICA (para a entrega): escreva expressões lineares simples em LaTeX inline entre cifrões simples (ex.: $A_0 \\cdot x^2$) e fórmulas complexas — frações, integrais com limites, matrizes, sistemas — em bloco entre cifrões duplos (ex.: $$\\frac{df}{dx} = \\lim_{h \\to 0} \\frac{f(x+h)-f(x)}{h}$$). Não descreva a fórmula em palavras quando puder escrevê-la em LaTeX.
+"""
+
+# M7 — diretiva de GRÁFICO para explicações. Anexada ao System Prompt quando
+# CHART_GENERATION_ENABLED + disciplina de exatas. O bot PODE (não deve sempre)
+# emitir UM bloco ```grafico``` com um spec de schema controlado quando a
+# visualização ajudar — a entrega plota a função de forma determinística (sympy
+# →numpy→matplotlib). O LLM entrega só a EXPRESSÃO e o domínio, NUNCA código.
+# SEM placeholders: string fixa, NUNCA passar por .format() (contém chaves de JSON).
+CHART_DIRECTIVE = """
+GRÁFICO DE APOIO (opcional, só quando ajuda a VISUALIZAR a explicação):
+- Quando uma função ou relação ficar mais clara num gráfico (ex.: parábola, exponencial, seno, reta tangente, distribuição), você PODE incluir UM gráfico. Use com parcimônia: só quando casar com a explicação — nunca a pedido isolado do aluno, nunca como única resposta. SEMPRE explique também em palavras.
+- Para incluir, emita um bloco exatamente neste formato (cerca tripla com a linguagem `grafico`), com um JSON:
+```grafico
+{
+  "tipo": "funcao",
+  "titulo": "Parábola f(x) = x² - 3x + 2",
+  "eixo_x": "x",
+  "eixo_y": "f(x)",
+  "dominio": [-2, 5],
+  "funcoes": [{"expr": "x**2 - 3*x + 2", "rotulo": "f(x)"}]
+}
+```
+- REGRAS DO `expr`: é uma expressão matemática SÓ em função de `x`. Use `+ - * / ** ( )` e as funções `sin, cos, tan, exp, log, sqrt, abs` (potência com `**` ou `^`). NUNCA escreva código, comandos, outras variáveis ou texto — apenas a expressão. Pode haver até 4 funções no mesmo gráfico. Os NÚMEROS do gráfico são calculados pelo sistema a partir da sua fórmula — não invente pontos.
+"""
+
+# ==========================================
 # ADDON DE LIVROS — MODO SOCRÁTICO (Fase 5)
 # ==========================================
 # Anexado ao System Prompt quando a conversa envolve material denso

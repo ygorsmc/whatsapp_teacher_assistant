@@ -55,7 +55,45 @@ class Settings(BaseSettings):
     DOCUMENT_INTELLIGENCE_ENDPOINT: str = Field(default="")
     DOCUMENT_INTELLIGENCE_KEY: Optional[str] = Field(default=None) # Used only if Managed Identity isn't available
     GOTENBERG_URL: str = Field(default="http://localhost:3000")
-    
+    # M1: parser ciente de matemática (Marker/Docling/MinerU self-hosted, modo
+    # híbrido: texto da camada digital + VLM nos crops de fórmula → Markdown+LaTeX).
+    # Sem endpoint, ou em falha/timeout, degrada para MARKER_FALLBACK_PARSER.
+    MARKER_ENDPOINT: str = Field(default="")
+    MARKER_API_KEY: Optional[str] = Field(default=None)
+    MARKER_TIMEOUT_SECONDS: float = Field(default=120.0)
+    MARKER_FALLBACK_PARSER: str = Field(default="azure")
+    # M2: roteador de ingestão de matemática (default OFF = parser padrão sempre).
+    # Usa o parser ciente de matemática só onde vale (disciplina de exatas pelo
+    # nome, tag [exatas], ou documento math-denso na sonda) — FinOps por documento.
+    MATH_INGESTION_ENABLED: bool = Field(default=False)
+    MATH_PARSER_BACKEND: str = Field(default="marker")
+    MATH_DENSITY_THRESHOLD: float = Field(default=3.0)  # indicadores de math / 1000 chars
+    # M5: comportamento de matemática na GERAÇÃO (default OFF). Ligada + disciplina
+    # de exatas (detect_exatas_course) → anexa a diretiva de raciocínio matemático
+    # ao System Prompt (isola a fórmula + emite LaTeX para a entrega do M6).
+    MATH_MODE_ENABLED: bool = Field(default=False)
+    # M6: entrega da matemática (default OFF). Transpila LaTeX inline → Unicode e
+    # renderiza fórmula complexa como imagem, intercalada no texto da resposta.
+    MATH_RENDERING_ENABLED: bool = Field(default=False)
+    # Renderer agnóstico: 'matplotlib' (in-process, import-guarded) | 'endpoint'
+    # (HTTP self-hosted) | 'none' (default) → sem imagem, degrada p/ Unicode.
+    MATH_RENDERER: str = Field(default="none")
+    MATH_RENDER_ENDPOINT: str = Field(default="")
+    MATH_RENDER_API_KEY: Optional[str] = Field(default=None)
+    MATH_RENDER_TIMEOUT_SECONDS: float = Field(default=15.0)
+    # M7: geração de gráficos para EXPLICAÇÕES (default OFF). Ligada + disciplina
+    # de exatas → o LLM PODE emitir um bloco ```grafico``` (schema controlado) quando
+    # a visualização ajudar; a entrega plota a função de forma DETERMINÍSTICA
+    # (sympy parse restrito → numpy → matplotlib/seaborn). NUNCA executa código do
+    # LLM (sem RCE): só expressão matemática numa whitelist. Falha/spec inválido →
+    # gráfico é descartado e o texto explicativo segue (feature ilustrativa).
+    CHART_GENERATION_ENABLED: bool = Field(default=False)
+    # Motor de plot: 'matplotlib' (in-process, import-guarded matplotlib+seaborn+
+    # sympy) | 'none' (default) → sem render, gráfico descartado.
+    CHART_RENDERER: str = Field(default="none")
+    CHART_MAX_POINTS: int = Field(default=1000)  # teto de pontos por série (anti-DoS)
+
+
     # LLMs e IA
     DEFAULT_LLM_PROVIDER: str = Field(default="deepseek")
     DEFAULT_EMBEDDER_PROVIDER: str = Field(default="azure")

@@ -878,8 +878,16 @@ async def process_inbound(event: dict, ctx: MessageContext):
             
             # Execute heavy LLM/RAG pipeline
             response = await run_rag_pipeline(student_context, combined)
-            
-            await channel.send_text(sender_id, response, reply_to=message_id)
+
+            # M6/M7: com qualquer flag de entrega rica ligada, a resposta é
+            # entregue intercalando texto, imagens de fórmula e gráficos (texto →
+            # fórmula/gráfico → texto). Ambas OFF → envio de texto único,
+            # byte-a-byte como hoje.
+            if settings.MATH_RENDERING_ENABLED or settings.CHART_GENERATION_ENABLED:
+                from src.math.delivery import deliver_answer
+                await deliver_answer(channel, sender_id, response, reply_to=message_id)
+            else:
+                await channel.send_text(sender_id, response, reply_to=message_id)
             await ctx.complete()
             track_event("llm_pipeline_success")
             

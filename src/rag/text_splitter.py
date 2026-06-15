@@ -58,6 +58,42 @@ _LIST_ITEM_REGEX = re.compile(r"^\s*(?:[a-z]\)|[ivxlc]+\)|\d{1,2}\)|[-–•·*]
 _MD_HEADING_REGEX = re.compile(r"^\s*#{1,6}\s+(.+?)\s*$")
 _NUMBERED_HEADING_REGEX = re.compile(r"^\s*\d{1,2}(?:\.\d{1,2}){0,3}\s*[-–.)]?\s+[^\n]{3,80}$")
 
+# Fórmulas em DISPLAY (saída do parser ciente de matemática): $$...$$, \[...\] e
+# ambientes \begin{env}...\end{env}. Estes spans são ATÔMICOS — uma integral ou
+# matriz partida ao meio vira um vetor sem sentido e o RAG explica a premissa
+# errada (cf. "Pipeline RAG para SaaS Educacional" §4.2). O chunking NUNCA corta
+# dentro deles. Math INLINE ($x$, A_0) é curto e segue o fluxo normal — só o
+# display, que cresce (matrizes, align), é protegido aqui.
+_DISPLAY_MATH_REGEX = re.compile(
+    r"\$\$.+?\$\$"                              # $$ ... $$
+    r"|\\\[.+?\\\]"                             # \[ ... \]
+    r"|\\begin\{(\w+\*?)\}.*?\\end\{\1\}",      # \begin{env} ... \end{env}
+    re.DOTALL,
+)
+
+
+def contains_display_math(text: str) -> bool:
+    """True se o texto contém ao menos uma fórmula em display (span atômico)."""
+    return bool(_DISPLAY_MATH_REGEX.search(text or ""))
+
+
+def is_math_block(paragraph: str) -> bool:
+    """True se o parágrafo é PRINCIPALMENTE uma fórmula em display.
+
+    Um bloco assim não abre chunk sozinho: pertence ao enunciado anterior
+    ("considere a equação:" → fórmula → "onde x é..."). Separá-lo orfana a
+    fórmula do seu contexto — o erro clássico de splitters de tamanho fixo.
+    """
+    if not paragraph:
+        return False
+    stripped = paragraph.strip()
+    starts_display = (
+        stripped.startswith("$$")
+        or stripped.startswith(r"\[")
+        or stripped.startswith(r"\begin{")
+    )
+    return starts_display and contains_display_math(stripped)
+
 
 def should_glue_paragraph(prev_chunk: str, paragraph: str) -> bool:
     """True se `paragraph` NÃO pode abrir chunk novo (cola no buffer anterior).
@@ -71,6 +107,9 @@ def should_glue_paragraph(prev_chunk: str, paragraph: str) -> bool:
     if not paragraph or not paragraph.strip():
         return False
     stripped = paragraph.strip()
+    # Fórmula em display nunca abre chunk sozinha — cola no enunciado anterior.
+    if is_math_block(stripped):
+        return True
     return bool(_CONTINUATION_REGEX.match(stripped) or _LIST_ITEM_REGEX.match(stripped))
 
 
@@ -130,6 +169,73 @@ def split_document_text(text: str, chunk_size: int = 1000, chunk_overlap: int = 
     return splitter.split_text(text)
 
 
+def split_protecting_math(
+    text: str,
+    chunk_size: int,
+    chunk_overlap: int,
+    separators: list[str] | None = None,
+) -> list[str]:
+    """Fatia um texto longo SEM nunca cortar dentro de uma fórmula em display.
+
+    A prosa entre fórmulas segue o split recursivo normal; cada fórmula
+    (`$$...$$`, `\\[...\\]`, `\\begin..\\end`) é um átomo indivisível — se
+    sozinha já estoura o `chunk_size`, vira um chunk inteiro (fórmula íntegra
+    vale mais que fórmula no tamanho certo, porém partida).
+
+    Sem fórmula em display, delega ao `split_document_text` — saída byte-a-byte
+    idêntica ao caminho atual (preserva o comportamento de documentos de prosa).
+    """
+    if not contains_display_math(text):
+        return split_document_text(text, chunk_size, chunk_overlap, separators)
+
+    # 1. Quebra em átomos, alternando prosa | fórmula, na ordem original.
+    atoms: list[tuple[str, str]] = []  # (kind, text); kind ∈ {"text", "math"}
+    last = 0
+    for m in _DISPLAY_MATH_REGEX.finditer(text):
+        if m.start() > last:
+            atoms.append(("text", text[last:m.start()]))
+        atoms.append(("math", m.group(0)))
+        last = m.end()
+    if last < len(text):
+        atoms.append(("text", text[last:]))
+
+    # 2. Empacota os átomos em chunks ≤ chunk_size; prosa longa é sub-fatiada,
+    #    a fórmula nunca (átomo). A fórmula gruda na prosa adjacente quando cabe.
+    chunks: list[str] = []
+    buffer = ""
+
+    def flush_buffer() -> None:
+        nonlocal buffer
+        if buffer.strip():
+            chunks.append(buffer.strip())
+        buffer = ""
+
+    for kind, atom in atoms:
+        atom = atom.strip("\n")
+        if not atom.strip():
+            continue
+        if kind == "math":
+            if buffer and len(buffer) + len(atom) + 1 > chunk_size:
+                flush_buffer()
+            buffer = f"{buffer}\n{atom}".strip() if buffer else atom
+            if len(buffer) >= chunk_size:  # fórmula grande fecha o chunk
+                flush_buffer()
+        elif len(atom) > chunk_size:
+            flush_buffer()
+            pieces = split_document_text(atom, chunk_size, chunk_overlap, separators)
+            # O último pedaço da prosa segue acumulável com a fórmula seguinte.
+            chunks.extend(pieces[:-1])
+            buffer = pieces[-1] if pieces else ""
+        elif buffer and len(buffer) + len(atom) + 1 > chunk_size:
+            flush_buffer()
+            buffer = atom
+        else:
+            buffer = f"{buffer}\n{atom}".strip() if buffer else atom
+
+    flush_buffer()
+    return chunks
+
+
 def assemble_structural_chunks(
     paragraphs: list[str],
     chunk_size: int,
@@ -161,7 +267,7 @@ def assemble_structural_chunks(
         if not content:
             return
         if len(content) > hard_cap:
-            for piece in split_document_text(
+            for piece in split_protecting_math(
                 content, chunk_size=chunk_size, chunk_overlap=chunk_overlap,
                 separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""],
             ):

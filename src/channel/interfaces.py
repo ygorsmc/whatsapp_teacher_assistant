@@ -69,6 +69,12 @@ class IMessagingChannel(ABC):
         pass
 
     @abstractmethod
+    async def send_image(self, user_id: str, image_bytes: bytes, caption: str = "") -> dict:
+        """Envia uma imagem (PNG) — ex.: fórmula matemática renderizada (M6).
+        A imagem aceita caption nativo no WhatsApp/Telegram (diferente do áudio)."""
+        pass
+
+    @abstractmethod
     async def download_media(self, media_id: str) -> bytes:
         """Baixa uma mídia recebida (H2.2 — foto de redação)."""
         pass

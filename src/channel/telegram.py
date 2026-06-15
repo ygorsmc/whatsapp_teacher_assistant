@@ -142,6 +142,18 @@ class TelegramChannel(IMessagingChannel):
             response.raise_for_status()
             return response.json()
 
+    async def send_image(self, user_id: str, image_bytes: bytes, caption: str = "") -> dict:
+        """Fórmula renderizada (M6): sendPhoto aceita PNG via multipart, com caption."""
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url=f"{self.api_url}/sendPhoto",
+                data={"chat_id": user_id, **({"caption": caption} if caption else {})},
+                files={"photo": ("formula.png", image_bytes, "image/png")},
+                timeout=60.0,
+            )
+            response.raise_for_status()
+            return response.json()
+
     async def download_media(self, media_id: str) -> bytes:
         """Baixa uma mídia recebida (H2.2): getFile → file_path → bytes."""
         async with httpx.AsyncClient() as client:

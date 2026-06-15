@@ -186,6 +186,31 @@ class WhatsAppChannel(IMessagingChannel):
             "audio": {"id": media_id},
         })
 
+    async def send_image(self, user_id: str, image_bytes: bytes, caption: str = "") -> dict:
+        """Fórmula renderizada (M6): upload do PNG na Media API + envio.
+        Imagem suporta caption nativo (diferente do áudio)."""
+        async with httpx.AsyncClient() as client:
+            upload = await client.post(
+                url=f"{self.api_url}/{self.phone_number_id}/media",
+                headers={"Authorization": f"Bearer {self.access_token}"},
+                data={"messaging_product": "whatsapp", "type": "image/png"},
+                files={"file": ("formula.png", image_bytes, "image/png")},
+                timeout=60.0,
+            )
+            upload.raise_for_status()
+            media_id = upload.json()["id"]
+
+        image_payload: dict = {"id": media_id}
+        if caption:
+            image_payload["caption"] = caption
+        return await self._send_request({
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": user_id,
+            "type": "image",
+            "image": image_payload,
+        })
+
     async def download_media(self, media_id: str) -> bytes:
         """Baixa uma mídia recebida (H2.2): GET /media_id → url assinada → bytes."""
         headers = {"Authorization": f"Bearer {self.access_token}"}

@@ -31,12 +31,24 @@
     Honesta: o sistema deve abster-se, não inventar). `expected_substrings`
     fica vazio.
 
+  Vertical de exatas (M0 — Cálculo/Física/Estatística…). Só fazem sentido com
+  o `PARSER_BACKEND` ciente de matemática indexando LaTeX no chunk:
+  - `formula_exata` — recuperar a EQUAÇÃO literal. `expected_substrings` deve
+    trazer fragmentos LaTeX como saíram do parser (ex.: `\frac`, `\sqrt`,
+    `\lim`) — o braço esparso (`HYBRID_SEARCH_ENABLED`) é quem casa o símbolo;
+  - `conceito_quantitativo` — pergunta aberta sobre um conceito de exatas
+    ("por que a força centrípeta aponta pro centro?"); mede a explicação;
+  - `excecao_matematica` — a resposta certa é a CONDIÇÃO DE CONTORNO/hipótese
+    da fórmula (o `excecao_regra` das exatas — protegido pelo guarda de chunk M3).
+
 ## Curadoria (obrigatória antes do baseline oficial)
 
 As linhas atuais estão marcadas `"draft": true` (o harness avisa). Para virar
 baseline: **40-80 linhas** com perguntas reais (use o `/duvidas_frequentes` e
 o histórico de `StudentInteractions` como fonte) e substrings copiadas do
-corpus indexado. Distribua entre as 5 categorias — inclua 6-10 fora-de-escopo.
+corpus indexado. Distribua entre as categorias — inclua 6-10 fora-de-escopo. As
+linhas de exatas (`formula_exata`/`conceito_quantitativo`/`excecao_matematica`)
+trazem `PREENCHER_LATEX_*` como lembrete: troque pela fórmula real indexada.
 
 ## Execução
 
