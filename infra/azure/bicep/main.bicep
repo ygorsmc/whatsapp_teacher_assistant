@@ -51,6 +51,39 @@ param telegramBotToken string = ''
 @description('Telegram webhook secret token')
 param telegramWebhookSecret string = ''
 
+// Endpoints semi-sensíveis que o app busca DO KEY VAULT (azure_kv.load_azure_secrets
+// faz fetch de QDRANT-URL e AZURE-OPENAI-ENDPOINT). Mantê-los aqui evita env em
+// claro no Container App e garante reconstrução determinística.
+@secure()
+@description('Qdrant Cloud URL (endpoint do cluster)')
+param qdrantUrl string = ''
+
+@secure()
+@description('Azure OpenAI endpoint')
+param azureOpenAiEndpoint string = ''
+
+// Config NÃO-sensível que o loader NÃO busca do KV → entra como env de container.
+@description('Azure Document Intelligence endpoint (PARSER_BACKEND=azure)')
+param documentIntelligenceEndpoint string = ''
+
+@description('Meta Phone Number ID (WhatsApp)')
+param phoneNumberId string = ''
+
+@description('URL base da Graph API do WhatsApp')
+param whatsappApiUrl string = 'https://graph.facebook.com/v25.0'
+
+@description('ID da pasta raiz do Google Drive (materiais)')
+param googleDriveFolderId string = ''
+
+@description('ID da planilha do Google Sheets (registro)')
+param googleSheetId string = ''
+
+@description('Provider de LLM padrão (get_provider)')
+param defaultLlmProvider string = 'gemini'
+
+@description('Provider de embeddings padrão (get_embedder)')
+param defaultEmbedderProvider string = 'azure'
+
 // --- Nomes dos recursos com sufixo único ---
 var pgServerName = '${baseName}-pg-${uniqueString(resourceGroup().id)}'
 var pgDbName = 'whatsapp_assistant'
@@ -214,6 +247,19 @@ resource secretTelegramWebhook 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = 
   properties: { value: telegramWebhookSecret }
 }
 
+// Endpoints buscados por azure_kv.load_azure_secrets (QDRANT-URL / AZURE-OPENAI-ENDPOINT).
+resource secretQdrantUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(qdrantUrl)) {
+  parent: keyVault
+  name: 'QDRANT-URL'
+  properties: { value: qdrantUrl }
+}
+
+resource secretAzureOpenAiEndpoint 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(azureOpenAiEndpoint)) {
+  parent: keyVault
+  name: 'AZURE-OPENAI-ENDPOINT'
+  properties: { value: azureOpenAiEndpoint }
+}
+
 // Connection string do PostgreSQL para o Key Vault
 var pgConnectionString = 'postgresql+asyncpg://${pgAdminLogin}:${pgAdminPassword}@${pgServer.properties.fullyQualifiedDomainName}:5432/${pgDbName}?ssl=require'
 
@@ -286,6 +332,28 @@ resource containerAppEnv 'Microsoft.App/managedEnvironments@2023-05-01' = {
 // Papel "Key Vault Secrets User" para acessar o Key Vault
 var keyVaultSecretsUserRoleDefinitionId = subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
 
+// Env NÃO-sensível compartilhado entre os apps. Os SECRETS (tokens/keys/endpoints
+// sensíveis) NÃO entram aqui — vêm do Key Vault via Managed Identity em runtime
+// (azure_kv.load_azure_secrets). Centralizado para que os 3 apps fiquem consistentes.
+var baseEnv = [
+  { name: 'AZURE_KEY_VAULT_URL', value: keyVault.properties.vaultUri }
+  { name: 'ENVIRONMENT', value: 'production' }
+  { name: 'QUEUE_BACKEND', value: 'redis' }
+]
+var messagingEnv = [
+  { name: 'PHONE_NUMBER_ID', value: phoneNumberId }
+  { name: 'WHATSAPP_API_URL', value: whatsappApiUrl }
+]
+// Config que só os Workers precisam (parsing, providers, fontes de material).
+var workerConfigEnv = [
+  { name: 'PARSER_BACKEND', value: 'azure' }
+  { name: 'DEFAULT_LLM_PROVIDER', value: defaultLlmProvider }
+  { name: 'DEFAULT_EMBEDDER_PROVIDER', value: defaultEmbedderProvider }
+  { name: 'GOOGLE_DRIVE_FOLDER_ID', value: googleDriveFolderId }
+  { name: 'GOOGLE_SHEET_ID', value: googleSheetId }
+  { name: 'DOCUMENT_INTELLIGENCE_ENDPOINT', value: documentIntelligenceEndpoint }
+]
+
 // Container App: Webhook
 resource webhookApp 'Microsoft.App/containerApps@2023-05-01' = {
   name: 'webhook-app'
@@ -323,16 +391,8 @@ resource webhookApp 'Microsoft.App/containerApps@2023-05-01' = {
             cpu: json('0.5')
             memory: '1.0Gi'
           }
-          env: [
-            {
-              name: 'AZURE_KEY_VAULT_URL'
-              value: keyVault.properties.vaultUri
-            }
-            {
-              name: 'ENVIRONMENT'
-              value: 'production'
-            }
-          ]
+          // Webhook só valida/roteia/enfileira — não precisa de config de LLM/parsing.
+          env: concat(baseEnv, messagingEnv)
         }
       ]
       scale: {
@@ -380,33 +440,20 @@ resource workerLlmApp 'Microsoft.App/containerApps@2023-05-01' = {
             cpu: json('0.5')
             memory: '1.0Gi'
           }
-          env: [
-            {
-              name: 'AZURE_KEY_VAULT_URL'
-              value: keyVault.properties.vaultUri
-            }
-            {
-              name: 'ENVIRONMENT'
-              value: 'production'
-            }
-            {
-              name: 'QUEUE_BACKEND'
-              value: 'redis'
-            }
-            {
-              name: 'PARSER_BACKEND'
-              value: 'azure'
-            }
+          env: concat(baseEnv, messagingEnv, workerConfigEnv, [
             {
               name: 'WORKER_TYPE'
               value: 'llm'
             }
-          ]
+          ])
         }
       ]
       scale: {
-        minReplicas: 1
-        maxReplicas: 5
+        // Worker assíncrono à fila: pode escalar a ZERO (FinOps) sem violar o SLA
+        // de 200ms — quem segura o ack do webhook é o webhook-app (minReplicas=1).
+        // Alinhado ao estado de produção (ver what-if): min 0 / max 10.
+        minReplicas: 0
+        maxReplicas: 10
         rules: [
           {
             name: 'inbound-messages-rule'
@@ -422,6 +469,26 @@ resource workerLlmApp 'Microsoft.App/containerApps@2023-05-01' = {
                 stream: 'inbound_messages'
                 consumerGroup: 'messaging_workers'
                 pendingEntriesCount: '5'
+              }
+            }
+          }
+          // Comandos '/' são roteados para a fila command_messages ANTES de
+          // inbound_messages (ver AGENTS.md). Sem esta regra o worker não escala
+          // para drenar comandos.
+          {
+            name: 'command-messages-rule'
+            custom: {
+              type: 'redis-streams'
+              auth: [
+                {
+                  secretRef: 'redis-url'
+                  triggerParameter: 'address'
+                }
+              ]
+              metadata: {
+                stream: 'command_messages'
+                consumerGroup: 'messaging_workers'
+                pendingEntriesCount: '1'
               }
             }
           }
@@ -464,28 +531,12 @@ resource workerSchedulerApp 'Microsoft.App/containerApps@2023-05-01' = {
             cpu: json('0.5')
             memory: '1.0Gi'
           }
-          env: [
-            {
-              name: 'AZURE_KEY_VAULT_URL'
-              value: keyVault.properties.vaultUri
-            }
-            {
-              name: 'ENVIRONMENT'
-              value: 'production'
-            }
-            {
-              name: 'QUEUE_BACKEND'
-              value: 'redis'
-            }
-            {
-              name: 'PARSER_BACKEND'
-              value: 'azure'
-            }
+          env: concat(baseEnv, messagingEnv, workerConfigEnv, [
             {
               name: 'WORKER_TYPE'
               value: 'scheduler'
             }
-          ]
+          ])
         }
       ]
       scale: {
