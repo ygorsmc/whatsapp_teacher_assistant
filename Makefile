@@ -54,7 +54,7 @@ help:
 	@echo "  make env-local              - Switch .env to LOCAL profile (all local)"
 	@echo "  make env-prod               - Switch .env to PROD profile (Qdrant cloud)"
 	@echo "  make env-status             - Show the active environment profile"
-	@echo "  make dev                    - Start infrastructure (docker-compose)"
+	@echo "  make dev                    - Start infrastructure (docker compose)"
 	@echo "  make dev-api                - Start FastAPI server locally"
 	@echo "  make dev-worker-<name>      - Start a specific worker locally"
 	@echo "                                Options: llm, ingestion, scheduler"
@@ -83,8 +83,8 @@ help:
 # 1. LOCAL DEVELOPMENT
 # ==========================================
 dev:
-	@echo "[INFO] Starting local infrastructure with docker-compose..."
-	docker-compose up -d
+	@echo "[INFO] Starting local infrastructure with docker compose..."
+	docker compose up -d
 	@echo "[INFO] Waiting for services to initialize..."
 	sleep 10
 	@echo "[INFO] Stack running: Redis, PostgreSQL, Qdrant"
@@ -132,7 +132,7 @@ db-upgrade:
 
 db-reset:
 	@echo "[WARN] Dropping and recreating the local Postgres schema (public)..."
-	docker-compose exec -T postgres psql -U whatsapp -d whatsapp_assistant -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+	docker compose exec -T postgres psql -U whatsapp -d whatsapp_assistant -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 	$(MAKE) db-upgrade
 
 dev-seed:

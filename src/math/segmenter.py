@@ -211,7 +211,10 @@ def latex_to_unicode(latex: str) -> str:
         try:
             converted = engine.latex_to_text(source).strip()
             if converted:
-                return converted
+                # pylatexenc cobre símbolos/grego mas NÃO converte ^/_ em
+                # sobrescritos Unicode — aplica o mesmo passo do fallback para
+                # que ambos os caminhos rendam "x²" (paridade pylatexenc/fallback).
+                return _apply_scripts(converted)
         except Exception:
             pass
     return _unicode_fallback(source)
@@ -255,6 +258,19 @@ _SUBSCRIPT = str.maketrans(
 )
 
 
+def _apply_scripts(s: str) -> str:
+    """Converte ^x/_x e ^{x}/_{x} (1 char) em sobrescritos/subscritos Unicode.
+
+    Compartilhado entre o caminho pylatexenc e o fallback para garantir paridade:
+    o pylatexenc não converte ^/_, então sem isto os dois caminhos divergiriam.
+    """
+    s = re.sub(r"\^\{([0-9n+\-=()i])\}", lambda m: m.group(1).translate(_SUPERSCRIPT), s)
+    s = re.sub(r"_\{([0-9+\-=()])\}", lambda m: m.group(1).translate(_SUBSCRIPT), s)
+    s = re.sub(r"\^([0-9n+\-=()i])", lambda m: m.group(1).translate(_SUPERSCRIPT), s)
+    s = re.sub(r"_([0-9+\-=()])", lambda m: m.group(1).translate(_SUBSCRIPT), s)
+    return s
+
+
 def _unicode_fallback(s: str) -> str:
     """Mapa embutido (Plano B): símbolos comuns + sub/sobrescritos de 1 char."""
     # Chaves longas primeiro (\\infty antes de \\in) para não casar prefixo.
@@ -262,10 +278,7 @@ def _unicode_fallback(s: str) -> str:
         s = s.replace(key, _SYMBOLS[key])
 
     # Sub/sobrescritos: ^{x}, _{x} de 1 char e ^x, _x diretos.
-    s = re.sub(r"\^\{([0-9n+\-=()i])\}", lambda m: m.group(1).translate(_SUPERSCRIPT), s)
-    s = re.sub(r"_\{([0-9+\-=()])\}", lambda m: m.group(1).translate(_SUBSCRIPT), s)
-    s = re.sub(r"\^([0-9n+\-=()i])", lambda m: m.group(1).translate(_SUPERSCRIPT), s)
-    s = re.sub(r"_([0-9+\-=()])", lambda m: m.group(1).translate(_SUBSCRIPT), s)
+    s = _apply_scripts(s)
 
     # Espaçamentos LaTeX (\, \; \! \: \quad) e \left \right viram nada/espaço.
     s = re.sub(r"\\(?:quad|qquad)", " ", s)
