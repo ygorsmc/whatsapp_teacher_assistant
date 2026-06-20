@@ -849,7 +849,24 @@ async def process_inbound(event: dict, ctx: MessageContext):
                         break
             else:
                 # Ambiguous intent - ask the student to specify
-                course_list_str = "\n".join(f"- {c['name']}" for c in enrolled_courses)
+                from collections import defaultdict
+                grouped_courses = defaultdict(list)
+                for s_ctx in student_contexts:
+                    c_name = s_ctx["course"].name
+                    grouped_courses[c_name].append(s_ctx.get("subject"))
+
+                lines = []
+                for course_name, subjects in grouped_courses.items():
+                    if all(sub is None for sub in subjects):
+                        lines.append(f"- {course_name}")
+                    else:
+                        lines.append(f"- {course_name}")
+                        for sub in subjects:
+                            if sub:
+                                lines.append(f"      - {sub.name}")
+                
+                course_list_str = "\n".join(lines)
+                
                 ambiguous_msg = (
                     "🤔 Pareceu que você fez uma pergunta genérica, mas eu vi que você está "
                     f"matriculado(a) em mais de uma disciplina comigo:\n\n{course_list_str}\n\n"

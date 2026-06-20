@@ -121,6 +121,8 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
     disciplina_divergente: set[str] = set()
     upserted_teacher_ids: set[str] = set()
     upserted_subject_ids: set[str] = set()
+    upserted_course_ids: set[str] = set()
+    upserted_class_ids: set[str] = set()
     # Disciplina por turma vinda de cada aba (p/ detectar divergência Alunos×Turmas).
     alunos_subject: dict[tuple[str, str], set[str]] = defaultdict(set)  # (curso,turma) -> {disciplinas vistas na aba Alunos}
     turmas_subject: dict[tuple[str, str], str] = {}                     # (curso,turma) -> disciplina (autoritativa)
@@ -193,9 +195,23 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
 
         stats["teachers_upserted"] = len(upserted_teacher_ids)
 
+        # ===== Pre-scan: is_active global por aluno (OR de todas as linhas) =====
+        # Um aluno aparece em várias linhas (uma por turma). O is_active da
+        # entidade Student deve ser true se QUALQUER matrícula estiver ativa;
+        # o status por LINHA controla a matrícula/agendamento daquela turma.
+        student_global_active: dict[str, bool] = {}
+        for row in alunos_rows:
+            phone = clean_phone(_cell(row, 1))
+            if not phone:
+                continue
+            status_val = (_cell(row, 8) or "ativo").lower()
+            row_active = status_val in ACTIVE_VALUES
+            student_global_active[phone] = student_global_active.get(phone, False) or row_active
+
         # ===== Pass 1: Alunos → Students/Courses/Classes/Enrollments/Schedules =====
         student_active_classes = defaultdict(set)
         student_active_schedules = defaultdict(set)
+        upserted_student_phones: set[str] = set()
 
         for row in alunos_rows:
             name = _cell(row, 0)
@@ -217,25 +233,37 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
             if not phone:
                 continue
 
-            # 1. Upsert Student
+            # 1. Upsert Student — is_active global: true se QUALQUER linha
+            # deste telefone for ativa (pré-computado acima). Evita que a
+            # última linha processada sobrescreva indevidamente o status.
             student_id = generate_id("stu", phone)
-            res = await session.execute(
-                text("""
-                    INSERT INTO "Students" (id, name, phone, is_active, guardian_phone, is_child)
-                    VALUES (:id, :name, :phone, :is_active, :gphone, :is_child)
-                    ON CONFLICT(phone) DO UPDATE SET
-                        name = excluded.name,
-                        is_active = excluded.is_active,
-                        guardian_phone = excluded.guardian_phone,
-                        is_child = excluded.is_child,
-                        updated_at = CURRENT_TIMESTAMP
-                    RETURNING id
-                """),
-                {"id": student_id, "name": name, "phone": phone, "is_active": is_active,
-                 "gphone": guardian_phone, "is_child": is_child},
-            )
-            student_id = cast(str, res.scalar())
-            stats["students_upserted"] = cast(int, stats["students_upserted"]) + 1
+            global_active = student_global_active.get(phone, is_active)
+            if phone not in upserted_student_phones:
+                res = await session.execute(
+                    text("""
+                        INSERT INTO "Students" (id, name, phone, is_active, guardian_phone, is_child)
+                        VALUES (:id, :name, :phone, :is_active, :gphone, :is_child)
+                        ON CONFLICT(phone) DO UPDATE SET
+                            name = excluded.name,
+                            is_active = excluded.is_active,
+                            guardian_phone = excluded.guardian_phone,
+                            is_child = excluded.is_child,
+                            updated_at = CURRENT_TIMESTAMP
+                        RETURNING id
+                    """),
+                    {"id": student_id, "name": name, "phone": phone, "is_active": global_active,
+                     "gphone": guardian_phone, "is_child": is_child},
+                )
+                student_id = cast(str, res.scalar())
+                upserted_student_phones.add(phone)
+                stats["students_upserted"] = cast(int, stats["students_upserted"]) + 1
+            else:
+                # Já fez upsert para este phone — só resolve o student_id.
+                res = await session.execute(
+                    text('SELECT id FROM "Students" WHERE phone = :phone'),
+                    {"phone": phone},
+                )
+                student_id = cast(str, res.scalar())
 
             if not course_name:
                 continue  # aluno sem curso atribuído
@@ -255,6 +283,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 """),
                 {"id": course_id, "tid": owner_tid, "name": course_name},
             )
+            upserted_course_ids.add(course_id)
             stats["courses_upserted"] = cast(int, stats["courses_upserted"]) + 1
 
             # 2.2 Upsert Subject (Disciplina). A aba Turmas é autoritativa e
@@ -281,6 +310,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 """),
                 {"id": class_id, "cid": course_id, "sid": subject_id, "tid": class_tid, "name": class_name},
             )
+            upserted_class_ids.add(class_id)
 
             # 3. Upsert Enrollment
             enroll_id = generate_id("enr", f"{student_id}_{class_id}")
@@ -368,6 +398,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 """),
                 {"id": course_id, "tid": owner_tid, "name": course_name},
             )
+            upserted_course_ids.add(course_id)
 
             # Disciplina autoritativa da turma (sobrescreve a vinda da aba Alunos).
             subject_id = None
@@ -413,6 +444,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                     "level": proficiency_level,
                 },
             )
+            upserted_class_ids.add(class_id)
 
         # ===== Detecção de divergência de Disciplina (Alunos × Turmas) =====
         # Uma turma pertence a UMA disciplina; a aba Turmas é autoritativa. Reporta
@@ -528,6 +560,34 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
             else:
                 stmt = delete(StudentSchedule).where(StudentSchedule.student_id == sid)
             await session.execute(stmt)
+
+        # ===== Pass 3.5: Desativar cursos/disciplinas stale (não vistos na planilha) =====
+        # Cursos e disciplinas que existem no banco mas não apareceram em nenhuma
+        # aba nesta sync são marcados is_active=false (e.g. renomeados, removidos,
+        # ou criados por typo). NÃO deleta — preserva histórico/vetores Qdrant.
+        if upserted_course_ids:
+            cids = list(upserted_course_ids)
+            placeholders = ", ".join(f":cid_{i}" for i in range(len(cids)))
+            params = {f"cid_{i}": cid for i, cid in enumerate(cids)}
+            params["admin_cid"] = BOOTSTRAP_ADMIN_ID
+            await session.execute(
+                text(f"""
+                    UPDATE "Courses" SET is_active = false, updated_at = CURRENT_TIMESTAMP
+                    WHERE is_active = true AND id != :admin_cid AND id NOT IN ({placeholders})
+                """),
+                params,
+            )
+        if upserted_subject_ids:
+            sids = list(upserted_subject_ids)
+            placeholders = ", ".join(f":sid_{i}" for i in range(len(sids)))
+            params = {f"sid_{i}": sid for i, sid in enumerate(sids)}
+            await session.execute(
+                text(f"""
+                    UPDATE "Subjects" SET is_active = false, updated_at = CURRENT_TIMESTAMP
+                    WHERE is_active = true AND id NOT IN ({placeholders})
+                """),
+                params,
+            )
 
         await session.commit()
 
