@@ -55,6 +55,11 @@ class Settings(BaseSettings):
     DOCUMENT_INTELLIGENCE_ENDPOINT: str = Field(default="")
     DOCUMENT_INTELLIGENCE_KEY: Optional[str] = Field(default=None) # Used only if Managed Identity isn't available
     GOTENBERG_URL: str = Field(default="http://localhost:3000")
+    # Mistral OCR: isola cabeçalho/rodapé corridos (nº de página, título repetido)
+    # nos campos próprios da página (page.header/footer), deixando o markdown do
+    # corpo limpo. Como a ingestão só consome o markdown, esse boilerplate NÃO entra
+    # no RAG. Default True (boilerplate repetido polui embeddings e infla os chunks).
+    MISTRAL_OCR_EXTRACT_HEADER_FOOTER: bool = Field(default=True)
     # M1: parser ciente de matemática (Marker/Docling/MinerU self-hosted, modo
     # híbrido: texto da camada digital + VLM nos crops de fórmula → Markdown+LaTeX).
     # Sem endpoint, ou em falha/timeout, degrada para MARKER_FALLBACK_PARSER.
@@ -124,6 +129,14 @@ class Settings(BaseSettings):
     BGE_M3_ENDPOINT: str = Field(default="")
     BGE_M3_API_KEY: Optional[str] = Field(default=None)
     BGE_M3_TIMEOUT_SECONDS: float = Field(default=15.0)
+    # Ollama como host LOCAL do mesmo modelo BGE-M3 (denso 1024d; Ollama NÃO
+    # devolve o braço esparso). Provider-agnóstico: hoje aponta para o Ollama
+    # local; migrar para um BGE-M3 hospedado depois é trocar DEFAULT_EMBEDDER_PROVIDER
+    # de volta para 'bge-m3' + BGE_M3_ENDPOINT (mesmo modelo, vetores compatíveis).
+    OLLAMA_BASE_URL: str = Field(default="http://localhost:11434")
+    OLLAMA_EMBED_MODEL: str = Field(default="bge-m3")
+    OLLAMA_EMBED_DIMENSIONS: int = Field(default=1024)
+    OLLAMA_TIMEOUT_SECONDS: float = Field(default=30.0)
     # F4: Reranking cross-encoder ('none' = passthrough, caminho atual).
     RERANKER_PROVIDER: str = Field(default="none")  # none | cohere | voyage | open
     RERANK_CANDIDATES: int = Field(default=50)
@@ -160,6 +173,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = Field(default=None)
     GOOGLE_API_KEY: Optional[str] = Field(default=None)
     DEEPSEEK_API_KEY: Optional[str] = Field(default=None)
+    MISTRAL_API_KEY: Optional[str] = Field(default=None)
     
     # Azure OpenAI
     AZURE_OPENAI_API_KEY: Optional[str] = Field(default=None)

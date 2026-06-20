@@ -64,9 +64,15 @@ def _build_marker() -> IDocumentParser:
     return MarkerParser()
 
 
+def _build_mistral() -> IDocumentParser:
+    from src.parsing.mistral_parser import MistralOCRParser  # import tardio
+    return MistralOCRParser()
+
+
 register_parser(DEFAULT_PARSER, _build_azure)
 register_parser("local", _build_local)
 register_parser("marker", _build_marker)
+register_parser("mistral", _build_mistral)
 
 
 def get_parser(name: str | None = None) -> IDocumentParser:

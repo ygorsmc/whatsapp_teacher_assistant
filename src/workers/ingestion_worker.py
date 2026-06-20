@@ -163,6 +163,43 @@ async def process_file(file_id: str, file_name: str, mime_type: str, teacher_id:
             logger.error("Parsing failed", error=str(e))
             return False
         
+    return await ingest_paragraphs(
+        raw_paragraphs=raw_paragraphs,
+        full_text=full_text,
+        file_id=file_id,
+        file_name=file_name,
+        teacher_id=teacher_id,
+        course_id=course_id,
+        subject_name=subject_name,
+        lesson_number=lesson_number,
+        material_type=material_type,
+    )
+
+
+async def ingest_paragraphs(
+    raw_paragraphs: list[str],
+    full_text: str,
+    file_id: str,
+    file_name: str,
+    teacher_id: str,
+    course_id: str,
+    subject_name: str,
+    lesson_number: int,
+    material_type: str = "lesson",
+) -> bool:
+    """Metade de baixo da ingestão (F1→F7), separada do download/parsing para que
+    OUTRAS origens de `raw_paragraphs` reusem o MESMO funil — em particular o OCR
+    em lote (Mistral Batch, −50%) feito offline: o script de bulk produz o mesmo
+    `list[str]` que um `IDocumentParser.parse()` produziria e chama esta função.
+
+    Faz chunking estrutural (F1), enriquecimento contextual (F2), embedding
+    híbrido (F3) e upsert no Qdrant com o payload de escopo
+    (teacher_id/course_id/subject_name/lesson_number/material_type/source/file_id).
+
+    `full_text` é o documento inteiro (excerto fixo do F2). Para markdown/TXT pode
+    vir vazio com `raw_paragraphs` populado (ou vice-versa) — o reassemble abaixo
+    cobre os dois casos, idêntico ao comportamento de quando isto vivia inline.
+    """
     # 3. Chunking estrutural (F1): headings = fronteiras + section_title;
     #    pares regra↔exceção nunca se separam (teto duro de 1.5×).
     if not raw_paragraphs:
@@ -471,6 +508,21 @@ async def handle_ingestion_message(payload: dict, context):
         material_type = payload.get("material_type", "lesson")
 
         async with AsyncSessionLocal() as session:
+            # Idempotência do consumidor: o stream Redis pode RE-ENTREGAR uma
+            # mensagem sem ACK (ex.: o worker morreu antes do `complete()`) ou
+            # conter DUPLICATAS enfileiradas por ciclos anteriores do sync. Sem
+            # esta guarda, cada redelivery re-baixa e re-parseia o arquivo (re-OCR
+            # caro). Se o arquivo já está em estado terminal, dá ACK e sai — espelha
+            # o skip do sync_google_drive (concluído/dead_letter/excluído).
+            existing = (await session.execute(
+                text("SELECT status FROM file_sync_state WHERE file_id = :fid"),
+                {"fid": file_id},
+            )).fetchone()
+            if existing and existing[0] in ("concluído", "dead_letter", "excluído"):
+                logger.info("ingestion_skip_already_terminal", file_id=file_id, status=existing[0])
+                await context.complete()
+                return
+
             # Mark as processing
             await session.execute(
                 text("UPDATE file_sync_state SET status = 'processando', processing_started_at = CURRENT_TIMESTAMP WHERE file_id = :fid"),

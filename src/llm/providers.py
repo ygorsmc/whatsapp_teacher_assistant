@@ -231,6 +231,59 @@ class AzureEmbeddingProvider(EmbeddingProvider):
         return await self.embeddings.aembed_documents(texts)
 
 
+class OllamaEmbeddingProvider(EmbeddingProvider):
+    """Embedder DENSO via Ollama local (`/api/embed`).
+
+    Serve o MESMO modelo BGE-M3 do provider 'bge-m3', mas hospedado no Ollama
+    local — útil enquanto não há um endpoint BGE-M3 hospedado. Diferença: o
+    Ollama devolve apenas o vetor DENSO (1024d), sem o braço esparso; logo a
+    busca híbrida (HYBRID_SEARCH_ENABLED) só teria o sparse via fallback BM25
+    local (fastembed). Para o braço esparso real, migrar para 'bge-m3' apontando
+    BGE_M3_ENDPOINT a um servidor que devolva dense+sparse (mesmo modelo →
+    vetores densos compatíveis, sem reindex para o braço denso)."""
+
+    def __init__(self):
+        import httpx  # import tardio
+        from tenacity import AsyncRetrying, stop_after_attempt, wait_exponential
+
+        self._httpx = httpx
+        self._AsyncRetrying = AsyncRetrying
+        self._stop = stop_after_attempt(3)
+        self._wait = wait_exponential(multiplier=1, min=1, max=10)
+        self.base_url = settings.OLLAMA_BASE_URL.rstrip("/")
+        self.model = settings.OLLAMA_EMBED_MODEL
+        self.dimensions = settings.OLLAMA_EMBED_DIMENSIONS
+        self.timeout = settings.OLLAMA_TIMEOUT_SECONDS
+
+    def get_dimensions(self) -> int:
+        return self.dimensions
+
+    async def _embed(self, texts: List[str]) -> List[List[float]]:
+        async for attempt in self._AsyncRetrying(wait=self._wait, stop=self._stop, reraise=True):
+            with attempt:
+                async with self._httpx.AsyncClient(timeout=self.timeout) as client:
+                    resp = await client.post(
+                        f"{self.base_url}/api/embed",
+                        json={"model": self.model, "input": texts},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                embeddings = data.get("embeddings")
+                if not embeddings or len(embeddings) != len(texts):
+                    raise ValueError(
+                        f"Ollama embed: esperado {len(texts)} vetores, recebido "
+                        f"{len(embeddings) if embeddings else 0}"
+                    )
+                return [list(map(float, vec)) for vec in embeddings]
+        raise RuntimeError("unreachable")  # pragma: no cover (reraise=True acima)
+
+    async def aembed_query(self, text: str) -> List[float]:
+        return (await self._embed([text]))[0]
+
+    async def aembed_documents(self, texts: List[str]) -> List[List[float]]:
+        return await self._embed(texts)
+
+
 from src.llm.factory import register_provider, register_embedder  # noqa: E402
 from src.llm.bge_m3 import BGEM3EmbeddingProvider  # noqa: E402
 register_provider("openai", OpenAILLMProvider)
@@ -241,3 +294,5 @@ register_embedder("azure", AzureEmbeddingProvider)
 # F3a (RAG Preciso): embedder híbrido (denso 1024 + esparso em 1 passo).
 # Trocar exige EMBEDDING_DIMENSIONS=1024 + reindexação (janela única da F8).
 register_embedder("bge-m3", BGEM3EmbeddingProvider)
+# BGE-M3 denso via Ollama local (1024d) — mesmo modelo, sem braço esparso.
+register_embedder("ollama", OllamaEmbeddingProvider)
