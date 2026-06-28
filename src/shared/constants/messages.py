@@ -342,3 +342,37 @@ DASHBOARD_GAMIFICATION_SECTION = (
     "🙈 Ocultos do ranking: *{hidden}*\n"
     "📎 Exportar pra planilha: /exportar_engajamento_{class_hint}"
 )
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Componente de NOTA (Fase 2, Modelo C — engajamento como % da nota, opt-in/turma)
+# ⚠️ Transparência é REQUISITO: o aluno sempre sabe a fórmula e o quanto falta.
+# ──────────────────────────────────────────────────────────────────────────────
+GRADE_SET_USAGE = (
+    "❌ Formato: `/nota_engajamento_[turma]_[peso%]_[meta_XP]`\n"
+    "Ex.: `/nota_engajamento_9B_10_350` (engajamento vale até *10%* da nota; meta de *350 XP*/semana).\n"
+    "Para desligar: `/nota_engajamento_9B_off`.\n\n"
+    "_Regras do sistema: peso máximo *{max_weight}%*, só ADICIONA (nunca subtrai), por esforço (meta), não por ranking._"
+)
+GRADE_SET_CONFIRM = (
+    "✅ *Componente de nota ativado — {class_name}*\n\n"
+    "Fórmula (idêntica para a turma toda, mostre aos alunos):\n"
+    "`engajamento = min(XP_da_semana / {goal}, 100%) × {weight}%`\n\n"
+    "• Peso: até *{weight}%* da nota · Meta: *{goal} XP*/semana\n"
+    "• Só adiciona (piso, nunca punição); respostas suspeitas (anti-gaming) não contam.\n"
+    "• O aluno acompanha em */minha_nota*."
+)
+GRADE_WEIGHT_CAPPED = "ℹ️ O peso foi limitado ao teto do sistema (*{max_weight}%*) — pesquisa: peso baixo + transparência."
+GRADE_DISABLED_OK = "✅ Componente de nota *desativado* na turma {class_name} (volta ao Modelo A: relatório, não nota)."
+GRADE_INVALID_VALUES = "❌ Peso e meta devem ser números positivos. Ex.: `/nota_engajamento_9B_10_350`."
+
+# /minha_nota (aluno) — transparência total.
+MY_GRADE_NONE = "ℹ️ Sua turma não usa o engajamento como nota — seu XP é só pra streak, liga e conquistas. 😉"
+MY_GRADE_BODY = (
+    "🎓 *Componente de nota — engajamento*\n\n"
+    "Meta da semana: *{goal} XP* · você fez: *{week_xp} XP* ({pct}%)\n"
+    "Nota parcial garantida: *{points}* de até *{weight}* pontos\n"
+    "{remaining}\n\n"
+    "_Fórmula: min(seu XP ÷ meta, 100%) × peso. Só adiciona, igual pra turma toda._"
+)
+MY_GRADE_REMAINING = "Faltam *{gap} XP* pra nota cheia de engajamento. 💪"
+MY_GRADE_FULL = "✅ Você já garantiu a nota cheia de engajamento esta semana! 🎉"

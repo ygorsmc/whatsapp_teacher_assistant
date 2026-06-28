@@ -9,7 +9,7 @@ from datetime import datetime, date, timedelta
 
 import pytest
 
-from src.gamification import xp, anti_gaming, badges, pseudonyms, leaderboard, export
+from src.gamification import xp, anti_gaming, badges, pseudonyms, leaderboard, export, grade
 from src.gamification import streak as streak_mod
 
 
@@ -274,6 +274,44 @@ def test_export_csv_escapes_commas_and_quotes():
     csv = export.rows_to_csv(export.build_engagement_export_rows(recs))
     # Nome com vírgula/aspas é envolto em aspas e as aspas internas são dobradas.
     assert '"Ana, ""B"""' in csv
+
+
+def test_export_grade_column_optional():
+    recs = [export.EngagementRecord("Ana", 5, 12, 8, 3, 7, 280, grade_points=8.0)]
+    # Sem Modelo C: sem coluna de nota.
+    rows_a = export.build_engagement_export_rows(recs)
+    assert export.GRADE_COLUMN not in rows_a[0]
+    assert len(rows_a[1]) == len(export.EXPORT_HEADER)
+    # Com Modelo C: coluna extra com os pontos.
+    rows_c = export.build_engagement_export_rows(recs, include_grade=True)
+    assert rows_c[0][-1] == export.GRADE_COLUMN
+    assert rows_c[1][-1] == "8.0"
+
+
+# ──────────── Componente de nota (Fase 2, Modelo C) — blindagens ───────────
+
+def test_grade_fraction_threshold_and_clamp():
+    assert grade.engagement_fraction(280, 350) == 0.8
+    assert grade.engagement_fraction(400, 350) == 1.0   # nunca passa de 100%
+    assert grade.engagement_fraction(50, 0) == 0.0      # meta inválida ⇒ 0
+    assert grade.engagement_fraction(-10, 350) == 0.0   # nunca negativo
+
+
+def test_grade_points_only_adds_and_caps_weight():
+    assert grade.grade_points(280, 350, 10) == 8.0
+    assert grade.grade_points(0, 350, 10) == 0.0         # só adiciona (piso)
+    # Peso acima do teto do sistema é cortado em MAX_GRADE_WEIGHT_PCT.
+    assert grade.grade_points(350, 350, 25) == grade.MAX_GRADE_WEIGHT_PCT
+    assert grade.clamp_weight(25) == grade.MAX_GRADE_WEIGHT_PCT
+    assert grade.clamp_weight(-3) == 0.0
+
+
+def test_grade_xp_to_full_and_enabled():
+    assert grade.xp_to_full(280, 350) == 70
+    assert grade.xp_to_full(400, 350) == 0
+    assert grade.is_grade_enabled(None, None) is False   # Modelo A
+    assert grade.is_grade_enabled(0, 350) is False
+    assert grade.is_grade_enabled(10, 350) is True       # Modelo C
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ class CommandType:
     # ── Comandos gerenciais (sintaxe explícita /comando_[turma]_[arg]) ──────
     ENGAGEMENT = "engagement"            # /engajamento_[turma]
     EXPORT_ENGAGEMENT = "export_engagement"  # /exportar_engajamento_[turma] (gamificação F1)
+    SET_GRADE_COMPONENT = "set_grade_component"  # /nota_engajamento_[turma]_[peso]_[meta] (F2)
     QUIZ_PERFORMANCE = "quiz_performance"  # /acertos_[turma]
     AT_RISK = "at_risk"                  # /risco_[turma]
     FREQUENT_DOUBTS = "frequent_doubts"  # /duvidas_frequentes_[turma]
@@ -47,6 +48,7 @@ class CommandType:
     MY_RANKING = "my_ranking"              # /meu_ranking
     ACHIEVEMENTS = "achievements"          # /conquistas
     HIDE_RANKING = "hide_ranking"          # /ocultar_ranking (toggle opt-out só do ranking)
+    MY_GRADE = "my_grade"                  # /minha_nota (componente de nota, F2)
     # ── Horizontes H1-H3 ─────────────────────────────────────────────────────
     CLASS_CHALLENGE = "class_challenge"    # /desafio_[turma]               (H1.1)
     KEY_STATS = "key_stats"                # /chaves_[turma]                (H2.1)
@@ -106,7 +108,7 @@ COMMAND_ALIASES = {
 #   - No /aviso, a [turma] é o trecho entre o 1º e o 2º "_" (sem underscores);
 #     todo o restante é a mensagem (que PODE conter underscores).
 MANAGEMENT_COMMAND_REGEX = re.compile(
-    r"^/(?P<cmd>exportar_engajamento|engajamento|acertos|risco|duvidas_frequentes|ver_aluno|"
+    r"^/(?P<cmd>nota_engajamento|exportar_engajamento|engajamento|acertos|risco|duvidas_frequentes|ver_aluno|"
     r"resetar_aluno|limpar_quizzes|aviso|zerar_aula|"
     r"plano_leitura|simulado|vincular_aula|errata|ativar_capitulos|gabarito|"
     r"mapa_dificuldade|funil_conclusao|corpus_duvidas|"
@@ -124,6 +126,7 @@ _AVISO_SPLIT_REGEX = re.compile(r"^(?P<turma>[^_]+)_(?P<msg>.+)$", re.DOTALL)
 _MANAGEMENT_MAP = {
     "engajamento": CommandType.ENGAGEMENT,
     "exportar_engajamento": CommandType.EXPORT_ENGAGEMENT,
+    "nota_engajamento": CommandType.SET_GRADE_COMPONENT,
     "acertos": CommandType.QUIZ_PERFORMANCE,
     "risco": CommandType.AT_RISK,
     "duvidas_frequentes": CommandType.FREQUENT_DOUBTS,
@@ -153,6 +156,7 @@ _MANAGEMENT_MAP = {
 # /aviso. Os demais comandos gerenciais têm arg único (turma ou telefone).
 _MULTIARG_COMMANDS = {
     CommandType.BROADCAST_NOTICE,
+    CommandType.SET_GRADE_COMPONENT,
     CommandType.READING_PLAN,
     CommandType.SIMULADO,
     CommandType.LINK_LESSON_CHAPTER,
@@ -170,14 +174,14 @@ _MULTIARG_COMMANDS = {
 # 200ms. Qualquer outro comando de aluno continua rejeitado na borda.
 STUDENT_COMMAND_REGEX = re.compile(
     r"^/(?P<cmd>pausar_leitura|retomar_leitura|meu_progresso|flashcards|nivelamento|sair_livro|corrigir|apagar_meus_dados|"
-    r"meu_ranking|conquistas|ocultar_ranking)\s*$",
+    r"meu_ranking|conquistas|ocultar_ranking|minha_nota)\s*$",
     re.IGNORECASE,
 )
 
 # Comandos de gamificação na allowlist: só contam como comando quando o MESTRE
 # está ON (a borda checa). Com a flag OFF, a borda os trata como qualquer comando
 # de aluno não reconhecido (byte-idêntico ao de hoje).
-GAMIFICATION_STUDENT_COMMANDS = frozenset({"meu_ranking", "conquistas", "ocultar_ranking"})
+GAMIFICATION_STUDENT_COMMANDS = frozenset({"meu_ranking", "conquistas", "ocultar_ranking", "minha_nota"})
 
 _STUDENT_MAP = {
     "pausar_leitura": CommandType.PAUSE_READING,
@@ -191,6 +195,7 @@ _STUDENT_MAP = {
     "meu_ranking": CommandType.MY_RANKING,
     "conquistas": CommandType.ACHIEVEMENTS,
     "ocultar_ranking": CommandType.HIDE_RANKING,
+    "minha_nota": CommandType.MY_GRADE,
 }
 
 # LGPD P1.1 (Art. 14): o RESPONSÁVEL não é usuário do bot — a palavra REVOGAR

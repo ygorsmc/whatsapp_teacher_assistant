@@ -1452,6 +1452,9 @@ async def process_command_message(message_body: dict):
         elif student_cmd == CommandType.HIDE_RANKING:
             from src.workers.gamification import run_hide_ranking_command
             await run_hide_ranking_command(channel, sender_id)
+        elif student_cmd == CommandType.MY_GRADE:
+            from src.workers.gamification import run_my_grade_command
+            await run_my_grade_command(channel, sender_id)
         return
 
     # 1) Comandos gerenciais — sintaxe explícita /comando_[turma]_[arg].
@@ -1466,6 +1469,9 @@ async def process_command_message(message_body: dict):
         elif cmd_type == CommandType.EXPORT_ENGAGEMENT:
             from src.workers.gamification import run_export_engagement_command
             await run_export_engagement_command(channel, sender_id, target)
+        elif cmd_type == CommandType.SET_GRADE_COMPONENT:
+            from src.workers.gamification import run_set_grade_component_command
+            await run_set_grade_component_command(channel, sender_id, target, extra)
         elif cmd_type == CommandType.QUIZ_PERFORMANCE:
             await run_quiz_performance_command(channel, sender_id, target)
         elif cmd_type == CommandType.AT_RISK:

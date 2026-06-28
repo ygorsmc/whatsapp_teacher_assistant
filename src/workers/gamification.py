@@ -31,6 +31,7 @@ from src.gamification import xp as xp_logic
 from src.gamification import anti_gaming, streak as streak_logic, badges as badge_logic
 from src.gamification import pseudonyms, leaderboard
 from src.gamification import export as gami_export
+from src.gamification import grade as grade_logic
 from src.shared.constants import messages as M
 
 logger = structlog.get_logger(__name__)
@@ -992,6 +993,13 @@ async def run_export_engagement_command(channel, sender_id: str, class_query: st
                 return
             class_id, c_name, course_id = klass[0], klass[1], klass[2]
 
+            # Componente de nota (Modelo C) desta turma — acrescenta coluna no CSV.
+            grade_cfg = (await session.execute(
+                text('SELECT grade_weight_pct AS weight, weekly_xp_goal AS goal FROM "Classes" WHERE id = :cid'),
+                {"cid": class_id},
+            )).fetchone()
+            grade_on = bool(grade_cfg and grade_logic.is_grade_enabled(grade_cfg.weight, grade_cfg.goal))
+
             records_rows = (await session.execute(
                 text('''
                     SELECT s.name,
@@ -1026,9 +1034,12 @@ async def run_export_engagement_command(channel, sender_id: str, class_query: st
                 name=r.name, days_active=int(r.days_active or 0), quizzes=int(r.quizzes or 0),
                 srs_reviews=int(r.srs or 0), reading_sections=int(r.reading or 0),
                 streak=int(r.streak or 0), week_xp=int(r.week_xp or 0),
+                grade_points=(grade_logic.grade_points(int(r.week_xp or 0), int(grade_cfg.goal),
+                                                        float(grade_cfg.weight)) if grade_on else None),
             ) for r in records_rows
         ]
-        csv_text = gami_export.rows_to_csv(gami_export.build_engagement_export_rows(records))
+        csv_text = gami_export.rows_to_csv(
+            gami_export.build_engagement_export_rows(records, include_grade=grade_on))
 
         await channel.send_text(
             sender_id,
@@ -1056,3 +1067,119 @@ def _chunk_text(s: str, size: int) -> list[str]:
     if cur:
         chunks.append(cur)
     return chunks or [""]
+
+
+# ==============================================================================
+# COMPONENTE DE NOTA (Fase 2, Modelo C — GRADE_COMPONENT_ENABLED, opt-in/turma)
+# ⚠️ O ponto mais sensível: peso ≤ 10%, só adiciona, por esforço/threshold,
+# fórmula transparente, anti-gaming aplicado ANTES (week_xp já exclui suspect).
+# ==============================================================================
+
+async def run_set_grade_component_command(channel, sender_id: str, class_query: str, extra: str) -> None:
+    """/nota_engajamento_[turma]_[peso]_[meta] (ou _off) — opt-in do Modelo C.
+
+    O sistema FORÇA o teto de peso (`MAX_GRADE_WEIGHT_PCT`) e devolve a fórmula
+    EXATA que os alunos verão (transparência é requisito). Determinístico."""
+    if not gamification_on() or not settings.GRADE_COMPONENT_ENABLED:
+        return
+    try:
+        from src.workers.reading_commands import _resolve_teacher_and_class
+        max_weight = grade_logic.MAX_GRADE_WEIGHT_PCT
+
+        async with AsyncSessionLocal() as session:
+            teacher, klass = await _resolve_teacher_and_class(session, channel, sender_id, class_query)
+            if not teacher:
+                await channel.send_text(sender_id, M.CMD_TEACHER_NOT_FOUND)
+                return
+            if not klass:
+                await channel.send_text(sender_id, M.CMD_CLASS_NOT_FOUND.format(class_query=class_query))
+                return
+            class_id, class_name = klass[0], klass[1]
+
+            arg = (extra or "").strip().lower()
+            if arg in ("off", "desligar", "0"):
+                await session.execute(
+                    text('''UPDATE "Classes" SET grade_weight_pct = NULL, weekly_xp_goal = NULL,
+                                updated_at = CURRENT_TIMESTAMP WHERE id = :cid'''),
+                    {"cid": class_id},
+                )
+                await session.commit()
+                await channel.send_text(sender_id, M.GRADE_DISABLED_OK.format(class_name=class_name))
+                return
+
+            parts = arg.replace(" ", "").split("_")
+            if len(parts) != 2:
+                await channel.send_text(sender_id, M.GRADE_SET_USAGE.format(max_weight=max_weight))
+                return
+            try:
+                weight = float(parts[0].replace("%", "").replace(",", "."))
+                goal = int(parts[1])
+            except ValueError:
+                await channel.send_text(sender_id, M.GRADE_INVALID_VALUES)
+                return
+            if weight <= 0 or goal <= 0:
+                await channel.send_text(sender_id, M.GRADE_INVALID_VALUES)
+                return
+
+            capped = grade_logic.clamp_weight(weight)
+            await session.execute(
+                text('''UPDATE "Classes" SET grade_weight_pct = :w, weekly_xp_goal = :g,
+                            updated_at = CURRENT_TIMESTAMP WHERE id = :cid'''),
+                {"w": capped, "g": goal, "cid": class_id},
+            )
+            await session.commit()
+
+        # weight legível (sem casas se inteiro).
+        weight_label = int(capped) if float(capped).is_integer() else capped
+        if capped < weight:
+            await channel.send_text(sender_id, M.GRADE_WEIGHT_CAPPED.format(max_weight=max_weight))
+        await channel.send_text(sender_id, M.GRADE_SET_CONFIRM.format(
+            class_name=class_name, goal=goal, weight=weight_label))
+        track_event("grade_component_set", {"class_id": class_id, "weight": capped, "goal": goal})
+    except Exception as e:
+        logger.error("set_grade_component_failed", error=str(e)[:300])
+        await channel.send_text(sender_id, f"❌ Erro ao configurar componente de nota: {str(e)[:100]}")
+
+
+async def run_my_grade_command(channel, sender_id: str) -> None:
+    """/minha_nota — transparência total do componente de nota (Modelo C)."""
+    if not gamification_on() or not settings.GRADE_COMPONENT_ENABLED:
+        return
+    try:
+        query_col = channel.get_user_query_column()
+        week_id = current_week_id()
+        async with AsyncSessionLocal() as session:
+            row = (await session.execute(
+                text(f'''SELECT s.id, cl.course_id, cl.grade_weight_pct AS weight, cl.weekly_xp_goal AS goal
+                         FROM "Students" s
+                         JOIN "StudentEnrollment" se ON se.student_id = s.id
+                         JOIN "Classes" cl ON cl.id = se.class_id
+                         WHERE s.{query_col} = :sid AND s.is_active = true
+                           AND cl.grade_weight_pct IS NOT NULL AND cl.weekly_xp_goal IS NOT NULL
+                         ORDER BY se.created_at LIMIT 1'''),
+                {"sid": sender_id},
+            )).fetchone()
+            if not row:
+                await channel.send_text(sender_id, M.MY_GRADE_NONE)
+                return
+            week_xp = (await session.execute(
+                text('''SELECT COALESCE(SUM(CASE WHEN xp_suspect = false THEN xp_awarded ELSE 0 END), 0)
+                        FROM "StudentInteractions"
+                        WHERE student_id = :sid AND interaction_type = 'xp_event'
+                          AND xp_week_id = :wk AND course_id = :cid'''),
+                {"sid": row.id, "wk": week_id, "cid": row.course_id},
+            )).scalar() or 0
+
+        weight = float(row.weight)
+        goal = int(row.goal)
+        week_xp = int(week_xp)
+        pct = round(grade_logic.engagement_fraction(week_xp, goal) * 100)
+        points = grade_logic.grade_points(week_xp, goal, weight)
+        gap = grade_logic.xp_to_full(week_xp, goal)
+        remaining = M.MY_GRADE_FULL if gap == 0 else M.MY_GRADE_REMAINING.format(gap=gap)
+        weight_label = int(weight) if weight.is_integer() else weight
+        await channel.send_text(sender_id, M.MY_GRADE_BODY.format(
+            goal=goal, week_xp=week_xp, pct=pct, points=points,
+            weight=weight_label, remaining=remaining))
+    except Exception as e:
+        logger.error("my_grade_failed", error=str(e)[:300])

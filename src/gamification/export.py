@@ -25,16 +25,31 @@ class EngagementRecord:
     reading_sections: int
     streak: int
     week_xp: int
+    # Componente de nota (Fase 2, Modelo C). None = turma é Modelo A (sem coluna).
+    grade_points: float | None = None
 
 
-def build_engagement_export_rows(records: list[EngagementRecord]) -> list[list[str]]:
-    """Cabeçalho + uma linha por aluno (tudo string, pronto p/ CSV/Sheets)."""
-    rows: list[list[str]] = [list(EXPORT_HEADER)]
+# Coluna extra quando a turma é Modelo C (engajamento como % da nota).
+GRADE_COLUMN = "Nota engajamento (pts)"
+
+
+def build_engagement_export_rows(
+    records: list[EngagementRecord], *, include_grade: bool = False
+) -> list[list[str]]:
+    """Cabeçalho + uma linha por aluno (tudo string, pronto p/ CSV/Sheets).
+
+    `include_grade` acrescenta a coluna do componente de nota (Modelo C).
+    """
+    header = list(EXPORT_HEADER) + ([GRADE_COLUMN] if include_grade else [])
+    rows: list[list[str]] = [header]
     for r in records:
-        rows.append([
+        row = [
             r.name, str(r.days_active), str(r.quizzes), str(r.srs_reviews),
             str(r.reading_sections), str(r.streak), str(r.week_xp),
-        ])
+        ]
+        if include_grade:
+            row.append("" if r.grade_points is None else str(r.grade_points))
+        rows.append(row)
     return rows
 
 

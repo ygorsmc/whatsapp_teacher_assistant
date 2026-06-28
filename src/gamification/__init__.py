@@ -13,6 +13,9 @@ I/O (escrita do ledger, envio de mensagem, batch semanal) mora em
 Mestre OFF (`GAMIFICATION_ENABLED=false`) ⇒ nada disto é chamado pelos workers.
 """
 
-from . import xp, anti_gaming, streak, badges, pseudonyms, leaderboard, export
+from . import xp, anti_gaming, streak, badges, pseudonyms, leaderboard, export, grade
 
-__all__ = ["xp", "anti_gaming", "streak", "badges", "pseudonyms", "leaderboard", "export"]
+__all__ = [
+    "xp", "anti_gaming", "streak", "badges", "pseudonyms",
+    "leaderboard", "export", "grade",
+]
