@@ -6,11 +6,15 @@ from typing import Any, Mapping
 from fastapi import Response
 from src.shared.config import settings
 from src.channel.interfaces import IMessagingChannel, InboundMessage
+from src.channel.markdown import to_whatsapp_markdown
 
 class WhatsAppChannel(IMessagingChannel):
     """Implementação de canal para WhatsApp Cloud API."""
 
     channel_name = "whatsapp"
+    # Corpo de mensagem interativa (botões/lista): limite RÍGIDO da Meta. Acima
+    # disso a API rejeita com 400 — o excedente vai como send_text antes.
+    INTERACTIVE_BODY_LIMIT = 1024
 
     def __init__(self):
         self.api_url = settings.WHATSAPP_API_URL
@@ -60,6 +64,7 @@ class WhatsAppChannel(IMessagingChannel):
         return chunks
 
     async def send_text(self, user_id: str, text: str, reply_to: str | None = None) -> dict:
+        text = to_whatsapp_markdown(text)
         chunks = self._chunk_text(text)
         last_response = {}
         for i, chunk in enumerate(chunks):
@@ -87,6 +92,13 @@ class WhatsAppChannel(IMessagingChannel):
     async def send_buttons(self, user_id: str, body: str, buttons: list[dict], footer: str = "") -> dict:
         if len(buttons) > 3:
             raise ValueError("Reply Buttons suportam no máximo 3 opções no WhatsApp")
+
+        body = to_whatsapp_markdown(body)
+        if len(body) > self.INTERACTIVE_BODY_LIMIT:
+            # Corpo > 1024 (a Meta rejeita): manda o conteúdo completo como texto
+            # e deixa os botões com um prompt curto. Nada se perde.
+            await self.send_text(user_id, body)
+            body = "👇 Escolha uma opção:"
 
         message: dict[str, Any] = {
             "messaging_product": "whatsapp",
@@ -116,6 +128,26 @@ class WhatsAppChannel(IMessagingChannel):
         if total_rows > 10:
             raise ValueError("List Messages suportam no máximo 10 itens no WhatsApp")
 
+        # Trunca aos limites RÍGIDOS da Meta (senão a API rejeita com 400):
+        # título de seção/linha ≤ 24, descrição ≤ 72.
+        safe_sections: list[dict[str, Any]] = []
+        for s in sections:
+            rows = []
+            for r in s.get("rows", []):
+                row: dict[str, Any] = {"id": r["id"], "title": (r.get("title") or "")[:24]}
+                if r.get("description"):
+                    row["description"] = r["description"][:72]
+                rows.append(row)
+            section: dict[str, Any] = {"rows": rows}
+            if s.get("title"):
+                section["title"] = s["title"][:24]
+            safe_sections.append(section)
+
+        body = to_whatsapp_markdown(body)
+        if len(body) > self.INTERACTIVE_BODY_LIMIT:
+            await self.send_text(user_id, body)
+            body = "👇 Escolha uma opção:"
+
         message: dict[str, Any] = {
             "messaging_product": "whatsapp",
             "to": user_id,
@@ -125,7 +157,7 @@ class WhatsAppChannel(IMessagingChannel):
                 "body": {"text": body},
                 "action": {
                     "button": button_text[:20],
-                    "sections": sections
+                    "sections": safe_sections
                 }
             }
         }

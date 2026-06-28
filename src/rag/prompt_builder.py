@@ -5,6 +5,7 @@ from src.db.models.user import Teacher, Student
 from src.shared.config import settings
 from src.shared.constants.prompts import (
     SYSTEM_PROMPT_TEMPLATE,
+    OUTPUT_FORMATTING_DIRECTIVE,
     LANGUAGE_TUTOR_PERSONA,
     L1_SAFETY_DIRECTIVE,
     MATH_REASONING_DIRECTIVE,
@@ -44,6 +45,11 @@ async def build_system_prompt(teacher: Teacher, student: Student, course_id: str
         subject_text=subject_text,
         out_of_scope=teacher.out_of_scope_message
     )
+
+    # Formatação de saída: dialeto comum a WhatsApp e Telegram (legacy Markdown).
+    # Anexada SEMPRE (não é vertical) — corrige na ORIGEM o caso que a camada de
+    # canal não consegue: *texto* simples virar negrito quando se queria itálico.
+    base_prompt += OUTPUT_FORMATTING_DIRECTIVE
 
     # Vertical de Idiomas (§1.4): único switch de comportamento do bot. SOMENTE
     # com a flag ligada E o curso detectado como de idioma (pelo NOME) anexamos o

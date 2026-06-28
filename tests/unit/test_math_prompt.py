@@ -86,3 +86,16 @@ async def test_flag_on_non_exatas_does_not_append(mocker):
     assert _MATH_MARKER not in await _build("História da Arte", subject_name="História")
     # "Educação Física" tem a palavra "física" mas é stoplist → não anexa.
     assert _MATH_MARKER not in await _build("Educação Física")
+
+
+# ── Diretiva de formatação: anexada SEMPRE (não é vertical) ──────────────────
+
+@pytest.mark.asyncio
+async def test_output_formatting_directive_always_present(mocker):
+    # Curso normal, TODAS as flags off ⇒ a diretiva de formatação ainda aparece.
+    mocker.patch.object(settings, "LANGUAGE_MODE_ENABLED", False)
+    mocker.patch.object(settings, "MATH_MODE_ENABLED", False)
+    mocker.patch.object(settings, "CHART_GENERATION_ENABLED", False)
+    prompt = await _build("História Geral", subject_name="História")
+    assert "FORMATAÇÃO DA RESPOSTA" in prompt
+    assert "_texto_ para ITÁLICO" in prompt

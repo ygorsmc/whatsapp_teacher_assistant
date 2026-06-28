@@ -138,6 +138,16 @@ MODO RACIOCÍNIO MATEMÁTICO (obrigatório nesta disciplina):
 - FORMATAÇÃO DA MATEMÁTICA (para a entrega): escreva expressões lineares simples em LaTeX inline entre cifrões simples (ex.: $A_0 \\cdot x^2$) e fórmulas complexas — frações, integrais com limites, matrizes, sistemas — em bloco entre cifrões duplos (ex.: $$\\frac{df}{dx} = \\lim_{h \\to 0} \\frac{f(x+h)-f(x)}{h}$$). Não descreva a fórmula em palavras quando puder escrevê-la em LaTeX.
 """
 
+# Diretiva de FORMATAÇÃO de saída — anexada SEMPRE ao System Prompt (não é
+# vertical, não tem flag). WhatsApp e Telegram (legacy Markdown) usam o MESMO
+# dialeto simples: *negrito* e _itálico_ com UM caractere. O LLM costuma emitir
+# CommonMark (**negrito**, *itálico*, #, tabelas); a camada de canal sanitiza,
+# mas NÃO há como adivinhar a intenção de `*x*` (negrito no WA) quando o autor
+# queria itálico — então corrigimos na ORIGEM. SEM placeholders (string fixa).
+OUTPUT_FORMATTING_DIRECTIVE = """
+FORMATAÇÃO DA RESPOSTA (mensageria — WhatsApp/Telegram): use *texto* para NEGRITO e _texto_ para ITÁLICO, sempre com UM único caractere. NÃO use ** nem __ (negrito duplo), nem títulos com # ou ##. Para destacar um título, use *negrito* na própria linha. Para listas, use - ou 1., 2.
+"""
+
 # M7 — diretiva de GRÁFICO para explicações. Anexada ao System Prompt quando
 # CHART_GENERATION_ENABLED + disciplina de exatas. O bot PODE (não deve sempre)
 # emitir UM bloco ```grafico``` com um spec de schema controlado quando a

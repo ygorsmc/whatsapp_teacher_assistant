@@ -2,6 +2,7 @@ import pytest
 from src.channel.factory import get_channel
 from src.channel.whatsapp import WhatsAppChannel
 from src.channel.telegram import TelegramChannel
+from src.channel.markdown import to_whatsapp_markdown
 from src.shared.config import settings
 
 def test_channel_factory_whatsapp(mocker):
@@ -89,3 +90,95 @@ async def test_telegram_parse_inbound():
     assert inbound.sender_id == "11223344"
     assert inbound.text == "/start"
     assert inbound.message_id == "678"
+
+
+# ── Adaptador de markdown CommonMark → WhatsApp ──────────────────────────────
+
+def test_md_bold_double_to_single():
+    assert to_whatsapp_markdown("isto é **negrito**") == "isto é *negrito*"
+    assert to_whatsapp_markdown("isto é __negrito__") == "isto é *negrito*"
+
+
+def test_md_heading_to_bold():
+    assert to_whatsapp_markdown("# Título") == "*Título*"
+    assert to_whatsapp_markdown("## Sub") == "*Sub*"
+
+
+def test_md_link_to_text():
+    assert to_whatsapp_markdown("[Google](http://g.com)") == "Google (http://g.com)"
+
+
+def test_md_table_to_monospace():
+    # Tabela vira bloco ``` (monospace) — sem separador, sem linha vazia.
+    out = to_whatsapp_markdown("| A | B |\n|---|---|\n| 1 | 2 |")
+    assert out == "```\nA | B\n1 | 2\n```"
+
+
+def test_md_table_aligns_columns():
+    src = "| Mês | Vendas |\n|---|---|\n| Jan | 120 |\n| Fevereiro | 9 |"
+    out = to_whatsapp_markdown(src)
+    assert out.startswith("```\n") and out.endswith("\n```")
+    assert "Fevereiro | 9" in out                 # coluna 0 com largura de "Fevereiro"
+    # Todas as linhas alinham o pipe na MESMA coluna (prova do alinhamento).
+    rows = [ln for ln in out.strip("`").strip().split("\n") if "|" in ln]
+    assert len({ln.index("|") for ln in rows}) == 1
+
+
+def test_md_non_table_pipes_untouched():
+    # Linha com `|` que NÃO é tabela (sem separador) fica intacta.
+    assert to_whatsapp_markdown("opção a | opção b") == "opção a | opção b"
+
+
+def test_md_preserves_existing_whatsapp_markup():
+    # *x* e _y_ simples (dialeto WA / copy do projeto) NÃO podem ser tocados.
+    src = "Olá *negrito* e _itálico_ e `código`"
+    assert to_whatsapp_markdown(src) == src
+
+
+def test_md_idempotent():
+    once = to_whatsapp_markdown("**a**\n# T\nfim")
+    assert to_whatsapp_markdown(once) == once
+
+
+# ── Blindagem dos limites da Meta (botões/lista) ─────────────────────────────
+
+@pytest.mark.asyncio
+async def test_send_list_truncates_long_row(mocker):
+    ch = WhatsAppChannel()
+    captured = {}
+
+    async def fake_send(msg):
+        captured["msg"] = msg
+        return {}
+
+    mocker.patch.object(ch, "_send_request", side_effect=fake_send)
+    await ch.send_list("123", "corpo", "Ver", [
+        {"title": "S" * 40, "rows": [{"id": "r1", "title": "T" * 40, "description": "D" * 100}]}
+    ])
+    section = captured["msg"]["interactive"]["action"]["sections"][0]
+    row = section["rows"][0]
+    assert len(section["title"]) == 24
+    assert len(row["title"]) == 24
+    assert len(row["description"]) == 72
+
+
+@pytest.mark.asyncio
+async def test_send_buttons_overflows_long_body(mocker):
+    ch = WhatsAppChannel()
+    captured = {}
+    sent_texts = []
+
+    async def fake_send(msg):
+        captured["msg"] = msg
+        return {}
+
+    async def fake_text(uid, txt, reply_to=None):
+        sent_texts.append(txt)
+        return {}
+
+    mocker.patch.object(ch, "_send_request", side_effect=fake_send)
+    mocker.patch.object(ch, "send_text", side_effect=fake_text)
+    big = "x" * 1500
+    await ch.send_buttons("123", big, [{"id": "b1", "title": "OK"}])
+    assert sent_texts and len(sent_texts[0]) == 1500   # corpo completo foi como texto
+    assert len(captured["msg"]["interactive"]["body"]["text"]) <= 1024
