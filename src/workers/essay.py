@@ -164,6 +164,14 @@ async def correct_essay(channel, sender_id: str, student_context: dict, media_id
         )
         await session.commit()
 
+    # Gamificação (Fase 0) — redação enviada acumula XP em silêncio (alto esforço).
+    # Isolado; flag OFF ⇒ no-op.
+    try:
+        from src.workers.gamification import award_xp
+        await award_xp(student.id, course.id, "essay")
+    except Exception as e:
+        logger.error("gamification_essay_hook_failed", error=str(e)[:200])
+
     track_event("essay_corrected", {
         "student_id": student.id, "course_id": course.id,
         "chars": len(essay_text), "has_rubric": bool(rubric),

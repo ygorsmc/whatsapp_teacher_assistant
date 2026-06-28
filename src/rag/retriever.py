@@ -222,9 +222,20 @@ async def _find_linked_scope(
 
 
 def _build_context(hits: list[RetrievedHit]) -> str:
-    """Formata os chunks com citação rastreável (fonte | aula | seção)."""
+    """Formata os chunks com citação rastreável (fonte | aula | seção).
+    Reordena cronologicamente (por arquivo e índice) para garantir que o LLM 
+    leia o material na sequência pedagógica correta."""
+    
+    def get_sort_key(hit: RetrievedHit):
+        payload = hit.payload or {}
+        source = payload.get("source", "")
+        chunk_idx = payload.get("chunk_index", 0)
+        return (source, chunk_idx)
+        
+    sorted_hits = sorted(hits, key=get_sort_key)
+    
     blocks = []
-    for hit in hits:
+    for hit in sorted_hits:
         payload = hit.payload or {}
         if "content" not in payload:
             continue

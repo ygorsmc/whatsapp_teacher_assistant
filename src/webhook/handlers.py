@@ -17,7 +17,7 @@ from src.shared.constants.messages import (
 )
 from src.shared.constants.commands import (
     MANAGEMENT_COMMAND_REGEX, STUDENT_COMMAND_REGEX, ACTIVATION_CODE_REGEX,
-    GUARDIAN_REVOKE_REGEX,
+    GUARDIAN_REVOKE_REGEX, GAMIFICATION_STUDENT_COMMANDS,
 )
 
 from src.channel.interfaces import IMessagingChannel, InboundMessage
@@ -252,6 +252,13 @@ async def _process_message(msg: InboundMessage, channel: IMessagingChannel):
             # rotulamos e enfileiramos para o command_worker. Qualquer outro
             # comando de aluno continua rejeitado na borda, como sempre.
             student_match = STUDENT_COMMAND_REGEX.match(msg.text.strip())
+            # Gamificação: /meu_ranking · /conquistas · /ocultar_ranking só contam
+            # como comando com o MESTRE ON — flag OFF ⇒ tratados como não-comando
+            # (ERROR_UNAUTHORIZED), preservando o byte-idêntico de hoje.
+            if (student_match
+                    and student_match.group("cmd").lower() in GAMIFICATION_STUDENT_COMMANDS
+                    and not settings.GAMIFICATION_ENABLED):
+                student_match = None
             if student_match:
                 await get_queue().enqueue("command_messages", {
                     "sender_id": sender_id,

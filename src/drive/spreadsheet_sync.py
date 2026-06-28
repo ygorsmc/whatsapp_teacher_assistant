@@ -411,11 +411,40 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 classes_sem_professor.add(f"{course_name} / {class_name}")
 
             class_id = generate_id("cls", f"{course_id}_{class_name}")
+            
+            def _calculate_elapsed_lessons(start: date, schedule: dict[str, str], target_dt: datetime) -> int:
+                if not schedule:
+                    return 0
+                schedules = []
+                for wd_str, time_str in schedule.items():
+                    try:
+                        t = datetime.strptime(time_str[:5], "%H:%M").time()
+                        schedules.append((int(wd_str), t))
+                    except ValueError:
+                        pass
+                
+                elapsed = 0
+                curr_date = start
+                target_date = target_dt.date()
+                target_time = target_dt.time()
+                
+                while curr_date <= target_date:
+                    wd = curr_date.weekday()
+                    for sched_wd, sched_time in schedules:
+                        if wd == sched_wd:
+                            if curr_date < target_date or (curr_date == target_date and target_time >= sched_time):
+                                elapsed += 1
+                    curr_date += timedelta(days=1)
+                return elapsed
+
             current_lesson = 1
             if start_date_obj:
                 local_tz = timezone(timedelta(hours=settings.TIMEZONE_OFFSET_HOURS))
-                if start_date_obj > datetime.now(local_tz).date():
+                now_local = datetime.now(local_tz)
+                if start_date_obj > now_local.date():
                     current_lesson = 0
+                else:
+                    current_lesson = _calculate_elapsed_lessons(start_date_obj, schedule_map, now_local)
 
             await session.execute(
                 text("""
@@ -428,7 +457,15 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                         schedule_map = excluded.schedule_map,
                         is_language = excluded.is_language,
                         proficiency_level = excluded.proficiency_level,
-                        current_lesson_number = CASE WHEN excluded.start_date > CURRENT_DATE THEN 0 ELSE "Classes".current_lesson_number END,
+                        current_lesson_number = CASE 
+                            WHEN excluded.start_date > CURRENT_DATE THEN 0 
+                            WHEN excluded.start_date IS DISTINCT FROM "Classes".start_date THEN excluded.current_lesson_number
+                            ELSE GREATEST("Classes".current_lesson_number, excluded.current_lesson_number)
+                        END,
+                        last_advanced_date = CASE
+                            WHEN excluded.start_date IS DISTINCT FROM "Classes".start_date THEN NULL
+                            ELSE "Classes".last_advanced_date
+                        END,
                         updated_at = CURRENT_TIMESTAMP
                 """),
                 {

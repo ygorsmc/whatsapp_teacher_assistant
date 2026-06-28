@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Integer, Text, UniqueConstraint
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Integer, Numeric, Text, UniqueConstraint
 from sqlalchemy.sql import func
 from src.db.database import Base
 
@@ -69,6 +69,16 @@ class CourseClass(Base):
     # (NULL = não informado). O idioma-alvo é inferido pelo NOME do curso (§1.4).
     is_language = Column(Boolean, nullable=False, default=False, server_default="false")
     proficiency_level = Column(String(20), nullable=True)
+
+    # ── Gamificação (Fase 2 — Engajamento como % da nota, OPT-IN) ─────────────
+    # NULL = Modelo A ("relatório, não nota"): o sistema entrega os dados e a
+    # decisão de virar nota é 100% do professor. Preenchidos só quando o
+    # professor opta pelo Modelo C (GRADE_COMPONENT_ENABLED, a flag de maior
+    # risco — última a ligar). Colunas adicionadas já na Fase 0 (baratas, NULL):
+    #   - grade_weight_pct: peso do engajamento na nota (teto 5–10%).
+    #   - weekly_xp_goal: piso semanal de XP (esforço por threshold, não por rank).
+    grade_weight_pct = Column(Numeric(5, 2), nullable=True)
+    weekly_xp_goal = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

@@ -34,25 +34,37 @@ Com base no conteúdo abaixo, sua missão é realizar um MICRO-LEARNING FOCADO. 
 1. Focar EXCLUSIVAMENTE no seguinte tópico: **{topic}**
 2. {perspective} (máximo 800 caracteres, formatado de forma conversacional com emojis).
 3. Gerar uma lista de 3 PONTOS-CHAVE de fixação relacionados apenas a esse conceito.
-4. Criar um QUIZ de múltipla escolha com EXATAMENTE 3 alternativas (A, B, C) focado em testar a compreensão desse conceito específico. A resposta correta deve exigir que o aluno tenha lido o resumo.
+4. Criar 3 QUIZZES independentes (3 casos de uso práticos distintos) focados em testar a compreensão desse mesmo conceito. Cada quiz DEVE ter EXATAMENTE 3 alternativas (A, B, C) e a resposta correta deve exigir que o aluno tenha lido o resumo.
 
 CONTEÚDO DA AULA:
 {lesson_content}
 
 Responda em português brasileiro. O quiz deve ser desafiador mas justo — o aluno deve conseguir responder corretamente SE leu o resumo com atenção."""
 
-TOPIC_EXTRACTION_PROMPT = """Analise o texto abaixo e extraia TODOS os conceitos/tópicos importantes abordados nele.
-Responda APENAS com a lista dos tópicos, separados por vírgula. Não escreva nenhuma palavra a mais.
+TOPIC_EXTRACTION_PROMPT = """Analise o texto da aula abaixo e extraia os principais conceitos e fundamentos abordados nele.
+
+IMPORTANTE: 
+1. Você DEVE extrair os tópicos na EXATA ordem cronológica/pedagógica em que eles aparecem no texto. O aluno vai aprender esses tópicos de forma sequencial.
+2. Para evitar repetições e granularidade excessiva, AGRUPE conceitos que são muito parecidos ou dependentes em tópicos mais abrangentes (ex: não crie um tópico para 'Regressão Logística' e outro para 'Curva Sigmoide', unifique-os).
+
+Responda APENAS com uma lista dos tópicos finais consolidados, colocando um item por linha, sem numeração:
+Tópico 1
+Tópico 2
+Tópico 3
+
+Não escreva nenhuma palavra a mais. Não use markdown na formatação da lista.
 
 Texto da aula:
 {context}"""
 
-QUIZ_GENERATION_PROMPT = """Com base no conteúdo da aula abaixo, gere uma questão de múltipla escolha para testar o entendimento do aluno.
+QUIZ_GENERATION_PROMPT = """Com base no conteúdo da aula abaixo, gere questões de múltipla escolha para testar o entendimento do aluno.
 
 IMPORTANTE: 
-1. A questão DEVE focar EXCLUSIVAMENTE no seguinte tópico: **{topic}**
-2. A questão DEVE adotar a seguinte abordagem pedagógica: **{perspective}**
-3. A questão DEVE ter EXATAMENTE 3 alternativas (A, B, C). Não crie 4 ou 5 opções.
+1. As questões DEVEM focar EXCLUSIVAMENTE no seguinte tópico: **{topic}**
+2. As questões DEVEM adotar a seguinte abordagem pedagógica: **{perspective}**
+3. Crie EXATAMENTE 3 QUIZZES (3 variações de casos de uso distintos para o mesmo conceito). Cada questão DEVE ter EXATAMENTE 3 alternativas (A, B, C). Não crie 4 ou 5 opções.
+4. As alternativas incorretas (distratores) DEVEM ser altamente plausíveis. NÃO utilize palavras extremistas ou absolutistas nas alternativas erradas (como 'exclusivamente', 'apenas', 'sempre', 'independentemente') e NUNCA crie cenários obviamente absurdos. As opções incorretas devem soar profissionais, lógicas e utilizar jargões reais do tema abordado, representando erros sutis de interpretação do texto.
+5. A questão (enunciado) DEVE ser 100% autossuficiente. Como a questão será reaproveitada meses depois em uma revisão espaçada (sem o resumo), NUNCA utilize referências textuais ou temporais como "discutido acima", "como vimos no resumo", "neste texto" ou "na aula de hoje". Contextualize a pergunta diretamente no tema de forma direta e atemporal.
 
 Conteúdo da aula:
 {context}
@@ -190,14 +202,14 @@ O aluno {student_name} acabou de ler a *{section_label}* do material "{material_
 Com base no conteúdo abaixo (trecho da seção), sua missão é gerar um CHECK-IN DE LEITURA:
 1. Um GUIA DE LEITURA curto (máximo 500 caracteres, conversacional, com emojis) focado EXCLUSIVAMENTE no seguinte tópico desta seção: **{topic}**. IMPORTANTE: o guia NÃO substitui a leitura — desperte curiosidade e aponte de volta para o material (ex: "veja os detalhes na própria seção"). NUNCA copie trechos literais longos da obra (citações de no máximo 1 frase curta).
 2. Uma lista de 3 PONTOS-CHAVE de fixação sobre esse tópico.
-3. Um QUIZ de múltipla escolha com EXATAMENTE 3 alternativas (A, B, C) que teste a compreensão do TRECHO ESPECÍFICO da {section_label} — nunca do livro inteiro. {perspective}
+3. Criar 3 QUIZZES independentes (3 casos de uso práticos distintos) de múltipla escolha com EXATAMENTE 3 alternativas (A, B, C) que testem a compreensão do TRECHO ESPECÍFICO da {section_label} — nunca do livro inteiro. {perspective}
 
 Se o conteúdo for de disciplina exata (cálculos), a questão deve ter valores numéricos verificáveis: resolva o cálculo passo a passo antes de definir a alternativa correta.
 
 CONTEÚDO DA SEÇÃO:
 {lesson_content}
 
-Responda em português brasileiro. O quiz deve ser curto e justo — o aluno que LEU a seção deve acertar."""
+Responda em português brasileiro. Os quizzes devem ser curtos e justos — o aluno que LEU a seção deve acertar."""
 
 # ==========================================
 # H2.2 — CORREÇÃO DISSERTATIVA (rubrica do professor)

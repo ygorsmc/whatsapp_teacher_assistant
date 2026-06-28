@@ -891,6 +891,13 @@ async def build_reading_rag_addons(
                 "\nERRATA OFICIAL desta seção (cadastrada pelo professor — mencione ao aluno):"
                 f"{errata_note}\n"
             )
+            # Gamificação (Fase 1) — 🔍 Caçador de Erratas (secreta): encarou um
+            # trecho com errata viva. Silencioso (aparece em /conquistas). Isolado.
+            try:
+                from src.workers.gamification import award_secret_badge
+                await award_secret_badge(student_id, course_id, "cacador_erratas", teacher_id=teacher_id)
+            except Exception as e:
+                logger.error("gamification_errata_badge_failed", error=str(e)[:200])
 
         return {"context": book_context, "directives": directives, "rate_limited": False}
     except Exception as e:

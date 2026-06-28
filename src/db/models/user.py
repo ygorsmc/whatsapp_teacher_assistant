@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, Text, ForeignKey, Index
+from sqlalchemy import Column, String, Boolean, DateTime, Date, Text, ForeignKey, Index, Integer
 from sqlalchemy.sql import func
 from src.db.database import Base
 
@@ -49,6 +49,25 @@ class Student(Base):
     # F9 (Quality Rating Meta): opt-out de mensagens proativas ("Envie SAIR").
     # As filas proativas respeitam esta flag; default false = comportamento atual.
     messaging_opted_out = Column(Boolean, default=False, server_default="false", nullable=False)
+
+    # ── Gamificação (Fase 0) — streak de engajamento (número PESSOAL) ─────────
+    # Streak "guarda-chuva" por aluno: conta QUALQUER ato que gere XP (quiz, SRS,
+    # microdose, dúvida, redação/voz). Mora aqui (não em ReadingPlans, que é por
+    # livro) porque é exibido só ao próprio aluno ⇒ sem vazamento entre tenants.
+    # Com STREAK_ENABLED OFF, nunca são escritas ⇒ comportamento idêntico.
+    #   - engagement_streak: dias consecutivos ativos.
+    #   - engagement_streak_best: recorde (PERSISTE mesmo ao quebrar).
+    #   - streak_shields: escudos guardados (ganhos a cada 7 dias, máx. 2);
+    #     um dia perdido consome 1 e preserva o streak — sem culpa, sem penalidade.
+    #   - streak_last_active_date: último dia (BRT) com ato válido.
+    engagement_streak = Column(Integer, nullable=False, default=0, server_default="0")
+    engagement_streak_best = Column(Integer, nullable=False, default=0, server_default="0")
+    streak_shields = Column(Integer, nullable=False, default=0, server_default="0")
+    streak_last_active_date = Column(Date, nullable=True)
+    # Opt-out SÓ do ranking (≠ `messaging_opted_out`, que silencia TUDO via "sair").
+    # Acionado por /ocultar_ranking: o aluno segue ganhando XP/streak/badges
+    # (privados), mas não aparece em coorte nenhuma nem recebe a seção de liga.
+    ranking_opted_out = Column(Boolean, default=False, server_default="false", nullable=False)
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())

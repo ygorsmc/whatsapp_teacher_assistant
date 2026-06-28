@@ -82,7 +82,19 @@ class TelegramChannel(IMessagingChannel):
                 "inline_keyboard": inline_keyboard
             }
         }
-        return await self._send_request("sendMessage", payload)
+        
+        try:
+            return await self._send_request("sendMessage", payload)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 400:
+                logger.warning(
+                    "telegram_markdown_fallback_buttons",
+                    user_id=user_id,
+                    detail=e.response.text[:300],
+                )
+                payload.pop("parse_mode", None)
+                return await self._send_request("sendMessage", payload)
+            raise
 
     async def send_list(self, user_id: str, body: str, button_text: str, sections: list[dict], footer: str = "") -> dict:
         # Telegram não tem "List Message", emulamos com botões inline verticais.
@@ -114,7 +126,19 @@ class TelegramChannel(IMessagingChannel):
                 "inline_keyboard": inline_keyboard
             }
         }
-        return await self._send_request("sendMessage", payload)
+        
+        try:
+            return await self._send_request("sendMessage", payload)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 400:
+                logger.warning(
+                    "telegram_markdown_fallback_list",
+                    user_id=user_id,
+                    detail=e.response.text[:300],
+                )
+                payload.pop("parse_mode", None)
+                return await self._send_request("sendMessage", payload)
+            raise
 
     async def send_template(self, user_id: str, template_name: str, params: list[str]) -> dict:
         # O Telegram não usa templates pre-aprovados pagos. 

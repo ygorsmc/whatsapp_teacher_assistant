@@ -114,6 +114,7 @@ async def process_pending_schedules():
                   AND ss.is_active = true
                   AND s.is_active = true
                   AND c.is_active = true
+                  AND cl.current_lesson_number > 0
                   {consent_clause}
                 FOR UPDATE OF ss SKIP LOCKED
             """),
@@ -272,16 +273,17 @@ async def process_pending_schedules():
 
 
 async def advance_classes_pointer():
-    """Verifica e avança as turmas com base na data de hoje e os dias de aula marcados na planilha."""
+    """Verifica e avança as turmas com base na data de hoje e o horário marcado na planilha, disparando a Sessão Mista."""
     import json
     brt = timezone(timedelta(hours=-3))
-    hoje = datetime.now(brt).date()
-    hoje_str = hoje.isoformat()
-    ontem = hoje - timedelta(days=1)
-    ontem_weekday = str(ontem.weekday()) # 0=Monday, 6=Sunday
+    agora = datetime.now(brt)
+    hoje_str = agora.date().isoformat()
+    weekday = str(agora.weekday()) # 0=Monday, 6=Sunday
+    
+    from src.queue.factory import get_queue
     
     async with AsyncSessionLocal() as session:
-        result = await session.execute(text('SELECT id, start_date, schedule_map, current_lesson_number, last_advanced_date FROM \"Classes\"'))
+        result = await session.execute(text('SELECT id, course_id, start_date, schedule_map, current_lesson_number, last_advanced_date FROM "Classes"'))
         classes = result.fetchall()
         
         advanced_count = 0
@@ -304,34 +306,54 @@ async def advance_classes_pointer():
             try:
                 smap = json.loads(schedule_map_str)
             except Exception:
-                smap = {}
-                
-            if last_adv_str and str(last_adv_str)[:10] == hoje_str:
                 continue
                 
-            new_lesson = current_lesson
+            # Compara last_advanced_date convertida para BRT com a data de hoje em BRT
+            if last_adv_str:
+                last_adv_dt = last_adv_str if isinstance(last_adv_str, datetime) else datetime.fromisoformat(str(last_adv_str))
+                if last_adv_dt.tzinfo is None:
+                    last_adv_dt = last_adv_dt.replace(tzinfo=timezone.utc)
+                last_adv_brt = last_adv_dt.astimezone(brt).date().isoformat()
+                if last_adv_brt == hoje_str:
+                    continue
             
-            # Condicional de Inicio: Se hoje é o dia de começar e estava no 0, vai pra Aula 1.
-            if current_lesson == 0 and start_date_iso == hoje_str:
-                new_lesson = 1
-            # Se a turma já iniciou, avança no dia SEGUINTE à aula
-            elif current_lesson >= 1:
-                if ontem_weekday in smap:
-                    new_lesson = current_lesson + 1
-                    
-            if new_lesson == current_lesson:
+            if weekday not in smap:
                 continue
-            
-            await session.execute(
-                text("""
-                    UPDATE "Classes"
-                    SET current_lesson_number = :num, last_advanced_date = :hoje, updated_at = CURRENT_TIMESTAMP
-                    WHERE id = :cid
-                """),
-                {"num": new_lesson, "hoje": hoje, "cid": class_id}
-            )
-            advanced_count += 1
-            logger.info("class_pointer_advanced_auto", class_id=class_id, old_lesson=current_lesson, new_lesson=new_lesson)
+                
+            class_time_str = smap[weekday]
+            try:
+                class_time = datetime.strptime(class_time_str[:5], "%H:%M").time()
+            except ValueError:
+                continue
+                
+            if agora.time() >= class_time:
+                new_lesson = current_lesson + 1 if current_lesson >= 1 else 1
+                
+                # Grava last_advanced_date em UTC explicitamente (offset-naive para asyncpg)
+                now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+                await session.execute(
+                    text("""
+                        UPDATE "Classes"
+                        SET current_lesson_number = :num, last_advanced_date = :adv_date, updated_at = :adv_date
+                        WHERE id = :cid
+                    """),
+                    {"num": new_lesson, "cid": class_id, "adv_date": now_utc}
+                )
+                advanced_count += 1
+                logger.info("class_pointer_advanced_auto", class_id=class_id, old_lesson=current_lesson, new_lesson=new_lesson)
+                
+                # Dispara o evento de Sessão Mista para gerar e enfileirar os quizzes da aula
+                await get_queue().enqueue(
+                    queue="command_messages",
+                    payload={
+                        "action": "class_session_start",
+                        "class_id": class_id,
+                        "course_id": c.course_id,
+                        "lesson_number": new_lesson,
+                        "correlation_id": f"sess_{class_id}_{new_lesson}_{int(agora.timestamp())}"
+                    },
+                    session_id=class_id
+                )
             
         if advanced_count > 0:
             await session.commit()
@@ -399,27 +421,42 @@ async def process_window_extensions():
 
                 if not already_warned:
                     logger.info("sending_window_extension_warning", student_id=student.student_id, idle=str(idle_duration))
-                    
-                    body_text = (
-                        "⏰ *Aviso Importante*\n\n"
-                        "Para que eu possa continuar enviando seus quizzes e dicas sem interrupções "
-                        "nos próximos horários, preciso que você interaja comigo!\n\n"
-                        "Quer aproveitar e responder um quiz rápido agora ou prefere deixar para o próximo agendamento?"
-                    )
-                    
+
                     class_id = student.class_id
-                    buttons = [
-                        {"id": f"review_accept_{class_id}", "title": "Responder Quiz Agora"},
-                        {"id": "window_warning_later", "title": "Responder Depois"}
-                    ]
-                    
+                    footer = "Mantenha seus estudos em dia!"
+
+                    # Gamificação (Fase 0) — REÚSO do slot 23:30 (zero slot novo):
+                    # vira "salvar streak" para quem tem sequência ≥ 3 e ainda não
+                    # agiu hoje. Flag OFF ⇒ None ⇒ cópia padrão byte-idêntica.
+                    streak_copy = None
+                    try:
+                        from src.workers.gamification import maybe_streak_save_copy
+                        streak_copy = await maybe_streak_save_copy(session, student.student_id, class_id)
+                    except Exception as e:
+                        logger.error("streak_save_copy_failed", error=str(e)[:200])
+
+                    if streak_copy:
+                        body_text, buttons = streak_copy
+                        footer = "Sua sequência conta! 🔥"
+                    else:
+                        body_text = (
+                            "⏰ *Aviso Importante*\n\n"
+                            "Para que eu possa continuar enviando seus quizzes e dicas sem interrupções "
+                            "nos próximos horários, preciso que você interaja comigo!\n\n"
+                            "Quer aproveitar e responder um quiz rápido agora ou prefere deixar para o próximo agendamento?"
+                        )
+                        buttons = [
+                            {"id": f"review_accept_{class_id}", "title": "Responder Quiz Agora"},
+                            {"id": "window_warning_later", "title": "Responder Depois"}
+                        ]
+
                     # No Telegram, usamos list / buttons emulados
                     # No WhatsApp, max 3 botões usa send_buttons
                     await channel.send_buttons(
                         user_id=sender_id,
                         body=body_text,
                         buttons=buttons,
-                        footer="Mantenha seus estudos em dia!"
+                        footer=footer
                     )
                     
                     from uuid import uuid4
@@ -458,6 +495,9 @@ async def scheduler_loop():
     # de flag própria (no-op com a flag off; padrão da casa).
     from src.workers.guardian_consent import process_guardian_consent_requests
     from src.workers.retention import run_data_retention
+    # Gamificação (Fase 0): snapshot da liga + resumo semanal (1 template/semana).
+    # Atrás de flag própria (no-op com a flag off; padrão da casa).
+    from src.workers.gamification import process_weekly_leaderboard
 
     while True:
         try:
@@ -478,6 +518,7 @@ async def scheduler_loop():
             ("proficiency_report", process_monthly_proficiency_report), # F6 idiomas (1x/mês, flag)
             ("guardian_consent", process_guardian_consent_requests),# LGPD P1.1 (flag)
             ("data_retention", run_data_retention),                 # LGPD P1.3 (1x/mês, flag)
+            ("weekly_leaderboard", process_weekly_leaderboard),     # Gamificação (1x/semana, flag)
         ):
             try:
                 await step()

@@ -247,6 +247,50 @@ class Settings(BaseSettings):
     DEFAULT_NATIVE_LANGUAGE: str = Field(default="pt-BR")  # L1 do aluno (rede de segurança)
     DEFAULT_CEFR_LEVEL: str = Field(default="A2")
 
+    # ── Gamificação (Fase 0) — TUDO OFF por padrão ───────────────────────────
+    # Esquema: _docs/esquema_gamificacao_whatsapp_teacher_assistant.md
+    # Doc de operações: _docs/docs/GAMIFICATION_OPERATIONS.md
+    # Hierarquia: GAMIFICATION_ENABLED é o MESTRE; OFF ⇒ sistema byte a byte
+    # idêntico ao atual (nenhuma escrita de XP/streak/badge, nenhuma mensagem
+    # gamificada). As granulares só têm efeito com o mestre ON. Cálculo 100%
+    # DETERMINÍSTICO ($0/mensagem) e cada hook roda em try/except próprio (falha
+    # isolada: a liga nunca derruba quiz/revisão/RAG).
+    GAMIFICATION_ENABLED: bool = Field(default=False)         # mestre
+    XP_LEDGER_ENABLED: bool = Field(default=False)            # contagem da mãe-métrica
+    ANTI_GAMING_ENABLED: bool = Field(default=False)          # relâmpago/padrão/teto/farming
+    STREAK_ENABLED: bool = Field(default=False)               # streak de engajamento
+    STREAK_SHIELD_ENABLED: bool = Field(default=False)        # escudos automáticos
+    BADGES_ENABLED: bool = Field(default=False)               # conquistas persistentes
+    SECRET_BADGES_ENABLED: bool = Field(default=False)        # badges de descoberta (Fase 0/1)
+    LEADERBOARD_ENABLED: bool = Field(default=False)          # ranking flat por coorte (semanal)
+    WEEKLY_DIGEST_ENABLED: bool = Field(default=False)        # resumo semanal (1 template/semana)
+    LEAGUES_ENABLED: bool = Field(default=False)              # promoção/rebaixamento (Fase 1)
+    TEACHER_DASHBOARD_ENABLED: bool = Field(default=False)    # /engajamento + export (Fase 1)
+    GRADE_COMPONENT_ENABLED: bool = Field(default=False)      # engajamento como % da nota (Fase 2)
+
+    # Pesos de XP (hipóteses a calibrar pelo eval/A-B, nunca "no feeling").
+    XP_QUIZ_CORRECT: int = Field(default=10)
+    XP_QUIZ_WRONG: int = Field(default=4)        # tentou: não punir o fraco
+    XP_SRS_ONTIME: int = Field(default=8)        # revisão espaçada no prazo
+    XP_READING: int = Field(default=5)           # microdose de leitura concluída
+    XP_RAG_DOUBT: int = Field(default=3)         # dúvida substantiva (🟢/🟡)
+    XP_ESSAY: int = Field(default=12)            # redação enviada (/corrigir)
+    XP_VOICE: int = Field(default=10)            # nota de voz avaliada [idiomas]
+    XP_CONSISTENCY_BONUS: int = Field(default=5) # 1º ato válido do dia (comparecer)
+    XP_DAILY_CAP: int = Field(default=70)        # teto diário de XP competitivo (anti-grind)
+    # Anti-gaming (determinístico; limiares calibráveis por env var).
+    XP_FLASH_ANSWER_SECONDS: float = Field(default=3.0)   # < isso = resposta-relâmpago
+    XP_RAG_DOUBT_DAILY_CAP: int = Field(default=3)        # perguntas-XP/dia (anti-farming)
+    # Leaderboard / coorte.
+    LEADERBOARD_COHORT_SIZE: int = Field(default=30)      # teto da coorte (N-effect)
+    GAMIFICATION_MIN_COHORT: int = Field(default=3)       # < isso não circula placar (LGPD)
+    # Resumo semanal: dia (0=segunda … 6=domingo) e hora (BRT) do disparo.
+    WEEKLY_DIGEST_WEEKDAY: int = Field(default=6)         # domingo
+    WEEKLY_DIGEST_HOUR: int = Field(default=18)           # 18:00 BRT
+    # Ligas (Fase 1): topo que sobe / fundo que desce por coorte na virada semanal.
+    LEAGUE_PROMOTE_TOP: int = Field(default=5)
+    LEAGUE_RELEGATE_BOTTOM: int = Field(default=5)
+
     # Database — Postgres em todo lugar (dev e nuvem) para paridade de ambiente.
     # Default = Postgres local do docker-compose; .env e a nuvem injetam via env var.
     DATABASE_URL: str = Field(default="postgresql+asyncpg://whatsapp:whatsapp_dev_2026@localhost:5432/whatsapp_assistant")

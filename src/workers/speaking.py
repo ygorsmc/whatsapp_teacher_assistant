@@ -202,6 +202,14 @@ async def analyze_speaking(channel, sender_id: str, student_context: dict, media
             # Persistir score não pode derrubar o feedback já entregue ao aluno.
             logger.error("pronunciation_persist_failed", error=str(e)[:300])
 
+        # Gamificação (Fase 0) — nota de voz AVALIADA acumula XP em silêncio
+        # (alto esforço + retrieval ativo). Isolado; flag OFF ⇒ no-op.
+        try:
+            from src.workers.gamification import award_xp
+            await award_xp(student.id, course.id, "voice")
+        except Exception as e:
+            logger.error("gamification_voice_hook_failed", error=str(e)[:200])
+
     track_event("pronunciation_assessed" if score is not None else "speaking_received", {
         "student_id": student.id, "course_id": course.id, "lang": target_lang,
         "has_scores": score is not None,

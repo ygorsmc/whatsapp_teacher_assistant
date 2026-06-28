@@ -159,6 +159,10 @@ class RedisStreamsQueue(IMessageQueue):
                 err_str = str(e)
                 if "Timeout" in err_str:
                     continue
+                if "NOGROUP" in err_str:
+                    logger.warning("redis_nogroup_detected", queue=queue, msg="Recreating consumer group...")
+                    await self._ensure_group(queue)
+                    continue
                 logger.error("redis_consume_error", error=err_str[:500])
                 await asyncio.sleep(5)
 

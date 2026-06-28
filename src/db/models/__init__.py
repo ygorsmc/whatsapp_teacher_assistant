@@ -15,6 +15,7 @@ from .reading import (
     Erratas,
 )
 from .engagement import ClassChallenges, SentinelAlerts, PronunciationAttempts
+from .gamification import WeeklyEngagement, StudentBadges
 from .activation import ActivationKeys, KeyActivations, Rubrics
 
 __all__ = [
@@ -40,6 +41,8 @@ __all__ = [
     "ClassChallenges",
     "SentinelAlerts",
     "PronunciationAttempts",
+    "WeeklyEngagement",
+    "StudentBadges",
     "ActivationKeys",
     "KeyActivations",
     "Rubrics",

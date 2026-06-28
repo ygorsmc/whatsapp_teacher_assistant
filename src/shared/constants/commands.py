@@ -10,13 +10,16 @@ class CommandType:
     SYNC_MATERIALS = "sync_materials"
     HELP = "help"
     LIST_COURSES = "list_courses"
+    LIST_CLASSES = "list_classes"
     LIST_MATERIALS = "list_materials"
     DELETE_MATERIAL = "delete_material"  # /delete_[nº da lista do /listar_materiais]
     UPDATE_LESSON = "update_lesson"
+    ZERO_LESSON = "zero_lesson"
     WAKEUP = "wakeup"
     SEND_QUIZ = "send_quiz"
     # ── Comandos gerenciais (sintaxe explícita /comando_[turma]_[arg]) ──────
     ENGAGEMENT = "engagement"            # /engajamento_[turma]
+    EXPORT_ENGAGEMENT = "export_engagement"  # /exportar_engajamento_[turma] (gamificação F1)
     QUIZ_PERFORMANCE = "quiz_performance"  # /acertos_[turma]
     AT_RISK = "at_risk"                  # /risco_[turma]
     FREQUENT_DOUBTS = "frequent_doubts"  # /duvidas_frequentes_[turma]
@@ -40,12 +43,14 @@ class CommandType:
     MY_PROGRESS = "my_progress"            # /meu_progresso
     FLASHCARDS = "flashcards"              # /flashcards
     PLACEMENT = "placement"                # /nivelamento (F5 — idiomas)
+    # ── Gamificação (Fase 0) — comandos do ALUNO (sob demanda, grátis na janela) ─
+    MY_RANKING = "my_ranking"              # /meu_ranking
+    ACHIEVEMENTS = "achievements"          # /conquistas
+    HIDE_RANKING = "hide_ranking"          # /ocultar_ranking (toggle opt-out só do ranking)
     # ── Horizontes H1-H3 ─────────────────────────────────────────────────────
     CLASS_CHALLENGE = "class_challenge"    # /desafio_[turma]               (H1.1)
     KEY_STATS = "key_stats"                # /chaves_[turma]                (H2.1)
     RUBRIC = "rubric"                      # /rubrica_[turma]_[critérios]   (H2.2)
-    CREATE_CLASS = "create_class"          # /criar_turma_[curso]_[turma]   (H3.1)
-    ADD_STUDENTS = "add_students"          # /adicionar_alunos_[turma]_[lista] (H3.1)
     LEAVE_BOOK = "leave_book"              # /sair_livro (aluno, LGPD)      (H2.1)
     CORRECT_ESSAY = "correct_essay"        # /corrigir (aluno)              (H2.2)
     DELETE_MY_DATA = "delete_my_data"      # /apagar_meus_dados (aluno, LGPD Art. 18)
@@ -65,6 +70,9 @@ COMMAND_ALIASES = {
     ],
     CommandType.LIST_COURSES: [
         "/listar_cursos", "/list_cursos", "/cursos"
+    ],
+    CommandType.LIST_CLASSES: [
+        "/turmas", "/aulas", "/status_turmas", "/listar_turmas"
     ],
     CommandType.LIST_MATERIALS: [
         "/listar_materiais", "/list_materiais", "/materiais"
@@ -98,11 +106,11 @@ COMMAND_ALIASES = {
 #   - No /aviso, a [turma] é o trecho entre o 1º e o 2º "_" (sem underscores);
 #     todo o restante é a mensagem (que PODE conter underscores).
 MANAGEMENT_COMMAND_REGEX = re.compile(
-    r"^/(?P<cmd>engajamento|acertos|risco|duvidas_frequentes|ver_aluno|"
-    r"resetar_aluno|limpar_quizzes|aviso|"
+    r"^/(?P<cmd>exportar_engajamento|engajamento|acertos|risco|duvidas_frequentes|ver_aluno|"
+    r"resetar_aluno|limpar_quizzes|aviso|zerar_aula|"
     r"plano_leitura|simulado|vincular_aula|errata|ativar_capitulos|gabarito|"
     r"mapa_dificuldade|funil_conclusao|corpus_duvidas|"
-    r"desafio|chaves|rubrica|criar_turma|adicionar_alunos|delete)"
+    r"desafio|chaves|rubrica|delete)"
     r"_(?P<arg>.+)$",
     re.IGNORECASE | re.DOTALL,
 )
@@ -115,12 +123,14 @@ _AVISO_SPLIT_REGEX = re.compile(r"^(?P<turma>[^_]+)_(?P<msg>.+)$", re.DOTALL)
 
 _MANAGEMENT_MAP = {
     "engajamento": CommandType.ENGAGEMENT,
+    "exportar_engajamento": CommandType.EXPORT_ENGAGEMENT,
     "acertos": CommandType.QUIZ_PERFORMANCE,
     "risco": CommandType.AT_RISK,
     "duvidas_frequentes": CommandType.FREQUENT_DOUBTS,
     "ver_aluno": CommandType.VIEW_STUDENT,
     "resetar_aluno": CommandType.RESET_STUDENT,
     "limpar_quizzes": CommandType.CLEAR_QUIZ_BANK,
+    "zerar_aula": CommandType.ZERO_LESSON,
     "delete": CommandType.DELETE_MATERIAL,
     "aviso": CommandType.BROADCAST_NOTICE,
     # Addon de Livros
@@ -137,8 +147,6 @@ _MANAGEMENT_MAP = {
     "desafio": CommandType.CLASS_CHALLENGE,
     "chaves": CommandType.KEY_STATS,
     "rubrica": CommandType.RUBRIC,
-    "criar_turma": CommandType.CREATE_CLASS,
-    "adicionar_alunos": CommandType.ADD_STUDENTS,
 }
 
 # Comandos cujo argumento é (turma + arg extra): o split de turma é o mesmo do
@@ -152,8 +160,6 @@ _MULTIARG_COMMANDS = {
     CommandType.ACTIVATE_CHAPTERS,
     CommandType.ANSWER_KEY,
     CommandType.RUBRIC,
-    CommandType.CREATE_CLASS,
-    CommandType.ADD_STUDENTS,
 }
 
 # ==========================================
@@ -163,9 +169,15 @@ _MULTIARG_COMMANDS = {
 # rotear comandos de ALUNOS para a fila `command_messages` dentro do SLA de
 # 200ms. Qualquer outro comando de aluno continua rejeitado na borda.
 STUDENT_COMMAND_REGEX = re.compile(
-    r"^/(?P<cmd>pausar_leitura|retomar_leitura|meu_progresso|flashcards|nivelamento|sair_livro|corrigir|apagar_meus_dados)\s*$",
+    r"^/(?P<cmd>pausar_leitura|retomar_leitura|meu_progresso|flashcards|nivelamento|sair_livro|corrigir|apagar_meus_dados|"
+    r"meu_ranking|conquistas|ocultar_ranking)\s*$",
     re.IGNORECASE,
 )
+
+# Comandos de gamificação na allowlist: só contam como comando quando o MESTRE
+# está ON (a borda checa). Com a flag OFF, a borda os trata como qualquer comando
+# de aluno não reconhecido (byte-idêntico ao de hoje).
+GAMIFICATION_STUDENT_COMMANDS = frozenset({"meu_ranking", "conquistas", "ocultar_ranking"})
 
 _STUDENT_MAP = {
     "pausar_leitura": CommandType.PAUSE_READING,
@@ -176,6 +188,9 @@ _STUDENT_MAP = {
     "sair_livro": CommandType.LEAVE_BOOK,
     "corrigir": CommandType.CORRECT_ESSAY,
     "apagar_meus_dados": CommandType.DELETE_MY_DATA,
+    "meu_ranking": CommandType.MY_RANKING,
+    "conquistas": CommandType.ACHIEVEMENTS,
+    "ocultar_ranking": CommandType.HIDE_RANKING,
 }
 
 # LGPD P1.1 (Art. 14): o RESPONSÁVEL não é usuário do bot — a palavra REVOGAR

@@ -13,6 +13,7 @@ from src.shared.constants.messages import (
     QUIZ_FOOTER_LIST,
     QUIZ_LIST_BUTTON_TEXT,
     QUIZ_LIST_SECTION_TITLE,
+    CLASS_REVIEW_SEPARATOR,
 )
 
 logger = structlog.get_logger(__name__)
@@ -114,3 +115,89 @@ async def send_quiz_to_student(channel, student: dict, quiz: QuizOutput, quiz_ba
             logger.warning("quiz_audio_failed", quiz_id=quiz_id, error=str(e)[:200])
 
     return quiz_id
+
+async def send_existing_quiz(channel, sender_id: str, quiz_row) -> str:
+    """Envia um quiz que já está na tabela PendingQuizzes (fila de Sessão Mista)."""
+    quiz_id = quiz_row.quiz_id
+    alternatives = json.loads(quiz_row.alternatives)
+
+    # Sessão de Aula: o question_text traz "revisão + pergunta" separados pelo
+    # CLASS_REVIEW_SEPARATOR. Enviamos a revisão como TEXTO (que faz chunk) e
+    # deixamos só a pergunta no body interativo — cujo limite no WhatsApp é 1024
+    # chars (o resumo sozinho passava disso e causava 400). Sem o separador
+    # (outros fluxos), o comportamento é o de antes.
+    question_text = quiz_row.question_text
+    if CLASS_REVIEW_SEPARATOR in question_text:
+        review_block, question_text = question_text.split(CLASS_REVIEW_SEPARATOR, 1)
+        await channel.send_text(sender_id, review_block)
+
+    options_text = "\n".join([f"{alt['id']}) {alt['text']}" for alt in alternatives])
+    full_body_text = f"{QUIZ_BODY_PREFIX}{question_text}\n\n{options_text}"
+
+    if len(alternatives) <= 3:
+        buttons = [
+            {"id": f"quiz_{quiz_id}_{alt['id']}", "title": f"Alternativa {alt['id']}"}
+            for alt in alternatives
+        ]
+        await channel.send_buttons(
+            user_id=sender_id,
+            body=full_body_text,
+            buttons=buttons,
+            footer=QUIZ_FOOTER_BUTTONS,
+        )
+    else:
+        rows = [
+            {
+                "id": f"quiz_{quiz_id}_{alt['id']}",
+                "title": f"Alternativa {alt['id']}",
+                "description": "Toque para selecionar",
+            }
+            for alt in alternatives
+        ]
+        await channel.send_list(
+            user_id=sender_id,
+            body=full_body_text,
+            button_text=QUIZ_LIST_BUTTON_TEXT,
+            sections=[{"title": QUIZ_LIST_SECTION_TITLE, "rows": rows}],
+            footer=QUIZ_FOOTER_LIST,
+        )
+
+    await channel.send_buttons(
+        user_id=sender_id,
+        body="Se não quiser responder agora, você pode pular e avançar.",
+        buttons=[{"id": f"quiz_skip_{quiz_id}", "title": "Pular Quiz ⏭️"}]
+    )
+
+    return quiz_id
+
+async def deliver_next_pending_quiz(channel, sender_id: str, student_id: str, course_id: str, lesson_id: str, exclude_quiz_id: str | None = None) -> bool:
+    """Busca o próximo quiz pendente da aula e envia. Retorna True se enviou."""
+    from src.db.database import AsyncSessionLocal
+    from sqlalchemy import text
+    
+    async with AsyncSessionLocal() as session:
+        exclude_clause = "AND quiz_id != :exclude_id" if exclude_quiz_id else ""
+        params = {"student_id": student_id, "course_id": course_id, "lesson_id": lesson_id}
+        if exclude_quiz_id:
+            params["exclude_id"] = exclude_quiz_id
+            
+        result = await session.execute(
+            text(f"""
+                SELECT * FROM "PendingQuizzes"
+                WHERE student_id = :student_id
+                  AND course_id = :course_id
+                  AND lesson_id = :lesson_id
+                  AND status = 'pending'
+                  {exclude_clause}
+                ORDER BY created_at ASC
+                LIMIT 1
+            """),
+            params
+        )
+        quiz_row = result.fetchone()
+        
+    if not quiz_row:
+        return False
+        
+    await send_existing_quiz(channel, sender_id, quiz_row)
+    return True

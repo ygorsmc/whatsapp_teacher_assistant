@@ -172,7 +172,29 @@ async def run_rag_pipeline(student_context: dict, text: str) -> str:
         HumanMessage(content=text),
         AIMessage(content=response)
     ])
-    
+
+    # Gamificação (Fase 0) — dúvida SUBSTANTIVA (evidência 🟢/🟡) acumula XP em
+    # silêncio (teto anti-farming dentro do award). Recusa Honesta (🔴) = 0 XP.
+    # Isolado: nunca derruba a resposta (flag OFF ⇒ no-op).
+    if retrieval.evidence in ("green", "yellow"):
+        try:
+            from src.workers.gamification import award_xp
+            await award_xp(student.id, course.id, "rag_doubt", teacher_id=teacher.id)
+        except Exception as e:
+            logger.error("gamification_rag_hook_failed", error=str(e)[:200])
+
+    # Gamificação (Fase 1) — 🦉 Coruja Filosófica (secreta): pergunta FORTE (🟢)
+    # depois da meia-noite. Revela na hora (anexa à resposta, dentro da janela).
+    if retrieval.evidence == "green":
+        try:
+            from src.workers.gamification import award_secret_badge, now_local
+            if now_local().hour < 5:
+                reveal = await award_secret_badge(student.id, course.id, "coruja_filosofica", teacher_id=teacher.id)
+                if reveal:
+                    response += "\n\n" + reveal
+        except Exception as e:
+            logger.error("gamification_secret_hook_failed", error=str(e)[:200])
+
     return response
 
 async def get_student_context(sender_id: str, query_column: str, course_id: str | None = None, class_id: str | None = None):
@@ -237,7 +259,38 @@ async def handle_quiz_response(
     message_id: str | None = None
 ) -> None:
     """Valida resposta do aluno a um quiz por comparação direta (if/else)."""
-    # Parse do reply_id: "quiz_{quiz_id}_{answer_id}" → quiz_id, answer_id
+    # Parse do reply_id: "quiz_{quiz_id}_{answer_id}" ou "quiz_skip_{quiz_id}"
+    if reply_id.startswith("quiz_skip_"):
+        quiz_id = reply_id.split("quiz_skip_")[1]
+        
+        from src.db.database import AsyncSessionLocal
+        from sqlalchemy import text
+        from src.workers.micro_learning import deliver_next_pending_quiz
+        
+        async with AsyncSessionLocal() as session:
+            # Reordena para o fim da fila atualizando o created_at
+            result = await session.execute(
+                text("""
+                    UPDATE "PendingQuizzes"
+                    SET created_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                    WHERE quiz_id = :quiz_id AND student_id = :student_id AND status = 'pending'
+                    RETURNING course_id, lesson_id, question_text
+                """),
+                {"quiz_id": quiz_id, "student_id": student_id}
+            )
+            await session.commit()
+            row = result.fetchone()
+            if not row:
+                return  # skipped an invalid/answered quiz
+            
+            sent_next = await deliver_next_pending_quiz(channel, sender_id, student_id, row.course_id, row.lesson_id, exclude_quiz_id=quiz_id)
+            if not sent_next:
+                if "Revisão do Tópico" in row.question_text:
+                    await channel.send_text(sender_id, "🎉 Você pulou o último quiz e concluiu os tópicos desta sessão!")
+                else:
+                    await channel.send_text(sender_id, "Quiz pulado.")
+        return
+
     parts = reply_id.split("_", 2)
     if len(parts) < 3:
         await channel.send_text(sender_id, ERROR_INVALID_RESPONSE, reply_to=message_id)
@@ -254,7 +307,7 @@ async def handle_quiz_response(
         result = await session.execute(
             text("""
                 SELECT quiz_id, correct_answer, explanation, question_text, status,
-                       quiz_bank_id, reading_plan_id, lesson_id, course_id
+                       quiz_bank_id, reading_plan_id, lesson_id, course_id, created_at
                 FROM "PendingQuizzes"
                 WHERE quiz_id = :quiz_id AND student_id = :student_id
             """),
@@ -298,6 +351,12 @@ async def handle_quiz_response(
         feedback = FEEDBACK_CORRECT.format(explanation=quiz.explanation)
     else:
         feedback = FEEDBACK_INCORRECT.format(correct_answer=quiz.correct_answer, explanation=quiz.explanation)
+        
+        if quiz.quiz_bank_id:
+            from src.rag.quiz_bank import get_quiz_package
+            bank = await get_quiz_package(quiz.quiz_bank_id)
+            if bank and bank.get("summary"):
+                feedback += f"\n\n📖 *Revisão do Tópico:*\n{bank['summary']}"
 
     # ── ADDON DE LIVROS ─────────────────────────────────────────────────────
     # 6.5 Mapeamento Aula ↔ Capítulo: quiz de AULA respondido → sugere o
@@ -310,6 +369,25 @@ async def handle_quiz_response(
                 feedback += LESSON_CHAPTER_SUGGESTION.format(chapter=chapter)
         except Exception as e:
             logger.error("lesson_chapter_suggestion_failed", error=str(e)[:200])
+
+    # Gamificação (Fase 0) — anexa ⭐XP/🔥streak/🏅badge à confirmação (grátis,
+    # dentro da janela). Check-in de leitura conta como 'microdose' (+5); demais
+    # quizzes pontuam por acerto/erro (ou revisão SRS no prazo). Isolado: flag
+    # OFF ⇒ no-op (xp_line=None), nunca altera a confirmação atual.
+    try:
+        from src.workers.gamification import award_xp, award_quiz_xp, _now_utc
+        if quiz.reading_plan_id:
+            xp_line = await award_xp(student_id, quiz.course_id, "reading") if is_correct else None
+        else:
+            xp_line = await award_quiz_xp(
+                student_id, quiz.course_id, is_correct=is_correct,
+                quiz_bank_id=quiz.quiz_bank_id,
+                quiz_sent_at=quiz.created_at, quiz_answered_at=_now_utc(),
+            )
+        if xp_line:
+            feedback += "\n\n" + xp_line
+    except Exception as e:
+        logger.error("gamification_quiz_hook_failed", error=str(e)[:200])
 
     await channel.send_text(sender_id, feedback, reply_to=message_id)
 
@@ -339,6 +417,14 @@ async def handle_quiz_response(
         "answer": answer_id,
         "is_reading_checkin": bool(quiz.reading_plan_id),
     })
+
+    # Fase 5: Sessão Mista — se for quiz de aula, busca e envia o próximo da fila contínua
+    if not quiz.reading_plan_id:
+        from src.workers.micro_learning import deliver_next_pending_quiz
+        sent_next = await deliver_next_pending_quiz(channel, sender_id, student_id, quiz.course_id, quiz.lesson_id, exclude_quiz_id=quiz_id)
+        if not sent_next:
+            if "Revisão do Tópico" in quiz.question_text:
+                await channel.send_text(sender_id, "🎉 Você concluiu todos os tópicos desta aula. Parabéns pela dedicação!")
 
 
 async def _find_linked_chapter(course_id: str, quiz_bank_id: str | None, lesson_id: str) -> int | None:

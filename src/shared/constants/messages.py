@@ -22,6 +22,12 @@ QUIZ_FOOTER_LIST = "Selecione a resposta correta"
 QUIZ_LIST_BUTTON_TEXT = "Ver opções"
 QUIZ_LIST_SECTION_TITLE = "Alternativas"
 
+# Separador entre o bloco de revisão e a pergunta no `question_text` dos quizzes
+# da Sessão de Aula. Fonte de verdade única: o worker monta com ele e a entrega
+# (send_existing_quiz) divide por ele — assim a revisão vai como TEXTO separado e
+# o body interativo do WhatsApp (limite duro de 1024 chars) carrega só a pergunta.
+CLASS_REVIEW_SEPARATOR = "\n\n---\n\n📝 *Teste seu conhecimento:*\n"
+
 FEEDBACK_CORRECT = "🎉 Correto! {explanation}"
 FEEDBACK_INCORRECT = "❌ Incorreto. A resposta certa era a alternativa {correct_answer}. \n\n{explanation}"
 
@@ -180,53 +186,46 @@ Mensagens de conversação livre são destinadas apenas aos alunos."""
 # ==========================================
 # MANAGEMENT COMMANDS UX (TEACHER ONLY)
 # ==========================================
-CMD_HELP_TEXT = """📚 *Comandos disponíveis*
+CMD_HELP_TEXT = """📚 *Comandos do Professor*
 
-*Sincronização*
-🔹 /sinc_alunos — Atualiza alunos, cursos e horários da planilha.
-🔹 /sinc_materiais — Sincroniza os PDFs do Google Drive.
-🔹 /listar_cursos — Lista seus cursos.
-🔹 /listar_materiais — Status dos arquivos do Drive.
+*🔄 Sincronização & Status*
+🔹 /sinc_alunos — Atualiza alunos e horários da planilha.
+🔹 /sinc_materiais — Sincroniza PDFs do Google Drive.
+🔹 /turmas — Status e aulas atuais de todas as suas turmas.
+🔹 /listar_cursos — Lista seus cursos cadastrados.
+🔹 /listar_materiais — Mostra os arquivos lidos do Drive.
 
-*Aula & Quiz*
-🔹 /aula Turma = 2 — Define a aula atual da turma.
-🔹 /quiz_Turma — Envia um quiz para a turma agora.
-
-*Gestão da turma* (formato: /comando_Turma)
+*🎓 Gestão de Turma* (formato: /comando_Turma)
+🔹 /aula_Turma_2 — Força a turma ir para a aula especificada.
+🔹 /zerar_aula_Turma — Zera a turma para a Aula 0.
+🔹 /quiz_Turma — Dispara um quiz manual para a turma agora.
 🔹 /engajamento_Turma — Alunos ativos e interações (7 dias).
 🔹 /acertos_Turma — 3 tópicos com pior desempenho nos quizzes.
 🔹 /risco_Turma — Alunos inativos ou com baixo aproveitamento.
 🔹 /duvidas_frequentes_Turma — IA resume as dúvidas da semana.
 🔹 /limpar_quizzes_Turma — Apaga o Banco de Questões da turma.
 🔹 /aviso_Turma_Mensagem — Envia um aviso a todos os alunos.
+🔹 /desafio_Turma — Mesma questão para todos + placar em 6h.
 
-*Gestão de aluno* (formato: /comando_Telefone)
-🔹 /ver_aluno_11999998888 — Ficha do aluno (matrícula, aula, últimas interações).
+*👤 Gestão de Aluno* (formato: /comando_Telefone)
+🔹 /ver_aluno_11999998888 — Ficha do aluno (matrícula, aula, interações).
 🔹 /resetar_aluno_11999998888 — Reinicia a jornada individual do aluno.
 
 *📖 Livros & Apostilas (Addon)*
-🔹 /plano_leitura_Turma_diario — Cria a jornada de leitura (ritmos: diario | semanal).
+🔹 /plano_leitura_Turma_diario — Cria jornada (diario | semanal).
 🔹 /simulado_Turma_5 — Simulado com questões dos capítulos 1 a 5.
-🔹 /vincular_aula_Turma_2_3 — Vincula a Aula 2 ao Capítulo 3 do livro.
-🔹 /errata_Turma_cap3_Onde diz X, leia Y — Cadastra uma errata viva.
-🔹 /ativar_capitulos_Turma_1,3,5 — Ativa só os capítulos do plano de curso.
-🔹 /gabarito_Turma_cap3_ex2_42J — Cadastra gabarito oficial (âncora da IA).
+🔹 /vincular_aula_Turma_2_3 — Vincula a Aula 2 ao Capítulo 3.
+🔹 /errata_Turma_cap3_Onde diz X, leia Y — Cadastra errata viva.
+🔹 /ativar_capitulos_Turma_1,3,5 — Ativa só capítulos especificados.
+🔹 /gabarito_Turma_cap3_ex2_42J — Cadastra gabarito oficial.
 
-*📊 Telemetria editorial*
-🔹 /mapa_dificuldade_Turma — Heatmap de erros por capítulo/seção.
-🔹 /funil_conclusao_Turma — Onde a turma "abandona" o livro.
-🔹 /corpus_duvidas_Turma — Dúvidas agrupadas por capítulo (anonimizado).
+*📊 Telemetria Avançada*
+🔹 /mapa_dificuldade_Turma — Heatmap de erros por seção.
+🔹 /funil_conclusao_Turma — Onde a turma abandona o material.
+🔹 /corpus_duvidas_Turma — Dúvidas agrupadas (anonimizado).
+🔹 /chaves_Turma — Status das chaves de ativação (QR).
 
-*🏆 Engajamento & Correção*
-🔹 /desafio_Turma — Mesma questão para todos + placar anônimo em 6h.
-🔹 /rubrica_Turma_Critérios — Critérios oficiais da correção de redação.
-🔹 /chaves_Turma — Status das chaves de ativação (QR) do material.
-
-*🚀 Setup self-service*
-🔹 /criar_turma_Curso_Turma — Cria curso e turma na hora.
-🔹 /adicionar_alunos_Turma_Maria:11999990001; João:11999990002
-
-_Comandos dos alunos: /pausar_leitura, /retomar_leitura, /meu_progresso, /flashcards, /corrigir (redação), /sair_livro_"""
+_👨‍🎓 Comandos dos alunos: /pausar_leitura, /retomar_leitura, /meu_progresso, /flashcards, /corrigir (redação), /sair_livro_"""
 
 CMD_CLASS_NOT_FOUND = "❌ Turma '{class_query}' não encontrada ou você não tem permissão sobre ela."
 CMD_TEACHER_NOT_FOUND = "❌ Professor não encontrado no sistema."
@@ -272,3 +271,74 @@ PLACEMENT_RESULT = "🎉 Pronto! Seu nível estimado é *{cefr}*.\nVamos calibra
 # F9 (B2B/Quality Rating) — opt-out de mensagens proativas
 OPTOUT_CONFIRMED = "✅ Pronto, você não receberá mais mensagens automáticas. Para voltar a receber, envie *VOLTAR* a qualquer momento."
 OPTIN_CONFIRMED = "🎉 Que bom te ver de volta! Você voltará a receber as atividades. Bons estudos! 💪"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Gamificação (Fase 0) — esquema_gamificacao_whatsapp_teacher_assistant.md
+# Recompensa DISCRETA que ACOMPANHA o aprendizado (mitiga sobrejustificação):
+# a linha de XP só se ANEXA à resposta pedagógica que já existe.
+# ──────────────────────────────────────────────────────────────────────────────
+# Linha anexada à confirmação (dentro da janela de 24h = grátis). str.format.
+XP_APPEND_LINE = "⭐ +{xp} XP"
+XP_APPEND_STREAK = "⭐ +{xp} XP · 🔥 sequência de {streak} dias mantida"
+XP_APPEND_STREAK_MILESTONE = "⭐ +{xp} XP · 🔥 *{streak} dias seguidos* — novo marco! 🎉"
+XP_APPEND_SHIELD_EARNED = "🛡️ Você ganhou um *escudo* de sequência (tem {shields} guardado(s))!"
+BADGE_UNLOCKED_NOW = "🏅 *Conquista nova:* {emoji} {name} — *{level}*!"
+
+# Nudge de salvar streak (reúso do slot 23:30 do process_window_extensions).
+STREAK_SAVE_BODY = (
+    "🔥 Sua sequência de *{streak} dias* tá quase fechando o dia!\n\n"
+    "Uma revisão rapidinha mantém ela viva 😊"
+)
+STREAK_SAVE_BTN_GO = "▶️ Bora revisar"
+STREAK_SAVE_BTN_NO = "😴 Hoje não"
+STREAK_SAVED_BY_SHIELD = (
+    "Tudo bem! 🛡️ Usei um dos seus escudos pra proteger sua sequência hoje.\n"
+    "Você ainda tem *{shields} escudo(s)* guardado(s)."
+)
+
+# /ocultar_ranking (toggle do opt-out SÓ da competição; ≠ "sair").
+RANKING_HIDDEN = "🙈 Pronto, você saiu do *ranking*. Segue ganhando XP, sequência e conquistas (só pra você). Para voltar, mande */ocultar_ranking* de novo."
+RANKING_SHOWN = "👀 Você voltou pro *ranking* da sua turma! Boa sorte nesta semana 💪"
+
+# /meu_ranking (sob demanda, grátis na janela). Seções compostas no worker.
+RANKING_NONE_YET = "📊 Sua liga ainda está sendo formada — responda quizzes e revisões esta semana pra entrar no placar! 💪"
+RANKING_SMALL_COHORT = "📊 Sua turma ainda é pequena pra um ranking anônimo. Mas seu progresso conta: ⭐ *{xp} XP* esta semana! 🔥 sequência de *{streak}* dias."
+RANKING_OPTED_OUT = "🙈 Você está fora do ranking. Para voltar a aparecer, mande */ocultar_ranking*."
+RANKING_HEADER = "📊 *Sua liga esta semana* — {cohort_size} na coorte"
+RANKING_ROW_TOP = "{medal} {pseudonym} — {xp} ⭐"
+RANKING_ROW_ELLIPSIS = "   ⋯"
+RANKING_ROW_ME = "👉 *você* ({pseudonym}) — {xp} ⭐"
+RANKING_ROW_NEIGHBOR = "   {pseudonym} — {xp} ⭐"
+RANKING_TO_NEXT = "\nFaltam só *{gap} ⭐* pra você subir uma posição! 💪"
+RANKING_AT_TOP = "\n🥇 Você está no *topo* da coorte — segura essa liderança! 🔥"
+
+# /conquistas (vitrine sob demanda).
+ACHIEVEMENTS_NONE = "🏆 Você ainda não desbloqueou conquistas — mas tá no caminho! Responda quizzes, revisões e leituras pra começar. 💪"
+ACHIEVEMENTS_HEADER = "🏆 *Suas conquistas*"
+ACHIEVEMENTS_ROW = "{emoji} {name} — *{level}*"
+ACHIEVEMENTS_SECRET_ROW = "{emoji} {name} — 🔓 *secreta*"
+ACHIEVEMENTS_NEXT = "\n🔒 *Quase lá:* {emoji} {name} ({level}) — faltam {gap}"
+
+# Resumo semanal (a única proativa garantida — 1 template/semana).
+WEEKLY_DIGEST_HEADER = "🏁 *Seu resumo da semana*"
+WEEKLY_DIGEST_XP = "⭐ XP: *{xp}* (recorde: {best})"
+WEEKLY_DIGEST_STREAK = "🔥 Sequência: *{streak} dias* · 🛡️ {shields} escudo(s) guardado(s)"
+WEEKLY_DIGEST_OUTRO = "\nBora pra mais uma semana? 🚀"
+
+# Ligas (Fase 1) — movimento de promoção/rebaixamento no resumo + label no /meu_ranking.
+LEAGUE_LINE_PROMOTED = "📈 *{from_label}* → você *subiu* para *{to_label}*! 🎉"
+LEAGUE_LINE_RELEGATED = "📉 *{from_label}* → você caiu para *{to_label}*. Bora voltar! 💪"
+LEAGUE_LINE_STAY = "{label} — você segue firme!"
+RANKING_DIVISION_LINE = "{label}"
+
+# Conquistas secretas (Fase 1) — reveladas na hora (dentro da janela).
+SECRET_BADGE_UNLOCKED = "🔓 *Conquista secreta!* {emoji} {name}\n_{hint}_"
+
+# Dashboard do professor (Fase 1) — bloco anexado ao /engajamento.
+DASHBOARD_GAMIFICATION_SECTION = (
+    "\n\n⭐ *Gamificação*\n"
+    "XP da turma (semana): *{week_xp}*\n"
+    "🔥 Sequência média: *{avg_streak}* dias\n"
+    "🙈 Ocultos do ranking: *{hidden}*\n"
+    "📎 Exportar pra planilha: /exportar_engajamento_{class_hint}"
+)

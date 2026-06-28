@@ -133,7 +133,7 @@ async def run_sync_alunos_command(channel, sender_id: str):
             unlinked_names = stats.get('unlinked_names', [])
             if unlinked_names:
                 names_str = "\n".join(f"• {n}" for n in unlinked_names)
-                msg += CMD_SYNC_UNLINKED_WARNING.format(count=len(unlinked_names), names=names_str, bot=settings.BOT)
+                msg += CMD_SYNC_UNLINKED_WARNING.format(count=len(unlinked_names), names=names_str, bot=settings.BOT.replace("_", "\\_"))
             # Avisa o professor sobre turmas sem dono explícito na aba "Professores"
             # (caíram no Admin) — /quiz e /aula não vão achá-las pelo professor real.
             no_teacher = stats.get('classes_sem_professor', [])
@@ -202,6 +202,55 @@ async def run_list_cursos_command(channel, sender_id: str):
             await channel.send_text(sender_id, msg)
     except Exception:
         await channel.send_text(sender_id, "❌ Erro ao buscar cursos.")
+
+async def run_list_classes_command(channel, sender_id: str):
+    try:
+        async with AsyncSessionLocal() as session:
+            teacher = await _resolve_teacher(session, channel, sender_id)
+            if not teacher:
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
+                return
+            
+            teacher_id = teacher[0]
+            is_admin = teacher[1]
+            
+            query = """
+                SELECT cl.name as class_name, crs.name as course_name, 
+                       cl.current_lesson_number, cl.start_date, cl.schedule_map
+                FROM "Classes" cl
+                JOIN "Courses" crs ON cl.course_id = crs.id
+                WHERE crs.is_active = true
+            """
+            params = {}
+            if not is_admin:
+                query += " AND cl.teacher_id = :tid"
+                params["tid"] = teacher_id
+                
+            query += " ORDER BY crs.name, cl.name"
+            
+            result = await session.execute(text(query), params)
+            classes = result.fetchall()
+            
+            if not classes:
+                await channel.send_text(sender_id, "📚 Você não possui turmas cadastradas ou ativas.")
+                return
+                
+            msg = "📊 *Status das Suas Turmas:*\n\n"
+            for c in classes:
+                lesson = c.current_lesson_number
+                start_date = c.start_date.strftime('%d/%m/%Y') if c.start_date else 'N/A'
+                
+                # Se for aula 0, significa que não iniciou
+                status = f"Aula atual: {lesson}" if lesson > 0 else "Aguardando início (Aula 0)"
+                
+                msg += f"🏫 *Turma {c.class_name}* ({c.course_name})\n"
+                msg += f"├ Início: {start_date}\n"
+                msg += f"└ Status: {status}\n\n"
+                
+            await channel.send_text(sender_id, msg)
+    except Exception as e:
+        logger.error("error_listing_classes", error=str(e))
+        await channel.send_text(sender_id, "❌ Erro ao buscar turmas.")
 
 # ── /listar_materiais + /delete (exclusão de material indexado) ──────────────
 # A lista numerada memoriza, no Redis, o vínculo  nº → arquivo  (TTL 1h). O
@@ -479,7 +528,7 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
             class_id = class_row[0]
             
             await session.execute(
-                text('UPDATE \"Classes\" SET current_lesson_number = :num, updated_at = CURRENT_TIMESTAMP WHERE id = :cid'),
+                text('UPDATE \"Classes\" SET current_lesson_number = :num, last_advanced_date = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = :cid'),
                 {"num": new_lesson, "cid": class_id}
             )
             await session.commit()
@@ -488,6 +537,39 @@ async def run_update_lesson_command(channel, sender_id: str, args: str):
             
     except Exception as e:
         await channel.send_text(sender_id, f"❌ Erro ao atualizar aula: {str(e)[:100]}")
+
+async def run_zero_lesson_command(channel, sender_id: str, class_name: str):
+    """/zerar_aula_Turma — Zera a aula atual (define para 0)"""
+    try:
+        class_name = (class_name or "").strip()
+        if not class_name:
+            await channel.send_text(sender_id, "❌ Formato inválido. Use: `/zerar_aula_Nome da Turma`")
+            return
+
+        async with AsyncSessionLocal() as session:
+            teacher = await _resolve_teacher(session, channel, sender_id)
+            if not teacher:
+                await channel.send_text(sender_id, CMD_TEACHER_NOT_FOUND)
+                return
+            
+            class_row = await _resolve_owned_class(session, teacher[0], teacher[1], class_name)
+            
+            if not class_row:
+                await channel.send_text(sender_id, CMD_CLASS_NOT_FOUND.format(class_query=class_name))
+                return
+                
+            class_id = class_row[0]
+            
+            await session.execute(
+                text('UPDATE \"Classes\" SET current_lesson_number = 0, last_advanced_date = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = :cid'),
+                {"cid": class_id}
+            )
+            await session.commit()
+            
+            await channel.send_text(sender_id, f"🔄 A turma *{class_name}* teve seu contador zerado e agora está na *Aula 0* (Aguardando Início).")
+            
+    except Exception as e:
+        await channel.send_text(sender_id, f"❌ Erro ao zerar aula: {str(e)[:100]}")
 
 async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
     try:
@@ -772,6 +854,9 @@ async def run_engagement_command(channel, sender_id: str, class_query: str):
             f"💬 Interações registradas: *{interactions}*\n"
             f"📝 Quizzes respondidos: *{quizzes_answered}*"
         )
+        # Gamificação (Fase 1) — anexa o bloco de engajamento (vazio se a flag off).
+        from src.workers.gamification import teacher_gamification_section
+        msg += await teacher_gamification_section(class_id, c_name)
         await channel.send_text(sender_id, msg)
     except Exception as e:
         logger.error("engagement_command_failed", error=str(e)[:300])
@@ -1300,6 +1385,12 @@ async def run_broadcast_notice_command(channel, sender_id: str, class_query: str
 # ==============================================================================
 
 async def process_command_message(message_body: dict):
+    action = message_body.get("action")
+    if action == "class_session_start":
+        from src.workers.class_session_worker import handle_class_session_start
+        await handle_class_session_start(message_body)
+        return
+
     sender_id = str(message_body.get("sender_id", message_body.get("phone", "")))
     text_content = message_body.get("text", "")
     channel_type = message_body.get("channel")
@@ -1351,6 +1442,16 @@ async def process_command_message(message_body: dict):
             # no fast-path do llm_worker (lgpd_delete_confirm/cancel).
             from src.workers.privacy_commands import run_delete_my_data_command
             await run_delete_my_data_command(channel, sender_id)
+        # ── Gamificação (Fase 0) — sob demanda, grátis na janela ────────────
+        elif student_cmd == CommandType.MY_RANKING:
+            from src.workers.gamification import run_my_ranking_command
+            await run_my_ranking_command(channel, sender_id)
+        elif student_cmd == CommandType.ACHIEVEMENTS:
+            from src.workers.gamification import run_achievements_command
+            await run_achievements_command(channel, sender_id)
+        elif student_cmd == CommandType.HIDE_RANKING:
+            from src.workers.gamification import run_hide_ranking_command
+            await run_hide_ranking_command(channel, sender_id)
         return
 
     # 1) Comandos gerenciais — sintaxe explícita /comando_[turma]_[arg].
@@ -1362,6 +1463,9 @@ async def process_command_message(message_body: dict):
 
         if cmd_type == CommandType.ENGAGEMENT:
             await run_engagement_command(channel, sender_id, target)
+        elif cmd_type == CommandType.EXPORT_ENGAGEMENT:
+            from src.workers.gamification import run_export_engagement_command
+            await run_export_engagement_command(channel, sender_id, target)
         elif cmd_type == CommandType.QUIZ_PERFORMANCE:
             await run_quiz_performance_command(channel, sender_id, target)
         elif cmd_type == CommandType.AT_RISK:
@@ -1374,6 +1478,8 @@ async def process_command_message(message_body: dict):
             await run_reset_student_command(channel, sender_id, target)
         elif cmd_type == CommandType.CLEAR_QUIZ_BANK:
             await run_clear_quiz_bank_command(channel, sender_id, target)
+        elif cmd_type == CommandType.ZERO_LESSON:
+            await run_zero_lesson_command(channel, sender_id, target)
         elif cmd_type == CommandType.DELETE_MATERIAL:
             await run_delete_material_command(channel, sender_id, target)
         elif cmd_type == CommandType.BROADCAST_NOTICE:
@@ -1409,12 +1515,6 @@ async def process_command_message(message_body: dict):
             elif cmd_type == CommandType.RUBRIC:
                 from src.workers.onboarding_commands import run_rubric_command
                 await run_rubric_command(channel, sender_id, target, extra)
-            elif cmd_type == CommandType.CREATE_CLASS:
-                from src.workers.onboarding_commands import run_create_class_command
-                await run_create_class_command(channel, sender_id, target, extra)
-            elif cmd_type == CommandType.ADD_STUDENTS:
-                from src.workers.onboarding_commands import run_add_students_command
-                await run_add_students_command(channel, sender_id, target, extra)
         return
 
     # 2) Comandos legados
@@ -1427,6 +1527,8 @@ async def process_command_message(message_body: dict):
         await run_sync_materiais_command(channel, sender_id)
     elif command == CommandType.LIST_COURSES:
         await run_list_cursos_command(channel, sender_id)
+    elif command == CommandType.LIST_CLASSES:
+        await run_list_classes_command(channel, sender_id)
     elif command == CommandType.LIST_MATERIALS:
         await run_list_materiais_command(channel, sender_id, args)
     elif command == CommandType.UPDATE_LESSON:

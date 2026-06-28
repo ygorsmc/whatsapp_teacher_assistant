@@ -72,8 +72,8 @@ class ReviewOutput(BaseModel):
     key_points: list[str] = Field(
         description="Lista de 3 a 5 pontos-chave extraídos do conteúdo"
     )
-    quiz: ReviewQuiz = Field(
-        description="Quiz de múltipla escolha baseado no resumo (3 alternativas)"
+    quizzes: list[ReviewQuiz] = Field(
+        description="Lista com EXATAMENTE 3 quizzes de múltipla escolha independentes (variações práticas do mesmo conceito/tópico)"
     )
     topic: Optional[str] = None
     # Id da questão no Banco de Questões (QuizBank). Os chamadores repassam
@@ -85,13 +85,14 @@ class ReviewOutput(BaseModel):
     # quando o próprio `summary` já está na língua-alvo (níveis avançados).
     audio_script: Optional[str] = None
 
+    @property
+    def quiz(self) -> ReviewQuiz:
+        return self.quizzes[0] if self.quizzes else None
+
 
 # Lentes Pedagógicas customizadas para o Resumo Agendado
 REVIEW_PERSPECTIVES = [
-    "Faça um resumo informativo que prepare o aluno para uma sessão de perguntas focado em um detalhe técnico minucioso",
-    "Faça um resumo informativo que prepare o aluno para uma sessão de perguntas sobre uma situação hipotética do mundo real",
-    "Faça um resumo informativo que prepare o aluno para uma sessão de perguntas sobre uma exceção à regra ou limitação",
-    "Faça um resumo informativo que prepare o aluno para uma sessão de perguntas explorando a definição do conceito central"
+    "Foque na aplicação prática, utilidade e no contexto do caso de uso fornecido",
 ]
 
 # Lentes do check-in de leitura (livro/apostila): questão curta sobre o TRECHO.
@@ -207,7 +208,7 @@ def _review_from_bank_row(row: dict) -> Optional[ReviewOutput]:
         review = ReviewOutput(
             summary=row.get("summary") or "",
             key_points=key_points,
-            quiz=quiz,
+            quizzes=[quiz],
             topic=row.get("topic"),
         )
         review.quiz_bank_id = row["id"]
@@ -261,6 +262,7 @@ async def generate_review(
     material_type: str = "lesson",
     perspectives: Optional[list[str]] = None,
     retrieval_material_type: Optional[str] = None,
+    force_topic: str | None = None,
 ) -> Optional[ReviewOutput]:
     """Gera (ou recupera do QuizBank) um pacote de revisão + quiz.
 
@@ -344,9 +346,12 @@ async def generate_review(
         topic_prompt = TOPIC_EXTRACTION_PROMPT.format(context=lesson_content)
         topics_response = await llm.agenerate(prompt=topic_prompt)
 
-        topics = [t.strip() for t in topics_response.split(",") if t.strip()]
+        topics = [t.strip() for t in topics_response.split("\n") if t.strip() and "|" in t]
         if not topics:
-            topics = ["Conceito Geral da Aula"]
+            # Fallback for unexpected formats
+            topics = [t.strip() for t in topics_response.split("\n") if t.strip()]
+            if not topics:
+                topics = ["Tópico: Conceito Geral da Aula | Caso de uso: Aplicação prática do tema"]
 
         await set_cached_topics(course_id, current_lesson_number, topics, subject_name, material_type)
 
@@ -369,8 +374,8 @@ async def generate_review(
 
     # H3.2 — Dificuldade adaptativa (flag): tópicos com histórico fraco do
     # aluno têm prioridade na rotação. Best-effort: falha → sorteio clássico.
-    chosen_topic = None
-    if settings.ADAPTIVE_TOPIC_PRIORITY and student_id != "broadcast":
+    chosen_topic = force_topic
+    if chosen_topic is None and settings.ADAPTIVE_TOPIC_PRIORITY and student_id != "broadcast":
         try:
             topic_stats = await quiz_bank.get_student_topic_stats(
                 student_id, course_id, subject_id, current_lesson_number, material_type
@@ -533,27 +538,34 @@ async def generate_review(
         review = cast(ReviewOutput, await llm.agenerate_structured(prompt=prompt, schema=ReviewOutput))
         review.topic = chosen_topic
 
-        # Randomização algorítmica (mesma lógica de sempre, agora num helper)
-        _shuffle_alternatives(review.quiz)
+        # Randomização algorítmica
+        for q in review.quizzes:
+            _shuffle_alternatives(q)
 
         # Persiste o pacote no QuizBank — mesmo no broadcast (from_bank=False):
         # a turma toda passa a aproveitar nas próximas revisões individuais.
         try:
-            review.quiz_bank_id = await quiz_bank.save_quiz_package(
-                course_id=course_id,
-                subject_id=subject_id,
-                lesson_number=current_lesson_number,
-                topic=chosen_topic,
-                pedagogical_lens=chosen_perspective,
-                question_text=review.quiz.question,
-                alternatives=[{"id": a.id, "text": a.text} for a in review.quiz.alternatives],
-                correct_answer=review.quiz.correct_answer,
-                explanation=review.quiz.explanation,
-                summary=review.summary,
-                key_points=review.key_points,
-                material_type=material_type,
-                audio_script=review.audio_script,
-            )
+            first_quiz_id = None
+            for q in review.quizzes:
+                q_id = await quiz_bank.save_quiz_package(
+                    course_id=course_id,
+                    subject_id=subject_id,
+                    lesson_number=current_lesson_number,
+                    topic=chosen_topic,
+                    pedagogical_lens=chosen_perspective,
+                    question_text=q.question,
+                    alternatives=[{"id": a.id, "text": a.text} for a in q.alternatives],
+                    correct_answer=q.correct_answer,
+                    explanation=q.explanation,
+                    summary=review.summary,
+                    key_points=review.key_points,
+                    material_type=material_type,
+                    audio_script=review.audio_script,
+                )
+                if not first_quiz_id:
+                    first_quiz_id = q_id
+            
+            review.quiz_bank_id = first_quiz_id
         except Exception as e:
             # Falha ao salvar no banco não bloqueia a entrega ao aluno.
             logger.error("quiz_bank_save_failed", error=str(e)[:300])
@@ -668,3 +680,37 @@ async def generate_language_review(
     except Exception as e:
         logger.error("language_review_generation_failed", error=str(e)[:300])
         return None
+
+async def get_all_lesson_topics(
+    teacher_id: str,
+    course_id: str,
+    subject_name: str | None,
+    current_lesson_number: int,
+    material_type: str = "lesson",
+) -> list[str]:
+    """Retorna os tópicos da aula (cache ou LLM). Usado para gerar Sessão Mista em lote."""
+    from src.cache.topic_cache import get_cached_topics, set_cached_topics
+    topics = await get_cached_topics(course_id, current_lesson_number, subject_name, material_type)
+    if topics:
+        return topics
+
+    lesson_content = await _retrieve_lesson_content(
+        teacher_id, course_id, subject_name, current_lesson_number, None if material_type == "lesson" else material_type
+    )
+    if not lesson_content:
+        return []
+
+    from src.llm.factory import get_provider
+    from src.shared.constants.prompts import TOPIC_EXTRACTION_PROMPT
+    
+    llm = get_provider(settings.DEFAULT_LLM_PROVIDER)
+    topic_prompt = TOPIC_EXTRACTION_PROMPT.format(context=lesson_content)
+    topics_response = await llm.agenerate(prompt=topic_prompt)
+
+    # Nova regra: pegar as linhas válidas
+    topics = [t.strip() for t in topics_response.split("\n") if t.strip()]
+    if not topics:
+        topics = ["Conceito Geral da Aula"]
+
+    await set_cached_topics(course_id, current_lesson_number, topics, subject_name, material_type)
+    return topics

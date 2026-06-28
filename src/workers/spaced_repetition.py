@@ -288,7 +288,7 @@ async def process_spaced_repetition():
                         logger.info("srs_postponed_window_closed", srq_id=item.srq_id)
                         continue
 
-                from src.rag.quiz_bank import get_quiz_package
+                from src.rag.quiz_bank import get_quiz_package, find_unseen_quiz
                 bank = await get_quiz_package(item.quiz_bank_id)
                 if not bank:
                     # Questão invalidada entre o agendamento e a entrega
@@ -303,6 +303,26 @@ async def process_spaced_repetition():
                     )
                     await session.commit()
                     continue
+
+                # Generalização de Tópicos: tenta achar uma variação irmã (mesmo tópico) inédita pro aluno
+                sister_bank = await find_unseen_quiz(
+                    student_id=item.student_id,
+                    course_id=bank["course_id"],
+                    subject_id=bank.get("subject_id"),
+                    lesson_number=bank["lesson_number"],
+                    topic=bank["topic"],
+                    material_type=bank["material_type"],
+                )
+                
+                quiz_bank_id_to_send = item.quiz_bank_id
+                if sister_bank:
+                    bank = sister_bank
+                    quiz_bank_id_to_send = bank["id"]
+                    # Atualiza a fila para apontar para a nova variação (para consistência futura)
+                    await session.execute(
+                        text('UPDATE "SpacedRepetitionQueue" SET quiz_bank_id = :qid WHERE id = :id'),
+                        {"qid": quiz_bank_id_to_send, "id": item.srq_id}
+                    )
 
                 channel = get_channel(ct)
                 quiz_output = _shuffled_quiz_from_bank(bank)
@@ -319,7 +339,7 @@ async def process_spaced_repetition():
                         "lesson_pointer": str(item.lesson_number),
                     },
                     quiz=quiz_output,
-                    quiz_bank_id=item.quiz_bank_id,
+                    quiz_bank_id=quiz_bank_id_to_send,
                 )
 
                 # Vertical de Idiomas: reentrega de VOCABULÁRIO refala a palavra-alvo

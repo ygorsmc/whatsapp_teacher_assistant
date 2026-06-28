@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Index, Text, UniqueConstraint
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Index, Text, Integer, UniqueConstraint
 from sqlalchemy.sql import func
 from src.db.database import Base
 
@@ -48,6 +48,21 @@ class StudentInteractions(Base):
     message_content = Column(Text, nullable=True)
     timestamp = Column(DateTime, server_default=func.now())
 
+    # ── Gamificação (Fase 0) — ledger de XP de Engajamento ───────────────────
+    # Colunas NULLABLE: com GAMIFICATION_ENABLED/XP_LEDGER_ENABLED OFF nunca são
+    # escritas ⇒ comportamento byte a byte idêntico ao atual. O XP é um EVENTO
+    # nesta tabela (linhas interaction_type='xp_event') somado no rollup semanal
+    # (WeeklyEngagement). Mesmo padrão de extensão de is_language/cefr_level etc.
+    #   - xp_awarded: XP competitivo concedido (já com teto diário aplicado).
+    #   - xp_week_id: ISO week BRT ("2026-W26") — chave do rollup competitivo.
+    #   - xp_suspect: anti-gaming (resposta-relâmpago/padrão) — exclui o evento
+    #     do cálculo de nota; o XP fica retido (não soma na liga).
+    xp_awarded = Column(Integer, nullable=True)
+    xp_week_id = Column(String(20), nullable=True)
+    xp_suspect = Column(Boolean, nullable=False, default=False, server_default="false")
+
     __table_args__ = (
         Index('idx_interaction_student_type_time', 'student_id', 'interaction_type', 'timestamp'),
+        # Rollup semanal de XP por aluno (filtra xp_event da semana).
+        Index('idx_interaction_xp_week', 'student_id', 'xp_week_id'),
     )
