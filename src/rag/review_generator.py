@@ -87,7 +87,9 @@ class ReviewOutput(BaseModel):
 
     @property
     def quiz(self) -> ReviewQuiz:
-        return self.quizzes[0] if self.quizzes else None
+        # Os chamadores deste atalho garantem ≥1 quiz (ou checam a verdade via
+        # `if review.quiz`); o None só ocorre no caso degenerado de lista vazia.
+        return self.quizzes[0] if self.quizzes else None  # type: ignore[return-value]
 
 
 # Lentes Pedagógicas customizadas para o Resumo Agendado
@@ -224,7 +226,7 @@ async def _retrieve_lesson_content(
     course_id: str,
     subject_name: Optional[str],
     current_lesson_number: int,
-    material_type: str = "lesson",
+    material_type: Optional[str] = "lesson",
 ) -> str:
     """Recupera os chunks mais representativos da aula/seção no Qdrant (RAG).
     Chamado de forma LAZY: apenas quando realmente precisamos do LLM.
@@ -233,7 +235,7 @@ async def _retrieve_lesson_content(
     de aulas não têm o campo material_type no payload e sumiriam da busca.
     Para 'book'/'workbook' o filtro é obrigatório (vetores novos, com payload).
     """
-    material_label = MATERIAL_LABELS.get(material_type, "aula")
+    material_label = MATERIAL_LABELS.get(material_type or "lesson", "aula")
     return await retrieve_context(
         teacher_id=teacher_id,
         course_id=course_id,

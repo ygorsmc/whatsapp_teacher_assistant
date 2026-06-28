@@ -320,7 +320,8 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 """),
                 {"id": class_id, "cid": course_id, "sid": subject_id, "tid": class_tid, "name": class_name},
             )
-            upserted_class_ids.add(class_id)
+            if class_id:
+                upserted_class_ids.add(class_id)
 
             # 3. Upsert Enrollment
             enroll_id = generate_id("enr", f"{student_id}_{class_id}")

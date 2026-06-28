@@ -19,7 +19,7 @@ Todo o pipeline (ReadingPlans, QuizBank, revisão espaçada, janela de 24h,
 telemetria) é herdado sem fork.
 
 Chave PROF- (H3.1): mesmo fluxo, mas cria um Teacher e envia o guia de
-onboarding self-service (compartilhar Drive + /criar_turma + /adicionar_alunos).
+setup (compartilhar o Drive + preencher a planilha de cadastro + /sinc_alunos).
 """
 
 import json

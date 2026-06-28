@@ -233,7 +233,10 @@ async def test_chart_dropped_when_renderer_raises():
 # Factory do renderer de gráfico
 # ==============================================================================
 
-def test_get_chart_renderer_none_and_unknown():
+def test_get_chart_renderer_none_and_unknown(mocker):
+    # "" cai no default settings.CHART_RENDERER; fixamos p/ a suíte ser
+    # hermética (não depender do .env ativo, que tem CHART_RENDERER=matplotlib).
+    mocker.patch.object(settings, "CHART_RENDERER", "none")
     reset_chart_renderer_cache()
     assert get_chart_renderer("none") is None
     assert get_chart_renderer("") is None
@@ -367,6 +370,10 @@ async def test_matplotlib_renderer_returns_none_on_invalid_spec():
 # ==============================================================================
 
 def test_chart_flags_default_off():
-    assert settings.CHART_GENERATION_ENABLED is False
-    assert settings.CHART_RENDERER == "none"
-    assert settings.CHART_MAX_POINTS == 1000
+    # Hermético: valida os DEFAULTS do schema (não o .env ativo), senão o
+    # resultado depende do perfil carregado (CHART_GENERATION_ENABLED=true em prod).
+    from src.shared.config import Settings
+    fields = Settings.model_fields
+    assert fields["CHART_GENERATION_ENABLED"].default is False
+    assert fields["CHART_RENDERER"].default == "none"
+    assert fields["CHART_MAX_POINTS"].default == 1000

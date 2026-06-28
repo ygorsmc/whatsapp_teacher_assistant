@@ -1,26 +1,21 @@
 """
-Onboarding Commands — self-service do professor (H3.1) + rubrica (H2.2).
-
-Meta do H3.1: turma no ar em 10 minutos SEM humano no loop:
-  1. Professor ativa a chave PROF- (activation_worker cria o Teacher);
-  2. /criar_turma_[curso]_[turma]      → Course + Class dele;
-  3. /adicionar_alunos_[turma]_[lista] → Students + matrículas
-     (lista: "Maria:11999990001; João Silva:11999990002");
-  4. Compartilha o Drive e roda /sinc_materiais.
+Onboarding Commands — rubrica de correção do professor (H2.2).
 
 /rubrica_[turma]_[critérios] (H2.2): cadastra os critérios oficiais que
 ancoram TODA correção dissertativa da turma.
+
+(O onboarding self-service por chat — /criar_turma e /adicionar_alunos — foi
+descontinuado: a criação de turmas/alunos passa pela planilha de cadastro
++ /sinc_alunos.)
 """
 
 import re
-from typing import cast
 from uuid import uuid4
 
 from sqlalchemy import text
 
 from src.shared.telemetry import logger
 from src.db.database import AsyncSessionLocal
-from src.drive.spreadsheet_sync import clean_phone, generate_id
 from src.shared.constants.messages import CMD_TEACHER_NOT_FOUND, CMD_CLASS_NOT_FOUND
 
 

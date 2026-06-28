@@ -6,7 +6,7 @@ from typing import List
 
 from mistralai.client import Mistral
 from google import genai
-from tenacity import AsyncRetrying, wait_exponential, stop_after_attempt, retry_if_exception_type
+from tenacity import AsyncRetrying, wait_exponential, stop_after_attempt
 
 from src.parsing.interfaces import IDocumentParser
 from src.parsing.pdf_utils import split_pdf_for_ocr

@@ -7,7 +7,6 @@ from sqlalchemy import text
 from src.db.database import AsyncSessionLocal
 from src.rag.review_generator import get_all_lesson_topics, generate_review
 from src.workers.micro_learning import deliver_next_pending_quiz
-from src.channel.factory import get_channel
 from src.shared.constants.messages import CLASS_REVIEW_SEPARATOR
 
 logger = structlog.get_logger(__name__)

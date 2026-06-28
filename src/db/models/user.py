@@ -33,8 +33,9 @@ class Student(Base):
     preferred_channel = Column(String(50), nullable=True)
     # Origem do cadastro (H2.1): 'spreadsheet' (sync clássica) |
     # 'qr_activation' (leitor auto-cadastrado via chave do livro) |
-    # 'teacher_command' (/adicionar_alunos). Leitores podem se autoexcluir
-    # via /sair_livro (LGPD); alunos de planilha não.
+    # 'teacher_command' (valor legado — onboarding self-service descontinuado).
+    # Leitores QR podem se autoexcluir via /sair_livro (LGPD); alunos de
+    # planilha não.
     registration_source = Column(String(50), nullable=False, default="spreadsheet", server_default="spreadsheet")
     # Consentimento LGPD registrado no auto-cadastro (NULL para alunos de
     # planilha, cujo vínculo é gerido pelo professor).

@@ -1068,7 +1068,8 @@ async def run_export_engagement_command(channel, sender_id: str, class_query: st
                 srs_reviews=int(r.srs or 0), reading_sections=int(r.reading or 0),
                 streak=int(r.streak or 0), week_xp=int(r.week_xp or 0),
                 grade_points=(grade_logic.grade_points(int(r.week_xp or 0), int(grade_cfg.goal),
-                                                        float(grade_cfg.weight)) if grade_on else None),
+                                                        float(grade_cfg.weight))
+                              if grade_on and grade_cfg is not None else None),
             ) for r in records_rows
         ]
         csv_text = gami_export.rows_to_csv(

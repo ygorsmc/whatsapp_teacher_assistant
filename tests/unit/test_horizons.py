@@ -32,7 +32,6 @@ from src.workers.sentinel import (
 )
 from src.workers.spaced_repetition import adaptive_next_interval
 from src.workers.reading_journey import streak_medal, best_streak_badge
-from src.workers.onboarding_commands import parse_student_list
 from src.workers.essay import caption_triggers_essay
 from src.rag.review_generator import choose_topic_adaptive
 from src.shared.tts import prepare_tts_text
@@ -202,22 +201,6 @@ def test_choose_topic_adaptive_sem_fracos_sorteia():
 
 
 # ==============================================================================
-# H3.1 — parse da lista de alunos (/adicionar_alunos)
-# ==============================================================================
-
-def test_parse_student_list():
-    valid, invalid = parse_student_list("Maria:11 99999-0001; João Silva:21988887777; quebrado")
-    assert ("Maria", "5511999990001") in valid
-    assert ("João Silva", "5521988887777") in valid
-    assert invalid == ["quebrado"]
-
-
-def test_parse_student_list_vazia():
-    valid, invalid = parse_student_list("")
-    assert valid == [] and invalid == []
-
-
-# ==============================================================================
 # H2.2 — gatilho de correção por legenda
 # ==============================================================================
 
@@ -258,9 +241,6 @@ def test_prepare_tts_text_corta_em_fronteira_de_frase():
     ("/chaves_TurmaA", CommandType.KEY_STATS, "TurmaA", ""),
     ("/rubrica_TurmaA_1. Tese (0-2); 2. Norma culta (0-8)", CommandType.RUBRIC,
      "TurmaA", "1. Tese (0-2); 2. Norma culta (0-8)"),
-    ("/criar_turma_Curso X_TurmaA", CommandType.CREATE_CLASS, "Curso X", "TurmaA"),
-    ("/adicionar_alunos_TurmaA_Maria:11999990001; João:11999990002",
-     CommandType.ADD_STUDENTS, "TurmaA", "Maria:11999990001; João:11999990002"),
 ])
 def test_novos_comandos_gerenciais(texto, cmd, target, extra):
     assert parse_management_command(texto) == (cmd, target, extra)

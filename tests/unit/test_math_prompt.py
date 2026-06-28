@@ -51,6 +51,7 @@ async def test_flag_off_does_not_append(mocker):
 @pytest.mark.asyncio
 async def test_flag_off_is_byte_for_byte_prefix_of_on(mocker):
     mocker.patch.object(settings, "LANGUAGE_MODE_ENABLED", False)
+    mocker.patch.object(settings, "CHART_GENERATION_ENABLED", False)
 
     mocker.patch.object(settings, "MATH_MODE_ENABLED", False)
     prompt_off = await _build("Cálculo I", subject_name="Cálculo")

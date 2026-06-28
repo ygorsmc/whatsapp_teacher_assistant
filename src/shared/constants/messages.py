@@ -102,7 +102,7 @@ LEAVE_BOOK_NOT_ALLOWED = "ℹ️ Sua conta é gerenciada pelo seu professor (mat
 
 # H3.1 — Onboarding self-service do professor
 TEACHER_ACTIVATION_ASK_NAME = "👨‍🏫 *Bem-vindo(a), professor(a)!*\n\nSua chave *{key}* é válida! 🎉\n\nPara criar sua conta, me diga seu *nome completo*.\n\n_🔒 LGPD: ao responder, você concorda com o uso do seu número para operar o assistente._"
-TEACHER_ACTIVATION_WELCOME = "🎉 *Conta criada, prof. {teacher_name}!*\n\nSeu assistente em 3 passos:\n\n1️⃣ *Material:* compartilhe sua pasta do Google Drive com:\n`{service_account_email}`\n(estrutura: Curso > Disciplina > Aulas/Livro > seções)\n\n2️⃣ *Turma:* `/criar_turma_MeuCurso_TurmaA`\n\n3️⃣ *Alunos:* `/adicionar_alunos_TurmaA_Maria:11999990001; João:11999990002`\n\nDepois é só rodar /sinc_materiais e a mágica começa. Digite /ajuda para ver tudo. 🚀"
+TEACHER_ACTIVATION_WELCOME = "🎉 *Conta criada, prof. {teacher_name}!*\n\nSeu assistente em 3 passos:\n\n1️⃣ *Material:* compartilhe sua pasta do Google Drive com:\n`{service_account_email}`\n(estrutura: Curso > Disciplina > Aulas/Livro > seções)\n\n2️⃣ *Cadastro:* preencha a planilha (abas Professores, Alunos e Turmas) e rode /sinc_alunos.\n\n3️⃣ *Indexação:* rode /sinc_materiais para o robô ler seus PDFs.\n\nDigite /ajuda para ver tudo. 🚀"
 
 # ==========================================
 # H2.2 — CORREÇÃO DISSERTATIVA
