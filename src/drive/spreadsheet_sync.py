@@ -67,6 +67,16 @@ def _cell(row, idx: int, default: str = "") -> str:
     return default
 
 
+# Valores que contam como "Sim" nas colunas de ativação da planilha (Gaming /
+# Nota Engajamento / Idioma). Puro e testável. Ausente/'-'/'não' ⇒ False.
+_YES_VALUES = ("sim", "yes", "true", "1", "x", "ativo")
+
+
+def parse_sheet_yes(cell: str) -> bool:
+    """Interpreta uma célula de ativação Sim/Não da planilha."""
+    return (cell or "").strip().lower() in _YES_VALUES
+
+
 def _parse_date(value: str) -> date | None:
     """Tenta parsear a data em formatos comuns (BR e ISO)."""
     for fmt in _DATE_FORMATS:
@@ -482,6 +492,29 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 },
             )
             upserted_class_ids.add(class_id)
+
+            # ===== Gamificação POR TURMA (decisão professor/instituição) =====
+            # Colunas opcionais ao FINAL da aba "Turmas":
+            #   13 = "Gaming" (ativa a gamificação da turma)
+            #   14 = "Nota Engajamento" (ativa o componente de NOTA — Modelo C)
+            # Autoritativas e gated pelas chaves-mestras: com o flag global OFF o
+            # sync NEM TOCA a coluna (byte-idêntico ao comportamento atual).
+            if settings.GAMIFICATION_ENABLED:
+                gaming_on = parse_sheet_yes(_cell(row, 13))
+                await session.execute(
+                    text('UPDATE "Classes" SET gamification_enabled = :g, updated_at = CURRENT_TIMESTAMP WHERE id = :cid'),
+                    {"g": gaming_on, "cid": class_id},
+                )
+            if settings.GRADE_COMPONENT_ENABLED:
+                # Sim/Não → defaults do sistema (clampados ao teto); Não ⇒ Modelo A (NULL).
+                from src.gamification.grade import clamp_weight
+                nota_on = parse_sheet_yes(_cell(row, 14))
+                w = clamp_weight(settings.GRADE_DEFAULT_WEIGHT_PCT) if nota_on else None
+                g = settings.GRADE_DEFAULT_WEEKLY_XP_GOAL if nota_on else None
+                await session.execute(
+                    text('UPDATE "Classes" SET grade_weight_pct = :w, weekly_xp_goal = :g, updated_at = CURRENT_TIMESTAMP WHERE id = :cid'),
+                    {"w": w, "g": g, "cid": class_id},
+                )
 
         # ===== Detecção de divergência de Disciplina (Alunos × Turmas) =====
         # Uma turma pertence a UMA disciplina; a aba Turmas é autoritativa. Reporta

@@ -290,6 +290,12 @@ class Settings(BaseSettings):
     # Ligas (Fase 1): topo que sobe / fundo que desce por coorte na virada semanal.
     LEAGUE_PROMOTE_TOP: int = Field(default=5)
     LEAGUE_RELEGATE_BOTTOM: int = Field(default=5)
+    # Componente de nota por turma via planilha (coluna "Nota Engajamento"=Sim).
+    # Como a planilha é Sim/Não, o sistema aplica estes padrões (transparentes ao
+    # aluno em /minha_nota). Conservadores (faixa 5–10%, meta atingível). O teto
+    # duro de peso continua sendo grade.MAX_GRADE_WEIGHT_PCT (10%).
+    GRADE_DEFAULT_WEIGHT_PCT: float = Field(default=5.0)
+    GRADE_DEFAULT_WEEKLY_XP_GOAL: int = Field(default=300)
 
     # Database — Postgres em todo lugar (dev e nuvem) para paridade de ambiente.
     # Default = Postgres local do docker-compose; .env e a nuvem injetam via env var.

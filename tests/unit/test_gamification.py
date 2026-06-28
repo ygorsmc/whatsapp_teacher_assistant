@@ -314,5 +314,15 @@ def test_grade_xp_to_full_and_enabled():
     assert grade.is_grade_enabled(10, 350) is True       # Modelo C
 
 
+# ──────────── Ativação por planilha (aba "Turmas" — Sim/Não) ───────────
+
+def test_parse_sheet_yes():
+    from src.drive.spreadsheet_sync import parse_sheet_yes
+    for yes in ("Sim", "sim", "SIM", "yes", "true", "1", "x", "X", "ativo", " Sim "):
+        assert parse_sheet_yes(yes) is True
+    for no in ("", "Não", "nao", "n", "-", "0", "false", None):
+        assert parse_sheet_yes(no) is False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

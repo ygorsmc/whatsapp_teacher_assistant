@@ -72,7 +72,26 @@ def current_week_id() -> str:
 # ==============================================================================
 
 def gamification_on() -> bool:
+    """Chave-mestra/kill-switch global. A ativação REAL é por turma (planilha →
+    Classes.gamification_enabled) — ver `_student_class_gami_on`."""
     return bool(settings.GAMIFICATION_ENABLED)
+
+
+async def _student_class_gami_on(session, student_id: str, course_id: str | None) -> bool:
+    """A turma do aluno NESTE curso tem gamificação ativada (planilha)?
+
+    `BOOL_OR`: se qualquer turma do aluno no curso optou, vale. Sem curso (raro)
+    ou sem turma ⇒ False (não pontua) — a ativação é opt-in deliberado."""
+    if not course_id:
+        return False
+    val = (await session.execute(
+        text('''SELECT COALESCE(BOOL_OR(cl.gamification_enabled), false)
+                FROM "StudentEnrollment" se
+                JOIN "Classes" cl ON cl.id = se.class_id
+                WHERE se.student_id = :sid AND cl.course_id = :cid'''),
+        {"sid": student_id, "cid": course_id},
+    )).scalar()
+    return bool(val)
 
 
 # ==============================================================================
@@ -125,6 +144,9 @@ async def award_xp(
         return None
     try:
         async with AsyncSessionLocal() as session:
+            # Ativação POR TURMA (planilha): turma sem gamificação ⇒ no-op.
+            if not await _student_class_gami_on(session, student_id, course_id):
+                return None
             stats = await _read_day_stats(session, student_id)
             first_act = stats.acts_today == 0
 
@@ -290,7 +312,7 @@ async def _update_streak(session, student_id: str):
         {"st": s.streak, "best": s.best, "sh": s.shields,
          "lad": s.last_active_date, "sid": student_id},
     )
-    return outcome
+    return outcome, old_best
 
 
 # ==============================================================================
@@ -428,6 +450,8 @@ async def award_secret_badge(student_id: str, course_id: str | None, code: str,
         return None
     try:
         async with AsyncSessionLocal() as session:
+            if not await _student_class_gami_on(session, student_id, course_id):
+                return None
             msg = await _unlock_secret(session, student_id, course_id, code, teacher_id)
             await session.commit()
             if msg:
@@ -479,6 +503,13 @@ async def maybe_streak_save_copy(session, student_id: str, class_id: str) -> tup
     if not gamification_on() or not settings.STREAK_ENABLED:
         return None
     try:
+        # Ativação POR TURMA: turma sem gamificação não recebe o nudge de streak.
+        cls_on = (await session.execute(
+            text('SELECT gamification_enabled FROM "Classes" WHERE id = :cid'),
+            {"cid": class_id},
+        )).scalar()
+        if not cls_on:
+            return None
         row = (await session.execute(
             text('''SELECT engagement_streak, streak_last_active_date
                     FROM "Students" WHERE id = :sid'''),
@@ -511,16 +542,18 @@ GAMIFICATION_STUDENT_COMMANDS = frozenset({"meu_ranking", "conquistas", "ocultar
 
 
 async def _resolve_student_scope(session, channel, sender_id: str):
-    """(student_id, name, course_id, teacher_id) da matrícula primária do aluno."""
+    """(student_id, name, course_id, teacher_id, ranking_opted_out, gami_on) do
+    aluno. PREFERE uma turma com gamificação ativa (planilha) quando houver."""
     query_col = channel.get_user_query_column()
     row = (await session.execute(
-        text(f'''SELECT s.id, s.name, c.id AS course_id, c.teacher_id, s.ranking_opted_out
+        text(f'''SELECT s.id, s.name, c.id AS course_id, c.teacher_id, s.ranking_opted_out,
+                        cl.gamification_enabled AS gami_on
                  FROM "Students" s
                  JOIN "StudentEnrollment" se ON se.student_id = s.id
                  JOIN "Classes" cl ON cl.id = se.class_id
                  JOIN "Courses" c ON c.id = cl.course_id
                  WHERE s.{query_col} = :sid AND s.is_active = true
-                 ORDER BY se.created_at LIMIT 1'''),
+                 ORDER BY cl.gamification_enabled DESC, se.created_at LIMIT 1'''),
         {"sid": sender_id},
     )).fetchone()
     return row
@@ -533,7 +566,7 @@ async def run_hide_ranking_command(channel, sender_id: str) -> None:
     try:
         async with AsyncSessionLocal() as session:
             scope = await _resolve_student_scope(session, channel, sender_id)
-            if not scope:
+            if not scope or not scope.gami_on:
                 return
             new_val = not bool(scope.ranking_opted_out)
             await session.execute(
@@ -553,7 +586,7 @@ async def run_achievements_command(channel, sender_id: str) -> None:
     try:
         async with AsyncSessionLocal() as session:
             scope = await _resolve_student_scope(session, channel, sender_id)
-            if not scope:
+            if not scope or not scope.gami_on:
                 return
             rows = (await session.execute(
                 text('''SELECT badge_code, level FROM "StudentBadges"
@@ -608,7 +641,7 @@ async def run_my_ranking_command(channel, sender_id: str) -> None:
     try:
         async with AsyncSessionLocal() as session:
             scope = await _resolve_student_scope(session, channel, sender_id)
-            if not scope:
+            if not scope or not scope.gami_on:
                 return
             if bool(scope.ranking_opted_out):
                 await channel.send_text(sender_id, M.RANKING_OPTED_OUT)
@@ -1155,6 +1188,7 @@ async def run_my_grade_command(channel, sender_id: str) -> None:
                          JOIN "StudentEnrollment" se ON se.student_id = s.id
                          JOIN "Classes" cl ON cl.id = se.class_id
                          WHERE s.{query_col} = :sid AND s.is_active = true
+                           AND cl.gamification_enabled = true
                            AND cl.grade_weight_pct IS NOT NULL AND cl.weekly_xp_goal IS NOT NULL
                          ORDER BY se.created_at LIMIT 1'''),
                 {"sid": sender_id},

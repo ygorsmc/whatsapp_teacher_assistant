@@ -80,6 +80,12 @@ class CourseClass(Base):
     grade_weight_pct = Column(Numeric(5, 2), nullable=True)
     weekly_xp_goal = Column(Integer, nullable=True)
 
+    # Ativação da GAMIFICAÇÃO por turma (decisão professor/instituição na aba
+    # "Turmas" da planilha — coluna "Gaming"). O flag global GAMIFICATION_ENABLED
+    # é a chave-mestra/kill-switch; esta coluna é a opção real por turma. Default
+    # false = turma fora da gamificação até a planilha optar (opt-in deliberado).
+    gamification_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
