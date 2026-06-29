@@ -18,12 +18,10 @@ import io
 import asyncio
 import socket
 import structlog
+from concurrent.futures import ThreadPoolExecutor
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-
-# Increase default socket timeout for Google Drive API (nested folder reads can take >60s)
-socket.setdefaulttimeout(300)
 
 from src.shared.config import settings
 from src.drive.interfaces import IMaterialSource, IRegistrySource, MaterialFile
@@ -33,6 +31,11 @@ from src.drive.folder_convention import (  # re-export (compat) + uso interno
     material_type_for_folder,
     extract_section_number,
 )
+
+# Leituras de pastas aninhadas no Drive podem passar de 60s: sobe o timeout
+# default de socket. Roda antes do singleton `drive_client` lá embaixo, então
+# vale para todas as conexões do googleapiclient.
+socket.setdefaulttimeout(300)
 
 __all__ = [
     "GoogleDriveClient",
@@ -67,6 +70,14 @@ class GoogleDriveClient(IMaterialSource, IRegistrySource):
         self.service = None
         self.sheets_service = None
 
+        # O service do googleapiclient usa httplib2.Http por baixo, que NÃO é
+        # thread-safe (uma conexão/socket SSL não pode ser usada por 2 threads ao
+        # mesmo tempo). Como polling de fundo e comandos sob demanda compartilham
+        # este singleton, rodar as chamadas no ThreadPool default (várias threads)
+        # corrompia o socket TLS → "double free"/SIGABRT. Um executor de UMA thread
+        # serializa todo o acesso: o Http compartilhado só é tocado por uma thread.
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gdrive")
+
         # Verify if service account file exists
         if not os.path.exists(settings.GOOGLE_SERVICE_ACCOUNT_FILE):
             logger.warning(f"Service account file not found: {settings.GOOGLE_SERVICE_ACCOUNT_FILE}")
@@ -98,7 +109,7 @@ class GoogleDriveClient(IMaterialSource, IRegistrySource):
             result = sheet.values().get(spreadsheetId=source_id, range=range_name).execute()
             return result.get('values', [])
 
-        return await loop.run_in_executor(None, _fetch)
+        return await loop.run_in_executor(self._executor, _fetch)
 
     # ── IMaterialSource ─────────────────────────────────────────────────────
     async def list_materials(self, root_id: str) -> list[MaterialFile]:
@@ -169,7 +180,7 @@ class GoogleDriveClient(IMaterialSource, IRegistrySource):
 
             return all_files
 
-        return await loop.run_in_executor(None, _fetch)
+        return await loop.run_in_executor(self._executor, _fetch)
 
     async def download(self, file_id: str) -> bytes:
         """
@@ -198,7 +209,7 @@ class GoogleDriveClient(IMaterialSource, IRegistrySource):
                 status, done = downloader.next_chunk()
             return fh.getvalue()
 
-        return await loop.run_in_executor(None, _download)
+        return await loop.run_in_executor(self._executor, _download)
 
 
 # Singleton instance (a factory devolve esta instância quando o backend = gdrive).

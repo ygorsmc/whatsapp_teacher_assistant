@@ -283,13 +283,17 @@ async def ingest_paragraphs(
     # 5. Upsert to Qdrant
     qdrant = await get_qdrant()
 
-    # 5.1 Remove vetores antigos para este arquivo (evita lixo se o novo PDF for menor que o antigo)
+    # 5.1 Remove os vetores antigos DESTE arquivo (evita lixo se o novo for menor).
+    # Filtra por file_id (id do Drive, ÚNICO e estável) — NUNCA por `source`/nome:
+    # no Drive, vários arquivos compartilham o mesmo nome ("lesson.md", "exercises.md"
+    # em cada Aula), então apagar por nome destruiria os vetores de TODOS os arquivos
+    # homônimos já ingeridos (era o que zerava A1 a cada sync em lote).
     try:
         from qdrant_client.models import Filter, FieldCondition, MatchValue
         await qdrant.delete(
             collection_name=settings.QDRANT_COLLECTION,
             points_selector=Filter(
-                must=[FieldCondition(key="source", match=MatchValue(value=file_name))]
+                must=[FieldCondition(key="file_id", match=MatchValue(value=file_id))]
             )
         )
     except Exception as e:
@@ -449,25 +453,36 @@ async def sync_google_drive():
             
             # Check if we already processed this file successfully
             result = await session.execute(
-                text("SELECT status FROM file_sync_state WHERE file_id = :fid"),
+                text("SELECT status, teacher_id FROM file_sync_state WHERE file_id = :fid"),
                 {"fid": file_id}
             )
             row = result.fetchone()
-            
+
             # 'excluído' = material removido por /delete — a sync NÃO o ressuscita
             # (o professor o apagou de propósito; reaparece só se re-adicionado).
             if row and row[0] in ('concluído', 'dead_letter', 'excluído'):
+                # Reconcilia a posse mesmo sem re-ingerir: a turma/curso pode ter
+                # trocado de dono desde a ingestão, e o /listar_materiais e /delete
+                # filtram por teacher_id. Sem isso, o material já ingerido ficaria
+                # invisível para o novo dono ("não sincronizado").
+                if row[1] != teacher_id:
+                    await session.execute(
+                        text("UPDATE file_sync_state SET teacher_id=:tid WHERE file_id=:fid"),
+                        {"tid": teacher_id, "fid": file_id},
+                    )
+                    await session.commit()
                 skipped_count += 1
                 continue
-            
+
             logger.info(f"Enqueuing file '{file_name}' (current status: {row[0] if row else 'new'})")
-                
-            # Upsert state as 'na_fila'
+
+            # Upsert state as 'na_fila' (reconcilia teacher_id no conflito: a posse
+            # do curso pode ter mudado desde a última ingestão deste arquivo).
             await session.execute(
                 text("""
                     INSERT INTO file_sync_state (file_id, teacher_id, status, processing_started_at)
                     VALUES (:fid, :tid, 'na_fila', CURRENT_TIMESTAMP)
-                    ON CONFLICT(file_id) DO UPDATE SET status='na_fila', processing_started_at=CURRENT_TIMESTAMP
+                    ON CONFLICT(file_id) DO UPDATE SET status='na_fila', teacher_id=:tid, processing_started_at=CURRENT_TIMESTAMP
                 """),
                 {"fid": file_id, "tid": teacher_id}
             )
