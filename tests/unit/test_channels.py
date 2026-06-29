@@ -182,3 +182,97 @@ async def test_send_buttons_overflows_long_body(mocker):
     await ch.send_buttons("123", big, [{"id": "b1", "title": "OK"}])
     assert sent_texts and len(sent_texts[0]) == 1500   # corpo completo foi como texto
     assert len(captured["msg"]["interactive"]["body"]["text"]) <= 1024
+
+
+# ── Áudio: transcrição como TEXTO logo DEPOIS do áudio (não há caption nativo) ──
+
+class _FakeUpload:
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"id": "media123", "result": {}}
+
+
+class _FakeHTTPClient:
+    """Stub mínimo de httpx.AsyncClient para o upload de mídia (media/sendAudio)."""
+
+    def __init__(self, calls):
+        self._calls = calls
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def post(self, *a, **k):
+        self._calls.append("upload")
+        return _FakeUpload()
+
+
+@pytest.mark.asyncio
+async def test_send_audio_caption_after_audio_whatsapp(mocker):
+    ch = WhatsAppChannel()
+    calls: list = []
+    mocker.patch("src.channel.whatsapp.httpx.AsyncClient", lambda: _FakeHTTPClient(calls))
+
+    async def fake_send(msg):
+        calls.append(("audio", msg["type"]))
+        return {"messages": [{"id": "wamid.audio"}]}
+
+    async def fake_text(uid, txt, reply_to=None):
+        calls.append(("text", txt, reply_to))
+        return {}
+
+    mocker.patch.object(ch, "_send_request", side_effect=fake_send)
+    mocker.patch.object(ch, "send_text", side_effect=fake_text)
+
+    await ch.send_audio("123", b"\x00\x01", caption="apple. I eat an apple.")
+
+    # Ordem RÍGIDA: upload → áudio → transcrição CITANDO (reply_to) o áudio.
+    assert calls == [
+        "upload",
+        ("audio", "audio"),
+        ("text", "apple. I eat an apple.", "wamid.audio"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_send_audio_without_caption_sends_no_text_whatsapp(mocker):
+    ch = WhatsAppChannel()
+    calls: list = []
+    mocker.patch("src.channel.whatsapp.httpx.AsyncClient", lambda: _FakeHTTPClient(calls))
+
+    async def fake_send(msg):
+        calls.append(("audio", msg["type"]))
+        return {}
+
+    async def fake_text(uid, txt, reply_to=None):
+        calls.append(("text", txt))
+        return {}
+
+    mocker.patch.object(ch, "_send_request", side_effect=fake_send)
+    mocker.patch.object(ch, "send_text", side_effect=fake_text)
+
+    await ch.send_audio("123", b"\x00\x01")
+
+    assert not any(isinstance(c, tuple) and c[0] == "text" for c in calls)
+
+
+@pytest.mark.asyncio
+async def test_send_audio_caption_after_audio_telegram(mocker):
+    # Paridade: o Telegram também manda a transcrição como TEXTO depois do áudio.
+    ch = TelegramChannel()
+    calls: list = []
+    mocker.patch("src.channel.telegram.httpx.AsyncClient", lambda: _FakeHTTPClient(calls))
+
+    async def fake_text(uid, txt, reply_to=None):
+        calls.append(("text", txt))
+        return {}
+
+    mocker.patch.object(ch, "send_text", side_effect=fake_text)
+
+    await ch.send_audio("123", b"\x00\x01", caption="bonjour")
+
+    assert calls == ["upload", ("text", "bonjour")]

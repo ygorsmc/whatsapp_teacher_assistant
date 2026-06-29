@@ -194,8 +194,10 @@ class WhatsAppChannel(IMessagingChannel):
         pass
 
     async def send_audio(self, user_id: str, audio_bytes: bytes, caption: str = "") -> dict:
-        """Pílula de áudio (H1.3): upload do MP3 na Media API + envio.
-        WhatsApp não suporta caption em áudio — se houver, vai em texto antes."""
+        """Nota de voz (H1.3): upload do MP3 na Media API + envio.
+        WhatsApp não suporta caption nativo em áudio — a transcrição, se houver,
+        vai como TEXTO logo DEPOIS do áudio ('transcrição abaixo': acessibilidade
+        + paridade com o Telegram)."""
         async with httpx.AsyncClient() as client:
             upload = await client.post(
                 url=f"{self.api_url}/{self.phone_number_id}/media",
@@ -207,16 +209,21 @@ class WhatsAppChannel(IMessagingChannel):
             upload.raise_for_status()
             media_id = upload.json()["id"]
 
-        if caption:
-            await self.send_text(user_id, caption)
-
-        return await self._send_request({
+        response = await self._send_request({
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": user_id,
             "type": "audio",
             "audio": {"id": media_id},
         })
+
+        if caption:
+            # Transcrição citando (reply/quote) a própria nota de voz, para o texto
+            # ficar visualmente atrelado ao áudio.
+            audio_id = (response.get("messages") or [{}])[0].get("id")
+            await self.send_text(user_id, caption, reply_to=audio_id)
+
+        return response
 
     async def send_image(self, user_id: str, image_bytes: bytes, caption: str = "") -> dict:
         """Fórmula renderizada (M6): upload do PNG na Media API + envio.

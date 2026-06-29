@@ -95,7 +95,9 @@ async def deliver_vocab_flashcard(
         try:
             audio = await synthesize_listening(review.audio_script, target_lang)
             if audio:
-                await channel.send_audio(sender_id, audio)
+                # Transcrição logo abaixo da nota de voz (flashcard de pronúncia —
+                # ver a palavra/exemplo é o objetivo, não atrapalha a prática).
+                await channel.send_audio(sender_id, audio, caption=review.audio_script)
         except Exception as e:
             logger.warning("vocab_audio_failed", student_id=student_id, error=str(e)[:200])
 

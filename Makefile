@@ -93,11 +93,36 @@ dev-api:
 	@echo "[INFO] Starting FastAPI webhook server..."
 	.venv/bin/uvicorn src.webhook.main:app --reload --host 0.0.0.0 --port 8000
 
-# Pattern Rule for all workers
+# Pattern Rule for all workers — com auto-restart em caso de FALHA (on-failure).
+# Reinicia quando o worker morre por ERRO: exit 1..127 OU crash nativo via sinal
+# fatal (SIGABRT=134, SIGSEGV=139, SIGBUS=135...). Encerra de vez SÓ em saída
+# limpa (0) ou desligamento pedido (Ctrl+C=130 / SIGTERM=143) — não vira loop no
+# Ctrl+C, mas TAMBÉM não trata um core dump como se fosse desligamento limpo.
+# Guarda anti crash-loop: 5 quedas seguidas em <5s (ex.: erro de import) → desiste.
 # Usage: make dev-worker-llm, make dev-worker-ingestion, make dev-worker-scheduler
 dev-worker-%:
-	@echo "[INFO] Starting Worker: $* ..."
-	.venv/bin/python -m src.workers.$*_worker
+	@echo "[INFO] Starting Worker: $* (auto-restart on failure) ..."
+	@fails=0; \
+	while true; do \
+		started=$$(date +%s); \
+		.venv/bin/python -m src.workers.$*_worker; \
+		code=$$?; \
+		if [ $$code -eq 0 ] || [ $$code -eq 130 ] || [ $$code -eq 143 ]; then \
+			echo "[INFO] Worker $* exited (code $$code). Not restarting."; \
+			break; \
+		fi; \
+		if [ $$(( $$(date +%s) - $$started )) -lt 5 ]; then \
+			fails=$$((fails + 1)); \
+		else \
+			fails=0; \
+		fi; \
+		if [ $$fails -ge 5 ]; then \
+			echo "[ERROR] Worker $* crashed 5x in a row (code $$code). Giving up — fix the error and rerun."; \
+			exit $$code; \
+		fi; \
+		echo "[WARN] Worker $* crashed (code $$code). Restarting in 2s... (fail $$fails/5)"; \
+		sleep 2; \
+	done
 
 start:
 	@.venv/bin/python scripts/start_ngrok.py

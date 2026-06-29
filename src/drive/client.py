@@ -16,10 +16,14 @@ compatibilidade com importadores existentes.
 import os
 import io
 import asyncio
+import socket
 import structlog
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+
+# Increase default socket timeout for Google Drive API (nested folder reads can take >60s)
+socket.setdefaulttimeout(300)
 
 from src.shared.config import settings
 from src.drive.interfaces import IMaterialSource, IRegistrySource, MaterialFile

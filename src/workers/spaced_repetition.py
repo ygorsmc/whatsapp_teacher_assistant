@@ -352,7 +352,9 @@ async def process_spaced_repetition():
                     try:
                         audio = await synthesize_listening(bank["audio_script"], target_lang)
                         if audio:
-                            await channel.send_audio(sender_id, audio)
+                            # Transcrição logo abaixo da nota de voz (flashcard de
+                            # pronúncia — ver a palavra/exemplo é o objetivo).
+                            await channel.send_audio(sender_id, audio, caption=bank["audio_script"])
                     except Exception as e:
                         logger.warning("srs_vocab_audio_failed", srq_id=item.srq_id, error=str(e)[:200])
 

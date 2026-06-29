@@ -155,16 +155,25 @@ class TelegramChannel(IMessagingChannel):
         await self._send_request("sendChatAction", payload)
 
     async def send_audio(self, user_id: str, audio_bytes: bytes, caption: str = "") -> dict:
-        """Pílula de áudio (H1.3): sendAudio aceita MP3 via multipart."""
+        """Nota de voz (H1.3): sendAudio aceita MP3 via multipart. A transcrição,
+        se houver, vai como TEXTO logo DEPOIS do áudio — paridade com o WhatsApp
+        (que não aceita caption nativo em áudio) e mesma renderização de markdown."""
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 url=f"{self.api_url}/sendAudio",
-                data={"chat_id": user_id, **({"caption": caption} if caption else {})},
+                data={"chat_id": user_id},
                 files={"audio": ("pilula.mp3", audio_bytes, "audio/mpeg")},
                 timeout=60.0,
             )
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+
+        if caption:
+            # Transcrição citando (reply) a nota de voz — paridade com o WhatsApp.
+            audio_id = result.get("result", {}).get("message_id")
+            await self.send_text(user_id, caption, reply_to=audio_id)
+
+        return result
 
     async def send_image(self, user_id: str, image_bytes: bytes, caption: str = "") -> dict:
         """Fórmula renderizada (M6): sendPhoto aceita PNG via multipart, com caption."""
