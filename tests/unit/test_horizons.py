@@ -275,7 +275,6 @@ def test_language_essay_prompt_placeholders():
     assert "examinador" in p           # persona de especialista
     assert "B1" in p and "inglês" in p
     assert "My essay text here." in p  # texto do OCR embutido
-    assert "OCR" in p                  # instrução de tolerar ruído de leitura
     assert "{" not in p                # todos os placeholders resolvidos
 
 

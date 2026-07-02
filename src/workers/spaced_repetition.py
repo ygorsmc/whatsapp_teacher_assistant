@@ -234,6 +234,7 @@ async def process_spaced_repetition():
                 SELECT srq.id AS srq_id, srq.student_id, srq.quiz_bank_id, srq.interval_days,
                        s.name AS student_name, s.phone, s.telegram_chat_id, s.preferred_channel,
                        qb.course_id, qb.lesson_number, qb.material_type, c.name AS course_name,
+                       COALESCE(sub.name, c.name, 'Geral') AS subject_name,
                        (SELECT MAX(si.timestamp) FROM "StudentInteractions" si
                         WHERE si.student_id = srq.student_id
                           AND si.interaction_type IN ('message_received', 'quiz_answered')
@@ -242,6 +243,7 @@ async def process_spaced_repetition():
                 JOIN "Students" s ON s.id = srq.student_id
                 JOIN "QuizBank" qb ON qb.id = srq.quiz_bank_id
                 LEFT JOIN "Courses" c ON c.id = qb.course_id
+                LEFT JOIN "Subjects" sub ON sub.id = qb.subject_id
                 WHERE srq.status = 'pending'
                   AND srq.next_review_at <= :now
                   AND s.is_active = true
@@ -328,8 +330,13 @@ async def process_spaced_repetition():
                 quiz_output = _shuffled_quiz_from_bank(bank)
 
                 # Explicita o degrau da escada (D+3/D+10/D+30, ou o valor
-                # adaptativo) para mapear se a reentrega caiu no intervalo certo.
-                await channel.send_text(sender_id, SPACED_REVIEW_INTRO.format(interval=item.interval_days))
+                # adaptativo) e a disciplina — sem isso, disciplinas parecidas
+                # do mesmo curso (ex.: "Design Thinking" dentro de IA) ficam
+                # indistinguíveis para o aluno mapear se está indo bem em cada uma.
+                await channel.send_text(
+                    sender_id,
+                    SPACED_REVIEW_INTRO.format(interval=item.interval_days, subject_name=item.subject_name),
+                )
 
                 from src.workers.micro_learning import send_quiz_to_student
                 await send_quiz_to_student(

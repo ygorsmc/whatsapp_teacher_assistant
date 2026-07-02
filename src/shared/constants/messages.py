@@ -59,8 +59,10 @@ READING_COMPLETED = "🏆 *PARABÉNS, {student_name}!*\n\nVocê concluiu 100% do
 # Revisão Espaçada (Fase 4)
 # {interval} = dias desde a 1ª resposta (escada D+3 → D+10 → D+30, ou o valor
 # adaptativo com SRS_ADAPTIVE_ENABLED). Explicitar o degrau ajuda a mapear se a
-# reentrega está caindo no intervalo certo.
-SPACED_REVIEW_INTRO = "🧠 *Revisão Espaçada — D+{interval}*\n\nLembra deste conteúdo? Revisitar no momento certo é o segredo da memória de longo prazo. Responda aí! 👇"
+# reentrega está caindo no intervalo certo. A disciplina também é explícita —
+# sem ela, disciplinas parecidas do mesmo curso (ex.: "Design Thinking" dentro
+# de "Inteligência Artificial") ficam indistinguíveis para o aluno.
+SPACED_REVIEW_INTRO = "🧠 *Revisão Espaçada — D+{interval}*\n📘 {subject_name}\n\nLembra deste conteúdo? Revisitar no momento certo é o segredo da memória de longo prazo. Responda aí! 👇"
 
 # Mapeamento Aula ↔ Capítulo (Fase 6.5)
 LESSON_CHAPTER_SUGGESTION = "\n\n📚 *Dica:* o conteúdo de hoje complementa o *Capítulo {chapter}* do seu livro. Que tal revisar?"

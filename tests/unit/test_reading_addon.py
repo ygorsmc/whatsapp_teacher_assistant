@@ -250,6 +250,16 @@ def test_srs_ease_factor_clamp():
     assert adjust_ease(2.95, True) == 3.0   # teto
 
 
+def test_spaced_review_intro_mostra_intervalo_e_disciplina():
+    # Sem a disciplina explícita, "Design Thinking" e outras matérias do mesmo
+    # curso (ex.: Inteligência Artificial) ficam indistinguíveis para o aluno.
+    from src.shared.constants.messages import SPACED_REVIEW_INTRO
+    msg = SPACED_REVIEW_INTRO.format(interval=10, subject_name="Design Thinking")
+    assert "D+10" in msg
+    assert "Design Thinking" in msg
+    assert "{" not in msg  # todos os placeholders resolvidos
+
+
 # ==============================================================================
 # Fase 5 — Gabarito Verificado (extração de referências da pergunta)
 # ==============================================================================
