@@ -1,3 +1,5 @@
+import base64
+
 from src.llm.interfaces import LLMProvider, EmbeddingProvider
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings, AzureOpenAIEmbeddings
 from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
@@ -53,17 +55,34 @@ class BaseLangChainProvider(LLMProvider):
         
         response = await self.llm.ainvoke(messages)
         self._track_usage(response)
-        
-        content = response.content
-        
+        return self._normalize_content(response.content)
+
+    async def agenerate_vision(self, prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+        """Geração MULTIMODAL: prompt + imagem inline (data URI base64).
+
+        Usado pela correção de redação por foto (/corrigir, Vertical de
+        Idiomas). O LangChain traduz o bloco `image_url` para o formato nativo
+        do provider (inline_data no Gemini, image_url na OpenAI)."""
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        message = HumanMessage(content=[
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64}"}},
+        ])
+        response = await self.llm.ainvoke([message])
+        self._track_usage(response)
+        return self._normalize_content(response.content)
+
+    @staticmethod
+    def _normalize_content(content: Any) -> str:
+        """Achata a resposta do LangChain (str ou lista de parts) em texto puro."""
         if isinstance(content, list):
             text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and "text" in part]
             text_parts.extend([str(part) for part in content if isinstance(part, str)])
             content = " ".join(text_parts)
-            
+
         if not content or not content.strip():
             content = "Desculpe, a inteligência artificial bloqueou a resposta ou retornou vazio."
-            
+
         return content
 
     def _track_usage(self, response: Any):

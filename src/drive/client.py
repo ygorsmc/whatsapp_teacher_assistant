@@ -59,7 +59,10 @@ SCOPES = [
 _SHEET_RANGES = {
     IRegistrySource.PROFESSORES: "Professores!A2:F1000",
     IRegistrySource.ALUNOS: "Alunos!A2:K1000",
-    IRegistrySource.TURMAS: "Turmas!A2:M1000",
+    # A→O: até Nível (M/12) o range antigo bastava; as colunas de ativação da
+    # gamificação — Gaming (N/13) e Nota Engajamento (O/14), lidas pelo sync em
+    # _cell(row, 13/14) — ficavam FORA do range e nunca chegavam ao código.
+    IRegistrySource.TURMAS: "Turmas!A2:O1000",
     IRegistrySource.CHAVES: "Chaves!A2:F10000",
 }
 

@@ -250,3 +250,106 @@ def test_novos_comandos_de_aluno():
     assert parse_student_command("/sair_livro") == CommandType.LEAVE_BOOK
     assert parse_student_command("/corrigir") == CommandType.CORRECT_ESSAY
     assert parse_student_command("/corrigir_agora") is None  # allowlist estrita
+
+
+# ==============================================================================
+# Correção de redação — Vertical de Idiomas (visão) + gate por curso de idioma
+# ==============================================================================
+
+def test_legenda_barra_corrigir_dispara_correcao():
+    # O pedido do produto: mandar a FOTO com a legenda "/corrigir".
+    assert caption_triggers_essay("/corrigir") is True
+    assert caption_triggers_essay("/CORRIGIR") is True
+
+
+def test_language_essay_prompt_placeholders():
+    # Esquema: Mistral OCR lê a foto → o TEXTO extraído entra no prompt do
+    # examinador (ESSAY_LANGUAGE_MODEL corrige texto, não imagem).
+    from src.shared.constants.prompts import LANGUAGE_ESSAY_CORRECTION_PROMPT
+    p = LANGUAGE_ESSAY_CORRECTION_PROMPT.format(
+        target_language_name="inglês",
+        feedback_language_name="português brasileiro",
+        cefr_level="B1",
+        essay_text="My essay text here.",
+    )
+    assert "examinador" in p           # persona de especialista
+    assert "B1" in p and "inglês" in p
+    assert "My essay text here." in p  # texto do OCR embutido
+    assert "OCR" in p                  # instrução de tolerar ruído de leitura
+    assert "{" not in p                # todos os placeholders resolvidos
+
+
+def test_essay_por_padrao_somente_idiomas():
+    # Default do produto: correção por foto habilitada só em turmas de idiomas;
+    # o fluxo genérico H2.2 (OCR + rubrica) volta com ESSAY_ALL_COURSES_ENABLED.
+    from src.shared.config import settings
+    assert settings.ESSAY_ALL_COURSES_ENABLED is False
+    assert settings.ESSAY_LANGUAGE_MODEL == "gemini-3.5-flash"
+
+
+@pytest.mark.asyncio
+async def test_ocr_preview_gateado_pela_flag(mocker):
+    """DEBUG de teste: com ESSAY_OCR_PREVIEW_ENABLED o texto lido pelo OCR é
+    mandado ao aluno antes da correção; com a flag OFF é no-op (produção)."""
+    from src.workers import essay
+    from src.shared.config import settings
+
+    channel = mocker.Mock()
+    channel.send_text = mocker.AsyncMock()
+
+    # Flag OFF → nada é enviado
+    mocker.patch.object(settings, "ESSAY_OCR_PREVIEW_ENABLED", False)
+    await essay._maybe_preview_ocr(channel, "sender-1", "texto lido pelo OCR")
+    channel.send_text.assert_not_called()
+
+    # Flag ON → manda o texto do OCR ao aluno
+    mocker.patch.object(settings, "ESSAY_OCR_PREVIEW_ENABLED", True)
+    await essay._maybe_preview_ocr(channel, "sender-1", "texto lido pelo OCR")
+    channel.send_text.assert_awaited_once()
+    (_sid, body) = channel.send_text.await_args.args
+    assert "texto lido pelo OCR" in body
+
+
+@pytest.mark.asyncio
+async def test_agenerate_vision_monta_mensagem_multimodal(mocker):
+    """agenerate_vision anexa a imagem como data URI base64 num bloco image_url
+    junto do prompt — o LangChain traduz para o formato nativo do provider."""
+    from types import SimpleNamespace
+    from src.llm.providers import GeminiLLMProvider
+
+    provider = object.__new__(GeminiLLMProvider)  # sem __init__ (não exige API key)
+    provider.llm = mocker.Mock()
+    provider.llm.ainvoke = mocker.AsyncMock(
+        return_value=SimpleNamespace(content="feedback ok", response_metadata={})
+    )
+
+    out = await provider.agenerate_vision("corrija esta redação", b"bytes-da-foto")
+
+    assert out == "feedback ok"
+    (messages,) = provider.llm.ainvoke.call_args.args
+    parts = messages[0].content
+    assert parts[0] == {"type": "text", "text": "corrija esta redação"}
+    url = parts[1]["image_url"]["url"]
+    assert url.startswith("data:image/jpeg;base64,")
+
+
+@pytest.mark.asyncio
+async def test_mistral_ocr_image_payload(mocker):
+    """ocr_image manda a foto como image_url data-URI ao Mistral OCR e devolve
+    o markdown puro — sem o enriquecimento Gemini do parse() de PDFs."""
+    from types import SimpleNamespace
+    from src.parsing.mistral_parser import MistralOCRParser
+
+    parser = object.__new__(MistralOCRParser)  # sem __init__ (não exige API key)
+    process = mocker.AsyncMock(return_value=SimpleNamespace(
+        pages=[SimpleNamespace(markdown="Hello"), SimpleNamespace(markdown="World")]
+    ))
+    parser.mistral_client = SimpleNamespace(ocr=SimpleNamespace(process_async=process))
+
+    out = await parser.ocr_image(b"bytes-da-foto")
+
+    assert out == "Hello\n\nWorld"
+    kwargs = process.call_args.kwargs
+    assert kwargs["model"] == "mistral-ocr-latest"
+    assert kwargs["document"]["type"] == "image_url"
+    assert kwargs["document"]["image_url"].startswith("data:image/jpeg;base64,")

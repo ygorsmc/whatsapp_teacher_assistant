@@ -327,7 +327,9 @@ async def process_spaced_repetition():
                 channel = get_channel(ct)
                 quiz_output = _shuffled_quiz_from_bank(bank)
 
-                await channel.send_text(sender_id, SPACED_REVIEW_INTRO)
+                # Explicita o degrau da escada (D+3/D+10/D+30, ou o valor
+                # adaptativo) para mapear se a reentrega caiu no intervalo certo.
+                await channel.send_text(sender_id, SPACED_REVIEW_INTRO.format(interval=item.interval_days))
 
                 from src.workers.micro_learning import send_quiz_to_student
                 await send_quiz_to_student(

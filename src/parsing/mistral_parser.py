@@ -194,6 +194,21 @@ class MistralOCRParser(IDocumentParser):
             raise
         return self._normalize_sdk_pages(ocr_response.pages)
 
+    async def ocr_image(self, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+        """OCR de UMA imagem (ex.: foto de redação) → texto markdown puro.
+
+        Sem o enriquecimento Gemini do `parse()` (a foto É o documento inteiro;
+        descrevê-la queimaria cota à toa). Levanta a exceção da Mistral em
+        falha — o chamador decide a mensagem ao usuário."""
+        b64 = base64.b64encode(image_bytes).decode("utf-8")
+        resp = await self.mistral_client.ocr.process_async(
+            model="mistral-ocr-latest",
+            document={"type": "image_url", "image_url": f"data:{mime_type};base64,{b64}"},
+        )
+        return "\n\n".join(
+            p.markdown for p in resp.pages if getattr(p, "markdown", "")
+        ).strip()
+
     async def parse(self, blob_url: str, file_bytes: bytes, filename: str) -> List[str]:
         if not filename.lower().endswith('.pdf'):
             return [file_bytes.decode('utf-8', errors='ignore')]

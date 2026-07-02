@@ -324,5 +324,22 @@ def test_parse_sheet_yes():
         assert parse_sheet_yes(no) is False
 
 
+def test_turmas_range_cobre_colunas_de_ativacao():
+    """O sync lê Gaming em `_cell(row, 13)` (coluna N) e Nota Engajamento em
+    `_cell(row, 14)` (coluna O). O range do Google Sheets PRECISA alcançar a
+    coluna O — senão essas colunas ficam FORA do fetch e a ativação por planilha
+    vira no-op silencioso (bug: range parava em M/Nível)."""
+    from src.drive.client import _SHEET_RANGES
+    from src.drive.interfaces import IRegistrySource
+
+    rng = _SHEET_RANGES[IRegistrySource.TURMAS]        # ex.: "Turmas!A2:O1000"
+    last_col = rng.split("!")[1].split(":")[1].rstrip("0123456789")  # "O"
+    col_num = 0
+    for ch in last_col:
+        col_num = col_num * 26 + (ord(ch) - ord("A") + 1)
+    # Nota Engajamento é a coluna O (15ª); Gaming é a N (14ª). Ambas cobertas.
+    assert col_num >= 15, f"range Turmas para em {last_col}; precisa alcançar O (Gaming/Nota)"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

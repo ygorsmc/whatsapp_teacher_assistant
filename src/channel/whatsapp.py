@@ -2,11 +2,15 @@ import httpx
 import asyncio
 import hmac
 import hashlib
+import structlog
 from typing import Any, Mapping
 from fastapi import Response
 from src.shared.config import settings
 from src.channel.interfaces import IMessagingChannel, InboundMessage
 from src.channel.markdown import to_whatsapp_markdown
+from src.channel.text_utils import chunk_text
+
+logger = structlog.get_logger(__name__)
 
 class WhatsAppChannel(IMessagingChannel):
     """Implementação de canal para WhatsApp Cloud API."""
@@ -22,13 +26,19 @@ class WhatsAppChannel(IMessagingChannel):
         self.access_token = settings.WHATSAPP_TOKEN
         self.app_secret = settings.META_APP_SECRET
         self.verify_token = settings.META_VERIFY_TOKEN
-        self.max_length = settings.MAX_WHATSAPP_MESSAGE_LENGTH
+        self.max_length = settings.MAX_TEXT_MESSAGE_LENGTH
 
     def get_user_query_column(self) -> str:
         return "phone"
 
     async def _send_request(self, message: dict) -> dict:
-        """Envio interno para a Graph API."""
+        """Envio interno para a Graph API.
+
+        Em erro, a Meta detalha o motivo (parâmetro inválido, janela de 24h
+        fechada, etc.) no CORPO JSON da resposta — que `raise_for_status()`
+        descarta, deixando só "400 Bad Request". Logamos o corpo ANTES de
+        propagar, para o motivo do 4xx/5xx nunca ficar invisível (era o que
+        escondia a causa das falhas de entrega de quiz)."""
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 url=f"{self.api_url}/{self.phone_number_id}/messages",
@@ -36,32 +46,19 @@ class WhatsAppChannel(IMessagingChannel):
                 json=message,
                 timeout=30.0,
             )
+            if response.is_error:
+                logger.error(
+                    "whatsapp_api_error",
+                    status=response.status_code,
+                    msg_type=message.get("type"),
+                    body=response.text[:800],
+                )
             response.raise_for_status()
             return response.json()
 
     def _chunk_text(self, text: str) -> list[str]:
         """Divide um texto longo em pedaços seguros para envio no WhatsApp."""
-        if len(text) <= self.max_length:
-            return [text]
-            
-        chunks = []
-        while text:
-            if len(text) <= self.max_length:
-                chunks.append(text)
-                break
-                
-            split_idx = text.rfind('\n\n', 0, self.max_length)
-            if split_idx == -1:
-                split_idx = text.rfind('\n', 0, self.max_length)
-                if split_idx == -1:
-                    split_idx = text.rfind(' ', 0, self.max_length)
-                    if split_idx == -1:
-                        split_idx = self.max_length
-                        
-            chunks.append(text[:split_idx].strip())
-            text = text[split_idx:].strip()
-            
-        return chunks
+        return chunk_text(text, self.max_length)
 
     async def send_text(self, user_id: str, text: str, reply_to: str | None = None) -> dict:
         text = to_whatsapp_markdown(text)
@@ -90,6 +87,10 @@ class WhatsAppChannel(IMessagingChannel):
         return last_response
 
     async def send_buttons(self, user_id: str, body: str, buttons: list[dict], footer: str = "") -> dict:
+        if not buttons:
+            # Sem botões a Meta rejeita com 400 opaco. Acontecia quando um quiz
+            # vinha com a lista de alternativas vazia — falha cedo e legível.
+            raise ValueError("Reply Buttons exigem ao menos 1 opção no WhatsApp")
         if len(buttons) > 3:
             raise ValueError("Reply Buttons suportam no máximo 3 opções no WhatsApp")
 
@@ -125,6 +126,8 @@ class WhatsAppChannel(IMessagingChannel):
 
     async def send_list(self, user_id: str, body: str, button_text: str, sections: list[dict], footer: str = "") -> dict:
         total_rows = sum(len(s.get("rows", [])) for s in sections)
+        if total_rows == 0:
+            raise ValueError("List Messages exigem ao menos 1 item no WhatsApp")
         if total_rows > 10:
             raise ValueError("List Messages suportam no máximo 10 itens no WhatsApp")
 

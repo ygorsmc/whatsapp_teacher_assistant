@@ -179,7 +179,7 @@ async def run_rag_pipeline(student_context: dict, text: str) -> str:
     if retrieval.evidence in ("green", "yellow"):
         try:
             from src.workers.gamification import award_xp
-            await award_xp(student.id, course.id, "rag_doubt", teacher_id=teacher.id)
+            await award_xp(student.id, course.id, "rag_doubt", teacher_id=teacher.id, subject_id=subject_id)
         except Exception as e:
             logger.error("gamification_rag_hook_failed", error=str(e)[:200])
 
@@ -375,9 +375,13 @@ async def handle_quiz_response(
     # quizzes pontuam por acerto/erro (ou revisão SRS no prazo). Isolado: flag
     # OFF ⇒ no-op (xp_line=None), nunca altera a confirmação atual.
     try:
-        from src.workers.gamification import award_xp, award_quiz_xp, _now_utc
+        from src.workers.gamification import award_xp, award_quiz_xp, subject_for_quiz_bank, _now_utc
         if quiz.reading_plan_id:
-            xp_line = await award_xp(student_id, quiz.course_id, "reading") if is_correct else None
+            xp_line = (
+                await award_xp(student_id, quiz.course_id, "reading",
+                               subject_id=await subject_for_quiz_bank(quiz.quiz_bank_id))
+                if is_correct else None
+            )
         else:
             xp_line = await award_quiz_xp(
                 student_id, quiz.course_id, is_correct=is_correct,
@@ -503,6 +507,7 @@ async def handle_review_request(channel, sender_id: str, student_context: dict) 
         from src.rag.review_generator import generate_language_review
         review = await generate_language_review(
             teacher_id=teacher.id,
+            student_id=student.id,
             student_name=student.name,
             course_id=course.id,
             course_name=course.name,
@@ -511,6 +516,8 @@ async def handle_review_request(channel, sender_id: str, student_context: dict) 
             lesson_label=lesson_label,
             delivery=delivery,
             target_language=target_language,
+            subject_id=subject_id,
+            from_bank=True,
         )
         if review is None:
             delivery = None  # sem conteúdo de idioma → cai na revisão normal
@@ -710,15 +717,21 @@ async def process_inbound(event: dict, ctx: MessageContext):
             interaction_type = "message_received"
             if message_type == "interactive" and interactive_payload and interactive_payload.get("id", "").startswith("quiz_"):
                 interaction_type = "quiz_answered"
-            
+
+            # Carimbo de curso/disciplina do contexto default do aluno — alimenta
+            # o /engajamento por disciplina (linhas antigas ficam NULL = "Geral").
+            _ctx_course = student_context.get("course")
+            _ctx_subject = student_context.get("subject")
             await session.execute(
                 sql_text("""
-                    INSERT INTO "StudentInteractions" (id, student_id, interaction_type, message_content) 
-                    VALUES (:id, :sid, :itype, :msg)
+                    INSERT INTO "StudentInteractions" (id, student_id, course_id, subject_id, interaction_type, message_content)
+                    VALUES (:id, :sid, :cid, :sub, :itype, :msg)
                 """),
                 {
                     "id": str(uuid4()),
                     "sid": student_id,
+                    "cid": _ctx_course.id if _ctx_course else None,
+                    "sub": _ctx_subject.id if _ctx_subject else None,
                     "itype": interaction_type,
                     "msg": text or (interactive_payload.get("title", "") if interactive_payload else "")
                 }

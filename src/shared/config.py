@@ -27,7 +27,10 @@ class Settings(BaseSettings):
     DEFAULT_LANGUAGE: str = Field(default="pt_BR")
     META_TEMPLATE_REVIEW: str = Field(default="convite_revisao_quiz")
     TIMEZONE_OFFSET_HOURS: int = Field(default=-3)
-    MAX_WHATSAPP_MESSAGE_LENGTH: int = Field(default=4000)
+    # Teto de caracteres por mensagem de texto — compartilhado entre WhatsApp e
+    # Telegram (as duas APIs rejeitam/truncam perto de 4096; textos maiores são
+    # divididos em várias mensagens por `src.channel.text_utils.chunk_text`).
+    MAX_TEXT_MESSAGE_LENGTH: int = Field(default=4000)
     
     # Messaging Channel
     CHANNEL_BACKEND: str = Field(default="whatsapp") # "whatsapp" ou "telegram"
@@ -205,6 +208,18 @@ class Settings(BaseSettings):
     AZURE_SPEECH_REGION: Optional[str] = Field(default=None)
     # H2.2 Correção dissertativa
     ESSAY_DAILY_LIMIT: int = Field(default=2)
+    # Correção de redação por foto (/corrigir): por padrão atende SÓ aluno com
+    # matrícula em turma de IDIOMA (correção visual especialista, calibrada ao
+    # CEFR). True reabre o fluxo genérico (OCR + rubrica do professor) para as
+    # demais turmas — o comportamento H2.2 original.
+    ESSAY_ALL_COURSES_ENABLED: bool = Field(default=False)
+    # Modelo que CORRIGE a redação de idiomas (o texto vem do Mistral OCR).
+    ESSAY_LANGUAGE_MODEL: str = Field(default="gemini-3.5-flash")
+    # DEBUG de qualidade do OCR: manda o texto lido pelo OCR ao aluno ANTES da
+    # correção, para inspecionar como a foto foi transcrita. Só para validação
+    # durante os testes — em produção fica False (o aluno não deve ver o texto
+    # cru, com ruído de OCR, antes do feedback).
+    ESSAY_OCR_PREVIEW_ENABLED: bool = Field(default=False)
     # H3.2 Hiperpersonalização
     SRS_ADAPTIVE_ENABLED: bool = Field(default=False)   # escada fixa D+3/10/30 por padrão
     ADAPTIVE_TOPIC_PRIORITY: bool = Field(default=True)  # prioriza tópicos fracos na rotação

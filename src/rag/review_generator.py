@@ -539,6 +539,10 @@ async def generate_review(
     try:
         review = cast(ReviewOutput, await llm.agenerate_structured(prompt=prompt, schema=ReviewOutput))
         review.topic = chosen_topic
+        # Zera qualquer quiz_bank_id ALUCINADO pelo LLM (ele preenche a FK com IDs
+        # que vê no material). Só o save abaixo, se der certo, atribui um id REAL
+        # do QuizBank; se o save falhar, fica None — nunca uma FK inexistente.
+        review.quiz_bank_id = None
 
         # Randomização algorítmica
         for q in review.quizzes:
@@ -634,6 +638,7 @@ def class_language_context(
 
 async def generate_language_review(
     teacher_id: str,
+    student_id: str,
     student_name: str,
     course_id: str,
     course_name: str,
@@ -642,20 +647,57 @@ async def generate_language_review(
     lesson_label: str,
     delivery: LanguageDelivery,
     target_language: str,
+    subject_id: str | None = None,
+    from_bank: bool = True,
     material_type: str = "lesson",
 ) -> Optional[ReviewOutput]:
     """Revisão de CURSO DE IDIOMA, com a língua do TEXTO por nível e a versão na
     língua-alvo p/ áudio (`audio_script`).
 
-    Gerador DEDICADO e SEM cache de propósito: o QuizBank é escopado por
-    curso/disciplina/aula/tópico (sem o nível), então cachear aqui colidiria
-    entre turmas de níveis diferentes (texto em L1 vs alvo). A revisão é diária e
-    roda na janela de 24h — 1 chamada de LLM é aceitável. Retorna None sem
-    conteúdo (o chamador cai na revisão normal).
+    Bank-aware — usa o MESMO QuizBank da revisão normal e da Revisão Espaçada:
+      - `from_bank` (fluxo individual): REUTILIZA a questão de idioma que o aluno
+        ainda não viu (cache hit → custo zero, e a MESMA questão reaparece na
+        Revisão Espaçada por carregar um `quiz_bank_id` real).
+      - Cache miss: gera 1 pacote (resumo + áudio + 3 variações) e o SALVA no
+        banco, atribuindo um `quiz_bank_id` REAL — é isso que matricula o idioma
+        na SRS (a matrícula só ocorre para quizzes com `quiz_bank_id`).
+      - `from_bank=False` (broadcast do professor / warm no avanço de aula): pula
+        a LEITURA mas ainda salva o pacote gerado.
+
+    O escopo por Disciplina isola o NÍVEL: no curso de idioma a Disciplina É o
+    nível (A1/A2/B1...), então B1 nunca lê questão de A2. Retorna None sem
+    conteúdo/geração (o chamador cai na revisão normal).
     """
     from src.shared.privacy import llm_safe_name
     student_name = llm_safe_name(student_name)
 
+    if subject_id is None and subject_name:
+        subject_id = await quiz_bank.resolve_subject_id(course_id, subject_name)
+
+    # ── CACHE HIT: reaproveita uma questão de idioma inédita para este aluno. ──
+    if from_bank and student_id != "broadcast":
+        bank_row = None
+        try:
+            bank_row = await quiz_bank.find_unseen_lesson_quiz(
+                student_id=student_id,
+                course_id=course_id,
+                subject_id=subject_id,
+                lesson_number=current_lesson_number,
+                material_type=material_type,
+            )
+        except Exception as e:
+            logger.error("language_quiz_bank_lookup_failed", error=str(e)[:300])
+        if bank_row:
+            review = _review_from_bank_row(bank_row)  # já embaralha + reidrata áudio/id
+            if review:
+                logger.info(
+                    "language_quiz_bank_cache_hit",
+                    student_id=student_id, course_id=course_id,
+                    lesson_number=current_lesson_number, quiz_bank_id=review.quiz_bank_id,
+                )
+                return review
+
+    # ── CACHE MISS: gera o pacote de idioma a partir da aula e SALVA no banco. ──
     # Listening tem fluxo próprio; aqui a recuperação lê sempre o material real.
     content = await _retrieve_lesson_content(
         teacher_id, course_id, subject_name, current_lesson_number,
@@ -665,6 +707,7 @@ async def generate_language_review(
         return None
 
     llm = get_provider(settings.DEFAULT_LLM_PROVIDER)
+    chosen_perspective = random.choice(REVIEW_PERSPECTIVES)
     prompt = LANGUAGE_REVIEW_PROMPT_TEMPLATE.format(
         target_language_name=language_name(target_language),
         text_language_name=language_name(delivery.text_language),
@@ -672,11 +715,46 @@ async def generate_language_review(
         student_name=student_name,
         course_name=course_name,
         lesson_label=lesson_label,
-        perspective=random.choice(REVIEW_PERSPECTIVES),
+        perspective=chosen_perspective,
         lesson_content=content,
     )
     try:
         review = cast(ReviewOutput, await llm.agenerate_structured(prompt=prompt, schema=ReviewOutput))
+        # O `quiz_bank_id` é um campo LLM-facing do schema, e o modelo o preenche
+        # com IDs que "vê" no material (ex.: 'E-B1-01'); zeramos e só o save abaixo
+        # atribui um id REAL (senão o INSERT do PendingQuizzes viola a FK).
+        review.quiz_bank_id = None
+        topic = review.topic or lesson_label
+
+        # Persiste TODAS as variações no QuizBank (mesmo escopo/formato da revisão
+        # normal): o áudio na língua-alvo (audio_script) viaja junto para a SRS.
+        try:
+            first_id = None
+            for q in review.quizzes:
+                qid = await quiz_bank.save_quiz_package(
+                    course_id=course_id,
+                    subject_id=subject_id,
+                    lesson_number=current_lesson_number,
+                    topic=topic,
+                    pedagogical_lens=chosen_perspective,
+                    question_text=q.question,
+                    alternatives=[{"id": a.id, "text": a.text} for a in q.alternatives],
+                    correct_answer=q.correct_answer,
+                    explanation=q.explanation,
+                    summary=review.summary,
+                    key_points=review.key_points,
+                    material_type=material_type,
+                    audio_script=review.audio_script,
+                )
+                if not first_id:
+                    first_id = qid
+            review.quiz_bank_id = first_id
+        except Exception as e:
+            # Falha ao salvar não bloqueia a entrega; mas zera a FK para não vazar
+            # um id inexistente ao PendingQuizzes.
+            logger.error("language_quiz_bank_save_failed", error=str(e)[:300])
+            review.quiz_bank_id = None
+
         _shuffle_alternatives(review.quiz)
         return review
     except Exception as e:

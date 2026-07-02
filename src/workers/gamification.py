@@ -131,6 +131,7 @@ async def award_xp(
     is_correct: bool | None = None,
     suspect: bool = False,
     teacher_id: str | None = None,
+    subject_id: str | None = None,
 ) -> str | None:
     """Concede XP de uma ação e devolve a LINHA a anexar à confirmação (ou None).
 
@@ -172,13 +173,13 @@ async def award_xp(
             await session.execute(
                 text('''
                     INSERT INTO "StudentInteractions"
-                        (id, student_id, course_id, interaction_type, is_correct,
+                        (id, student_id, course_id, subject_id, interaction_type, is_correct,
                          message_content, xp_awarded, xp_week_id, xp_suspect)
-                    VALUES (:id, :sid, :cid, 'xp_event', :corr, :act, :xp, :wk, :susp)
+                    VALUES (:id, :sid, :cid, :sub, 'xp_event', :corr, :act, :xp, :wk, :susp)
                 '''),
                 {"id": str(uuid4()), "sid": student_id, "cid": course_id,
-                 "corr": is_correct, "act": action, "xp": competitive,
-                 "wk": week_id, "susp": bool(suspect and anti_on)},
+                 "sub": subject_id, "corr": is_correct, "act": action,
+                 "xp": competitive, "wk": week_id, "susp": bool(suspect and anti_on)},
             )
 
             # Streak (o dia conta mesmo com XP retido/over-cap).
@@ -221,6 +222,7 @@ async def award_quiz_xp(
     try:
         action = "quiz_correct" if is_correct else "quiz_wrong"
         recovery = False
+        subject_id = await subject_for_quiz_bank(quiz_bank_id)
         if quiz_bank_id:
             async with AsyncSessionLocal() as session:
                 # Era uma reentrega SRS DEVIDA (revisão no prazo)?
@@ -252,6 +254,7 @@ async def award_quiz_xp(
         line = await award_xp(
             student_id, course_id, action,
             is_correct=is_correct, suspect=suspect, teacher_id=teacher_id,
+            subject_id=subject_id,
         )
 
         # Marcador da 'Volta por Cima' (alimenta o badge 🌱, sem XP próprio).
@@ -260,10 +263,10 @@ async def award_quiz_xp(
                 async with AsyncSessionLocal() as session:
                     await session.execute(
                         text('''INSERT INTO "StudentInteractions"
-                                    (id, student_id, course_id, interaction_type,
+                                    (id, student_id, course_id, subject_id, interaction_type,
                                      message_content, xp_awarded, xp_suspect)
-                                VALUES (:id, :sid, :cid, 'xp_event', 'srs_recovery', 0, false)'''),
-                        {"id": str(uuid4()), "sid": student_id, "cid": course_id},
+                                VALUES (:id, :sid, :cid, :sub, 'xp_event', 'srs_recovery', 0, false)'''),
+                        {"id": str(uuid4()), "sid": student_id, "cid": course_id, "sub": subject_id},
                     )
                     await session.commit()
             except Exception as e:
@@ -271,6 +274,22 @@ async def award_quiz_xp(
         return line
     except Exception as e:
         logger.error("award_quiz_xp_failed", error=str(e)[:300])
+        return None
+
+
+async def subject_for_quiz_bank(quiz_bank_id: str | None) -> str | None:
+    """Disciplina de origem de uma questão do QuizBank (carimbo do ledger).
+    Best-effort: falha/None ⇒ None (o evento entra sem disciplina = 'Geral')."""
+    if not quiz_bank_id:
+        return None
+    try:
+        async with AsyncSessionLocal() as session:
+            row = (await session.execute(
+                text('SELECT subject_id FROM "QuizBank" WHERE id = :qb'),
+                {"qb": quiz_bank_id},
+            )).fetchone()
+            return row.subject_id if row else None
+    except Exception:
         return None
 
 
@@ -632,6 +651,49 @@ async def run_achievements_command(channel, sender_id: str) -> None:
         await channel.send_text(sender_id, "\n".join(lines)[:4000])
     except Exception as e:
         logger.error("achievements_command_failed", error=str(e)[:300])
+
+
+async def run_my_xp_command(channel, sender_id: str) -> None:
+    """/minha_xp — XP POR DISCIPLINA (acumulado + semana), em todas as turmas
+    do aluno. Só dados do PRÓPRIO aluno (sem colegas — LGPD ok); exclui eventos
+    suspeitos (anti-gaming), igual ao ranking/nota. Eventos antigos sem carimbo
+    de disciplina caem em 'Geral' (nome do curso quando conhecido)."""
+    if not gamification_on() or not settings.XP_LEDGER_ENABLED:
+        return
+    try:
+        async with AsyncSessionLocal() as session:
+            scope = await _resolve_student_scope(session, channel, sender_id)
+            if not scope or not scope.gami_on:
+                return
+            week_id = current_week_id()
+            rows = (await session.execute(
+                text('''SELECT COALESCE(sub.name, c.name, 'Geral') AS label,
+                               COALESCE(SUM(CASE WHEN si.xp_suspect = false
+                                                 THEN si.xp_awarded ELSE 0 END), 0) AS total,
+                               COALESCE(SUM(CASE WHEN si.xp_suspect = false AND si.xp_week_id = :wk
+                                                 THEN si.xp_awarded ELSE 0 END), 0) AS week
+                        FROM "StudentInteractions" si
+                        LEFT JOIN "Subjects" sub ON sub.id = si.subject_id
+                        LEFT JOIN "Courses" c ON c.id = si.course_id
+                        WHERE si.interaction_type = 'xp_event'
+                          AND si.student_id = :sid
+                        GROUP BY label
+                        ORDER BY total DESC, label'''),
+                {"sid": scope.id, "wk": week_id},
+            )).fetchall()
+
+        rows = [r for r in rows if int(r.total or 0) > 0 or int(r.week or 0) > 0]
+        if not rows:
+            await channel.send_text(sender_id, M.MY_XP_NONE)
+            return
+
+        body = M.MY_XP_HEADER + "".join(
+            M.MY_XP_ROW.format(label=r.label, total=int(r.total or 0), week=int(r.week or 0))
+            for r in rows
+        ) + M.MY_XP_FOOTER
+        await channel.send_text(sender_id, body[:4000])
+    except Exception as e:
+        logger.error("my_xp_failed", error=str(e)[:300])
 
 
 async def run_my_ranking_command(channel, sender_id: str) -> None:

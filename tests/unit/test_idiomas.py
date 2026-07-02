@@ -46,11 +46,15 @@ from src.shared.constants.prompts import (
 from src.rag.review_generator import (
     LISTENING_PERSPECTIVES,
     VOCAB_PERSPECTIVES,
+    ReviewOutput,
+    ReviewQuiz,
     class_language_context,
+    generate_language_review,
     listening_directives,
     synthesize_listening,
     _review_from_bank_row,
 )
+from src.rag.quiz_generator import QuizAlternative
 from src.workers.vocabulary import vocab_enabled
 from src.workers.speaking import speaking_enabled, format_scores
 from src.workers.proficiency_report import (
@@ -750,3 +754,79 @@ def test_messaging_optout_clause():
     assert "messaging_opted_out" in clause and clause.strip().startswith("AND")
     # 'sair' do roleplay foi reservado ao opt-out → não é mais saída de roleplay.
     assert is_roleplay_exit("sair") is False
+
+
+@pytest.mark.asyncio
+async def test_language_review_nao_vaza_quiz_bank_id_alucinado(mocker):
+    """Regressão: o LLM preenche `quiz_bank_id` do schema com um ID que lê no
+    material (ex.: 'E-B1-01'), que NÃO existe no QuizBank. O gerador zera esse
+    valor e SÓ o save do banco atribui um id REAL — nunca a FK alucinada (que
+    derrubaria o INSERT do PendingQuizzes)."""
+    from src.rag import review_generator as rg
+
+    alucinado = ReviewOutput(
+        summary="Great work!",
+        key_points=["a", "b", "c"],
+        quizzes=[ReviewQuiz(
+            question="Which is correct?",
+            alternatives=[QuizAlternative(id="A", text="x"),
+                          QuizAlternative(id="B", text="y"),
+                          QuizAlternative(id="C", text="z")],
+            correct_answer="B", explanation="...",
+        )],
+        quiz_bank_id="E-B1-01",  # id alucinado do material
+    )
+    fake_llm = mocker.Mock()
+    fake_llm.agenerate_structured = mocker.AsyncMock(return_value=alucinado)
+    mocker.patch.object(rg, "get_provider", return_value=fake_llm)
+    mocker.patch.object(rg, "_retrieve_lesson_content",
+                        new=mocker.AsyncMock(return_value="conteúdo da aula"))
+    save_mock = mocker.patch.object(
+        rg.quiz_bank, "save_quiz_package", new=mocker.AsyncMock(return_value="qb_real_123"))
+
+    delivery, target = class_language_context("English Course", True, "Intermediário")
+    # from_bank=False + student "broadcast" força o caminho de geração+save.
+    review = await generate_language_review(
+        teacher_id="t", student_id="broadcast", student_name="Ygor", course_id="c",
+        course_name="English Course", subject_name="B1",
+        current_lesson_number=1, lesson_label="Aula 1",
+        delivery=delivery, target_language=target, subject_id="sub_1", from_bank=False)
+
+    assert review is not None
+    assert review.quiz_bank_id == "qb_real_123"   # id REAL do save, não o alucinado
+    assert review.quiz_bank_id != "E-B1-01"
+    save_mock.assert_awaited()                     # persistiu no QuizBank
+
+
+@pytest.mark.asyncio
+async def test_language_review_cache_hit_reutiliza_do_banco(mocker):
+    """Reutilização: havendo questão inédita no QuizBank, a revisão diária de
+    idioma a devolve (o MESMO quiz_bank_id que a Revisão Espaçada reentrega),
+    reidratando o áudio na língua-alvo e SEM chamar o LLM."""
+    import json
+    from src.rag import review_generator as rg
+
+    bank_row = {
+        "id": "qb_hit_1", "topic": "Present Perfect", "pedagogical_lens": "x",
+        "question_text": "Q?",
+        "alternatives": json.dumps([{"id": "A", "text": "a"},
+                                    {"id": "B", "text": "b"},
+                                    {"id": "C", "text": "c"}]),
+        "correct_answer": "A", "explanation": "...", "summary": "sum",
+        "key_points": json.dumps(["k"]), "audio_script": "audio en",
+    }
+    mocker.patch.object(rg.quiz_bank, "find_unseen_lesson_quiz",
+                        new=mocker.AsyncMock(return_value=bank_row))
+    llm_spy = mocker.patch.object(rg, "get_provider")
+
+    delivery, target = class_language_context("English Course", True, "Intermediário")
+    review = await generate_language_review(
+        teacher_id="t", student_id="stu_1", student_name="Ygor", course_id="c",
+        course_name="English Course", subject_name="B1",
+        current_lesson_number=1, lesson_label="Aula 1",
+        delivery=delivery, target_language=target, subject_id="sub_1", from_bank=True)
+
+    assert review is not None
+    assert review.quiz_bank_id == "qb_hit_1"      # veio do banco (reuso)
+    assert review.audio_script == "audio en"      # áudio na língua-alvo reidratado
+    llm_spy.assert_not_called()                    # zero LLM no cache hit

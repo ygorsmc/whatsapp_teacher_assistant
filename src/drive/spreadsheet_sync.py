@@ -133,6 +133,10 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
     upserted_subject_ids: set[str] = set()
     upserted_course_ids: set[str] = set()
     upserted_class_ids: set[str] = set()
+    # Turmas cujo contador de aula AVANÇOU nesta sync (old < new) → geram os quizzes
+    # da nova aula como no avanço automático do scheduler (class_session_start),
+    # enfileirado APÓS o commit. Só turmas PRÉ-EXISTENTES (não dispara na criação).
+    advanced_classes: list[tuple[str, str, int]] = []
     # Disciplina por turma vinda de cada aba (p/ detectar divergência Alunos×Turmas).
     alunos_subject: dict[tuple[str, str], set[str]] = defaultdict(set)  # (curso,turma) -> {disciplinas vistas na aba Alunos}
     turmas_subject: dict[tuple[str, str], str] = {}                     # (curso,turma) -> disciplina (autoritativa)
@@ -367,6 +371,13 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
             turmas_rows = []
             logger.warning("Aba 'Turmas' não encontrada", error=str(e)[:200])
 
+        # Aulas ANTES do upsert — base para detectar quais turmas avançam nesta sync.
+        old_class_lessons: dict[str, int] = {
+            r[0]: r[1] for r in (await session.execute(
+                text('SELECT id, current_lesson_number FROM "Classes"')
+            )).fetchall()
+        }
+
         from src.shared.language import normalize_level
         for row in turmas_rows:
             # Layout: Turma | Disciplina | Curso | Data Início | Seg..Dom | Idioma | Nível
@@ -457,7 +468,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                 else:
                     current_lesson = _calculate_elapsed_lessons(start_date_obj, schedule_map, now_local)
 
-            await session.execute(
+            _res = await session.execute(
                 text("""
                     INSERT INTO "Classes" (id, course_id, subject_id, teacher_id, name, current_lesson_number, start_date, schedule_map, is_language, proficiency_level)
                     VALUES (:id, :cid, :sid, :tid, :name, :lesson, :start_date, :sched_map, :is_lang, :level)
@@ -468,8 +479,8 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                         schedule_map = excluded.schedule_map,
                         is_language = excluded.is_language,
                         proficiency_level = excluded.proficiency_level,
-                        current_lesson_number = CASE 
-                            WHEN excluded.start_date > CURRENT_DATE THEN 0 
+                        current_lesson_number = CASE
+                            WHEN excluded.start_date > CURRENT_DATE THEN 0
                             WHEN excluded.start_date IS DISTINCT FROM "Classes".start_date THEN excluded.current_lesson_number
                             ELSE GREATEST("Classes".current_lesson_number, excluded.current_lesson_number)
                         END,
@@ -478,6 +489,7 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                             ELSE "Classes".last_advanced_date
                         END,
                         updated_at = CURRENT_TIMESTAMP
+                    RETURNING current_lesson_number
                 """),
                 {
                     "id": class_id,
@@ -492,7 +504,15 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
                     "level": proficiency_level,
                 },
             )
+            new_lesson = _res.scalar()
             upserted_class_ids.add(class_id)
+
+            # Turma PRÉ-EXISTENTE cujo contador subiu (ex.: 0→1 após /zerar_aula +
+            # /sinc_alunos): gera os quizzes da nova aula igual ao avanço do
+            # scheduler. Não dispara na criação inicial (turma ausente do snapshot).
+            _old_lesson = old_class_lessons.get(class_id)
+            if _old_lesson is not None and new_lesson is not None and new_lesson > _old_lesson:
+                advanced_classes.append((class_id, course_id, int(new_lesson)))
 
             # ===== Gamificação POR TURMA (decisão professor/instituição) =====
             # Colunas opcionais ao FINAL da aba "Turmas":
@@ -661,6 +681,28 @@ async def sync_users_from_sheet(sheet_id: str | None = None) -> dict:
             )
 
         await session.commit()
+
+        # Turmas que avançaram de aula nesta sync geram os quizzes da nova aula —
+        # mesmo gancho do avanço automático (idioma: aquece o QuizBank; demais:
+        # Sessão Mista). Enfileirado só APÓS o commit, para o worker ler a aula nova.
+        if advanced_classes:
+            from src.queue.factory import get_queue
+            _q = get_queue()
+            _ts = int(datetime.now(timezone.utc).timestamp())
+            for _cid, _course_id, _lesson in advanced_classes:
+                await _q.enqueue(
+                    queue="command_messages",
+                    payload={
+                        "action": "class_session_start",
+                        "class_id": _cid,
+                        "course_id": _course_id,
+                        "lesson_number": _lesson,
+                        "correlation_id": f"sess_{_cid}_{_lesson}_{_ts}",
+                    },
+                    session_id=_cid,
+                )
+            logger.info("sync_enqueued_class_sessions", count=len(advanced_classes),
+                        class_ids=[c[0] for c in advanced_classes])
 
         # Snapshot depois
         stats["teachers_before"] = teachers_before or 0

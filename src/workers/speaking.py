@@ -206,7 +206,9 @@ async def analyze_speaking(channel, sender_id: str, student_context: dict, media
         # (alto esforço + retrieval ativo). Isolado; flag OFF ⇒ no-op.
         try:
             from src.workers.gamification import award_xp
-            await award_xp(student.id, course.id, "voice")
+            _subj = student_context.get("subject")
+            await award_xp(student.id, course.id, "voice",
+                           subject_id=_subj.id if _subj else None)
         except Exception as e:
             logger.error("gamification_voice_hook_failed", error=str(e)[:200])
 

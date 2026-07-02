@@ -49,6 +49,8 @@ class CommandType:
     ACHIEVEMENTS = "achievements"          # /conquistas
     HIDE_RANKING = "hide_ranking"          # /ocultar_ranking (toggle opt-out só do ranking)
     MY_GRADE = "my_grade"                  # /minha_nota (componente de nota, F2)
+    MY_XP = "my_xp"                        # /minha_xp (XP acumulado + da semana)
+    STUDENT_ENGAGEMENT = "student_engagement"  # /engajamento[_7|_15|_30] (aluno)
     # ── Horizontes H1-H3 ─────────────────────────────────────────────────────
     CLASS_CHALLENGE = "class_challenge"    # /desafio_[turma]               (H1.1)
     KEY_STATS = "key_stats"                # /chaves_[turma]                (H2.1)
@@ -56,6 +58,7 @@ class CommandType:
     LEAVE_BOOK = "leave_book"              # /sair_livro (aluno, LGPD)      (H2.1)
     CORRECT_ESSAY = "correct_essay"        # /corrigir (aluno)              (H2.2)
     DELETE_MY_DATA = "delete_my_data"      # /apagar_meus_dados (aluno, LGPD Art. 18)
+    STUDENT_HELP = "student_help"          # /ajuda do ALUNO (help por perfil)
     UNKNOWN = "unknown"
 
 # Maps human-readable inputs (with aliases and typos) to CommandTypes
@@ -174,14 +177,28 @@ _MULTIARG_COMMANDS = {
 # 200ms. Qualquer outro comando de aluno continua rejeitado na borda.
 STUDENT_COMMAND_REGEX = re.compile(
     r"^/(?P<cmd>pausar_leitura|retomar_leitura|meu_progresso|flashcards|nivelamento|sair_livro|corrigir|apagar_meus_dados|"
-    r"meu_ranking|conquistas|ocultar_ranking|minha_nota)\s*$",
+    r"meu_ranking|conquistas|ocultar_ranking|minha_nota|minha_xp|meu_xp|"
+    r"engajamento_7|engajamento_15|engajamento_30|engajamento|"
+    r"ajuda|help|comandos)\s*$",
     re.IGNORECASE,
 )
+
+# Janela do /engajamento do aluno: sufixo _7/_15/_30 → dias; sem sufixo → None
+# (histórico completo). O regex do allowlist acima já restringe as variantes.
+_ENGAGEMENT_DAYS_REGEX = re.compile(r"^/engajamento(?:_(?P<days>\d+))?\s*$", re.IGNORECASE)
+
+
+def parse_engagement_days(text: str) -> int | None:
+    """Dias do período do /engajamento do aluno (None = histórico completo)."""
+    m = _ENGAGEMENT_DAYS_REGEX.match((text or "").strip())
+    if not m or not m.group("days"):
+        return None
+    return int(m.group("days"))
 
 # Comandos de gamificação na allowlist: só contam como comando quando o MESTRE
 # está ON (a borda checa). Com a flag OFF, a borda os trata como qualquer comando
 # de aluno não reconhecido (byte-idêntico ao de hoje).
-GAMIFICATION_STUDENT_COMMANDS = frozenset({"meu_ranking", "conquistas", "ocultar_ranking", "minha_nota"})
+GAMIFICATION_STUDENT_COMMANDS = frozenset({"meu_ranking", "conquistas", "ocultar_ranking", "minha_nota", "minha_xp", "meu_xp"})
 
 _STUDENT_MAP = {
     "pausar_leitura": CommandType.PAUSE_READING,
@@ -196,6 +213,20 @@ _STUDENT_MAP = {
     "conquistas": CommandType.ACHIEVEMENTS,
     "ocultar_ranking": CommandType.HIDE_RANKING,
     "minha_nota": CommandType.MY_GRADE,
+    "minha_xp": CommandType.MY_XP,
+    "meu_xp": CommandType.MY_XP,
+    # /engajamento do aluno (períodos): worker extrai os dias do sufixo via
+    # parse_engagement_days. NÃO entra em GAMIFICATION_STUDENT_COMMANDS —
+    # engajamento é telemetria pedagógica, disponível mesmo sem gamificação.
+    "engajamento": CommandType.STUDENT_ENGAGEMENT,
+    "engajamento_7": CommandType.STUDENT_ENGAGEMENT,
+    "engajamento_15": CommandType.STUDENT_ENGAGEMENT,
+    "engajamento_30": CommandType.STUDENT_ENGAGEMENT,
+    # /ajuda do aluno: mesmos aliases do professor; o PERFIL de quem chama é
+    # que decide o texto (o webhook rotula role=student/teacher na borda).
+    "ajuda": CommandType.STUDENT_HELP,
+    "help": CommandType.STUDENT_HELP,
+    "comandos": CommandType.STUDENT_HELP,
 }
 
 # LGPD P1.1 (Art. 14): o RESPONSÁVEL não é usuário do bot — a palavra REVOGAR

@@ -16,9 +16,12 @@ from src.shared.constants.messages import (
     CMD_DELETE_USAGE, CMD_DELETE_NEED_LIST, CMD_DELETE_NOT_FOUND, CMD_DELETE_EMPTY,
     CMD_DELETE_CONFIRM, CMD_DELETE_CONFIRM_YES, CMD_DELETE_CONFIRM_NO,
     CMD_DELETE_EXPIRED, CMD_DELETE_CANCELLED, CMD_DELETE_SUCCESS,
+    CMD_STUDENT_HELP_HEADER, CMD_STUDENT_HELP_LANGUAGE, CMD_STUDENT_HELP_READING,
+    CMD_STUDENT_HELP_GAMING, CMD_STUDENT_HELP_GRADE, CMD_STUDENT_HELP_FOOTER,
 )
 from src.shared.constants.commands import (
-    parse_command, parse_management_command, parse_student_command, CommandType,
+    parse_command, parse_management_command, parse_student_command,
+    parse_engagement_days, CommandType,
 )
 
 
@@ -649,6 +652,7 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
         if delivery is not None and target_language is not None:
             review = await generate_language_review(
                 teacher_id=teacher[0],
+                student_id="broadcast",
                 student_name="Turma",
                 course_id=course_id,
                 course_name=c_name,
@@ -657,6 +661,10 @@ async def run_broadcast_quiz_command(channel, sender_id: str, class_name: str):
                 lesson_label=lesson_label,
                 delivery=delivery,
                 target_language=target_language,
+                subject_id=subject_id,
+                # Broadcast p/ turma inteira: pula a leitura per-aluno, mas o pacote
+                # gerado é salvo no QuizBank (a turma reaproveita nas revisões).
+                from_bank=False,
             )
             if review is None:
                 delivery = None  # sem conteúdo de idioma → revisão normal
@@ -1384,6 +1392,108 @@ async def run_broadcast_notice_command(channel, sender_id: str, class_query: str
 # DISPATCH
 # ==============================================================================
 
+async def run_student_engagement_command(channel, sender_id: str, days: int | None) -> None:
+    """/engajamento[_7|_15|_30] do ALUNO — resumo POR DISCIPLINA: perguntas por
+    iniciativa (message_received) + quizzes recebidos/respondidos/acertos/%.
+
+    A disciplina do quiz vem do QuizBank (JOIN por quiz_bank_id); a da pergunta,
+    do carimbo subject_id do ledger. Linhas sem atribuição (histórico antigo,
+    quiz sem banco) caem no nome do curso ou em 'Geral'. Só dados do PRÓPRIO
+    aluno — sem colegas (LGPD ok)."""
+    from datetime import datetime, timezone, timedelta
+    from src.shared.constants.messages import (
+        STUDENT_ENGAGEMENT_HEADER, STUDENT_ENGAGEMENT_BLOCK, STUDENT_ENGAGEMENT_NONE,
+    )
+    try:
+        query_col = channel.get_user_query_column()
+        since = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+            if days else None
+        )
+        since_quiz = "AND pq.created_at >= :since" if since else ""
+        since_msgs = "AND si.timestamp >= :since" if since else ""
+
+        async with AsyncSessionLocal() as session:
+            stu = (await session.execute(
+                text(f'SELECT id FROM "Students" WHERE {query_col} = :sid AND is_active = true LIMIT 1'),
+                {"sid": sender_id},
+            )).fetchone()
+            if not stu:
+                return
+            params: dict = {"sid": stu.id}
+            if since:
+                params["since"] = since
+
+            quiz_rows = (await session.execute(
+                text(f'''SELECT COALESCE(sub.name, c.name, 'Geral') AS label,
+                                COUNT(*) AS recebidos,
+                                COUNT(*) FILTER (WHERE pq.status = 'answered') AS respondidos,
+                                COUNT(*) FILTER (WHERE pq.is_correct IS TRUE) AS acertos
+                         FROM "PendingQuizzes" pq
+                         LEFT JOIN "QuizBank" qb ON qb.id = pq.quiz_bank_id
+                         LEFT JOIN "Subjects" sub ON sub.id = qb.subject_id
+                         LEFT JOIN "Courses" c ON c.id = pq.course_id
+                         WHERE pq.student_id = :sid {since_quiz}
+                         GROUP BY label'''),
+                params,
+            )).fetchall()
+
+            msg_rows = (await session.execute(
+                text(f'''SELECT COALESCE(sub.name, c.name, 'Geral') AS label,
+                                COUNT(*) AS perguntas
+                         FROM "StudentInteractions" si
+                         LEFT JOIN "Subjects" sub ON sub.id = si.subject_id
+                         LEFT JOIN "Courses" c ON c.id = si.course_id
+                         WHERE si.student_id = :sid
+                           AND si.interaction_type = 'message_received' {since_msgs}
+                         GROUP BY label'''),
+                params,
+            )).fetchall()
+
+        # Merge por disciplina (uma linha pode existir só num dos lados)
+        stats: dict[str, dict] = {}
+        for r in quiz_rows:
+            stats.setdefault(r.label, {"perguntas": 0, "recebidos": 0, "respondidos": 0, "acertos": 0})
+            stats[r.label].update(recebidos=int(r.recebidos or 0),
+                                  respondidos=int(r.respondidos or 0),
+                                  acertos=int(r.acertos or 0))
+        for r in msg_rows:
+            stats.setdefault(r.label, {"perguntas": 0, "recebidos": 0, "respondidos": 0, "acertos": 0})
+            stats[r.label]["perguntas"] = int(r.perguntas or 0)
+
+        period = f"últimos {days} dias" if days else "histórico completo"
+        if not stats:
+            suffix = f" nos últimos {days} dias" if days else ""
+            await channel.send_text(sender_id, STUDENT_ENGAGEMENT_NONE.format(period_suffix=suffix))
+            return
+
+        body = STUDENT_ENGAGEMENT_HEADER.format(period=period)
+        for label in sorted(stats):
+            s = stats[label]
+            pct = round(100 * s["acertos"] / s["respondidos"]) if s["respondidos"] else 0
+            body += STUDENT_ENGAGEMENT_BLOCK.format(label=label, pct=pct, **s)
+        await channel.send_text(sender_id, body[:4000])
+    except Exception as e:
+        logger.error("student_engagement_failed", error=str(e)[:300])
+
+
+def build_student_help_text() -> str:
+    """Monta o /ajuda do ALUNO por PERFIL: só entram as seções cujos recursos
+    estão ativos — mesmo gate das próprias funcionalidades (o webhook nem
+    roteia /meu_ranking com GAMIFICATION_ENABLED off, então listá-lo seria
+    anunciar um comando que responde ERROR_UNAUTHORIZED)."""
+    parts = [CMD_STUDENT_HELP_HEADER]
+    if settings.LANGUAGE_MODE_ENABLED:
+        parts.append(CMD_STUDENT_HELP_LANGUAGE)
+    parts.append(CMD_STUDENT_HELP_READING)
+    if settings.GAMIFICATION_ENABLED:
+        parts.append(CMD_STUDENT_HELP_GAMING)
+        if settings.GRADE_COMPONENT_ENABLED:
+            parts.append(CMD_STUDENT_HELP_GRADE)
+    parts.append(CMD_STUDENT_HELP_FOOTER)
+    return "".join(parts)
+
+
 async def process_command_message(message_body: dict):
     action = message_body.get("action")
     if action == "class_session_start":
@@ -1455,6 +1565,15 @@ async def process_command_message(message_body: dict):
         elif student_cmd == CommandType.MY_GRADE:
             from src.workers.gamification import run_my_grade_command
             await run_my_grade_command(channel, sender_id)
+        elif student_cmd == CommandType.MY_XP:
+            from src.workers.gamification import run_my_xp_command
+            await run_my_xp_command(channel, sender_id)
+        elif student_cmd == CommandType.STUDENT_ENGAGEMENT:
+            await run_student_engagement_command(
+                channel, sender_id, parse_engagement_days(text_content)
+            )
+        elif student_cmd == CommandType.STUDENT_HELP:
+            await channel.send_text(sender_id, build_student_help_text())
         return
 
     # 1) Comandos gerenciais — sintaxe explícita /comando_[turma]_[arg].

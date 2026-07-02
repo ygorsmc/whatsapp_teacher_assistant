@@ -37,8 +37,31 @@ async def send_quiz_to_student(channel, student: dict, quiz: QuizOutput, quiz_ba
     """
     quiz_id = str(uuid4())[:8]  # ID curto para caber no reply_id do WhatsApp
 
+    # Guard: quiz degenerado (o LLM às vezes devolve `alternatives` vazia e o
+    # _shuffle_alternatives faz `return` silencioso, deixando passar). Sem isto,
+    # persistíamos lixo no PendingQuizzes e o send_buttons/list disparava um 400
+    # opaco da Meta — o resumo+áudio iam, mas o quiz "sumia". Falha cedo e clara.
+    n_alts = len(quiz.alternatives or [])
+    if n_alts < 2:
+        raise ValueError(
+            f"Quiz inválido: {n_alts} alternativa(s) (mínimo 2). "
+            f"Pergunta: {quiz.question[:80]!r}"
+        )
+
     # Persiste no banco para validação futura
     async with AsyncSessionLocal() as session:
+        # Blindagem: quiz_bank_id é FK para QuizBank. Um id inválido (ex.: um
+        # gerador que deixou passar um código alucinado do material) faria o
+        # INSERT estourar por FK e derrubaria a entrega INTEIRA do quiz. Se o id
+        # não existir no banco, degradamos para None em vez de quebrar.
+        if quiz_bank_id:
+            exists = await session.scalar(
+                text('SELECT 1 FROM "QuizBank" WHERE id = :id'), {"id": quiz_bank_id}
+            )
+            if not exists:
+                logger.warning("quiz_bank_id_invalido_ignorado", quiz_bank_id=quiz_bank_id)
+                quiz_bank_id = None
+
         await session.execute(
             text("""
                 INSERT INTO "PendingQuizzes"

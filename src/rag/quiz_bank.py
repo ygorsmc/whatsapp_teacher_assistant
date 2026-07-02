@@ -105,6 +105,48 @@ async def find_unseen_quiz(
         return dict(row) if row else None
 
 
+async def find_unseen_lesson_quiz(
+    student_id: str,
+    course_id: str,
+    subject_id: Optional[str],
+    lesson_number: int,
+    material_type: str = "lesson",
+) -> Optional[dict]:
+    """CACHE HIT por AULA (sem filtrar tópico): a questão mais antiga da aula que
+    o aluno ainda não viu, em QUALQUER tópico/lente.
+
+    É a leitura da Revisão de Idioma: o pacote de idioma é gerado a partir da aula
+    inteira (não por tópico como o fluxo clássico), então a reutilização varre o
+    banco da aula em ordem de criação. O escopo por `subject_id` já isola o NÍVEL
+    (no curso de idioma a Disciplina é o nível: A1/A2/B1...). Retorna dict ou None.
+    """
+    subject_clause, subject_params = _subject_filter(subject_id)
+    sql = f"""
+        SELECT qb.id, qb.topic, qb.pedagogical_lens, qb.question_text,
+               qb.alternatives, qb.correct_answer, qb.explanation,
+               qb.summary, qb.key_points, qb.audio_script
+        FROM "QuizBank" qb
+        WHERE qb.course_id = :cid
+          AND {subject_clause}
+          AND qb.lesson_number = :lesson
+          AND qb.material_type = :mat
+          AND NOT EXISTS (
+                SELECT 1 FROM "PendingQuizzes" pq
+                WHERE pq.quiz_bank_id = qb.id
+                  AND pq.student_id = :stid
+          )
+        ORDER BY qb.created_at ASC
+        LIMIT 1
+    """
+    params = {"cid": course_id, "lesson": lesson_number, "stid": student_id, "mat": material_type}
+    params.update(subject_params)
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(text(sql), params)
+        row = result.mappings().first()
+        return dict(row) if row else None
+
+
 async def get_used_lenses(
     course_id: str,
     subject_id: Optional[str],

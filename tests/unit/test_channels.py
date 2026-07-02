@@ -1,3 +1,4 @@
+import httpx
 import pytest
 from src.channel.factory import get_channel
 from src.channel.whatsapp import WhatsAppChannel
@@ -184,6 +185,45 @@ async def test_send_buttons_overflows_long_body(mocker):
     assert len(captured["msg"]["interactive"]["body"]["text"]) <= 1024
 
 
+@pytest.mark.asyncio
+async def test_send_buttons_rejects_empty():
+    # Quiz com alternativas vazias chegava aqui como buttons=[] → 400 opaco da Meta.
+    ch = WhatsAppChannel()
+    with pytest.raises(ValueError, match="ao menos 1 opção"):
+        await ch.send_buttons("123", "corpo", [])
+
+
+@pytest.mark.asyncio
+async def test_send_list_rejects_empty():
+    ch = WhatsAppChannel()
+    with pytest.raises(ValueError, match="ao menos 1 item"):
+        await ch.send_list("123", "corpo", "Ver", [{"title": "S", "rows": []}])
+
+
+@pytest.mark.asyncio
+async def test_send_quiz_rejects_degenerate_quiz():
+    # Chokepoint channel-agnostic: quiz sem alternativas suficientes falha cedo e
+    # legível, antes de persistir lixo no PendingQuizzes ou tentar enviar.
+    from src.workers.micro_learning import send_quiz_to_student
+    from src.rag.quiz_generator import QuizOutput, QuizAlternative
+
+    empty_quiz = QuizOutput(
+        question="Qual é a regra?", alternatives=[],
+        correct_answer="A", explanation="...",
+    )
+    student = {"id": "stu_x", "sender_id": "123", "course_id": "crs_x", "lesson_pointer": "1"}
+    with pytest.raises(ValueError, match="Quiz inválido"):
+        await send_quiz_to_student(channel=None, student=student, quiz=empty_quiz)
+
+    one_alt = QuizOutput(
+        question="Qual é a regra?",
+        alternatives=[QuizAlternative(id="A", text="única")],
+        correct_answer="A", explanation="...",
+    )
+    with pytest.raises(ValueError, match="Quiz inválido"):
+        await send_quiz_to_student(channel=None, student=student, quiz=one_alt)
+
+
 # ── Áudio: transcrição como TEXTO logo DEPOIS do áudio (não há caption nativo) ──
 
 class _FakeUpload:
@@ -276,3 +316,87 @@ async def test_send_audio_caption_after_audio_telegram(mocker):
     await ch.send_audio("123", b"\x00\x01", caption="bonjour")
 
     assert calls == ["upload", ("text", "bonjour")]
+
+
+# ── Chunking de texto longo (compartilhado entre canais) ─────────────────────
+# Correção de redação sem teto artificial: o feedback completo é dividido em
+# várias mensagens em vez de cortado — vale para os dois canais.
+
+def test_chunk_text_short_text_passthrough():
+    from src.channel.text_utils import chunk_text
+    assert chunk_text("abc", 10) == ["abc"]
+
+
+def test_chunk_text_splits_on_paragraph_boundary():
+    from src.channel.text_utils import chunk_text
+    text = ("A" * 15) + "\n\n" + ("B" * 15)
+    assert chunk_text(text, 20) == ["A" * 15, "B" * 15]
+
+
+def test_chunk_text_hard_cuts_when_no_boundary():
+    from src.channel.text_utils import chunk_text
+    assert chunk_text("x" * 25, 10) == ["x" * 10, "x" * 10, "x" * 5]
+
+
+@pytest.mark.asyncio
+async def test_whatsapp_send_text_chunks_long_message(mocker):
+    # Antes, redação longa era CORTADA em 4000 chars; agora send_text divide
+    # em várias mensagens — nenhum conteúdo se perde.
+    ch = WhatsAppChannel()
+    ch.max_length = 20
+    mocker.patch("src.channel.whatsapp.asyncio.sleep", mocker.AsyncMock())
+    sent = []
+
+    async def fake_send(msg):
+        sent.append(msg["text"]["body"])
+        return {}
+
+    mocker.patch.object(ch, "_send_request", side_effect=fake_send)
+    text = ("A" * 15) + "\n\n" + ("B" * 15)
+    await ch.send_text("123", text)
+
+    assert sent == ["A" * 15, "B" * 15]
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_text_chunks_long_message(mocker):
+    # Paridade: o Telegram REJEITA (400) texto acima do teto — sem dividir em
+    # várias mensagens, a correção de redação longa quebraria só nesse canal.
+    ch = TelegramChannel()
+    ch.max_length = 20
+    sent = []
+
+    async def fake_send(endpoint, payload):
+        sent.append(payload)
+        return {}
+
+    mocker.patch.object(ch, "_send_request", side_effect=fake_send)
+    text = ("A" * 15) + "\n\n" + ("B" * 15)
+    await ch.send_text("123", text, reply_to="999")
+
+    assert [p["text"] for p in sent] == ["A" * 15, "B" * 15]
+    assert sent[0]["reply_to_message_id"] == 999   # só o primeiro pedaço cita
+    assert "reply_to_message_id" not in sent[1]
+
+
+@pytest.mark.asyncio
+async def test_telegram_send_text_markdown_fallback_per_chunk(mocker):
+    # Comportamento pré-existente preservado: 400 de markdown malformado
+    # reenvia SÓ aquele pedaço como texto puro (sem quebrar o pipeline).
+    ch = TelegramChannel()
+    calls = []
+
+    async def fake_send(endpoint, payload):
+        calls.append(dict(payload))
+        if "parse_mode" in payload:
+            request = httpx.Request("POST", "http://x")
+            response = httpx.Response(400, text="can't parse entities", request=request)
+            raise httpx.HTTPStatusError("400", request=request, response=response)
+        return {"ok": True}
+
+    mocker.patch.object(ch, "_send_request", side_effect=fake_send)
+    out = await ch.send_text("123", "texto com _itálico quebrado")
+
+    assert out == {"ok": True}
+    assert len(calls) == 2
+    assert "parse_mode" in calls[0] and "parse_mode" not in calls[1]

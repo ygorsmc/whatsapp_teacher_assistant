@@ -57,7 +57,10 @@ READING_GATE_RETRY = "💪 Sem problemas — errar faz parte! Que tal *reler o {
 READING_COMPLETED = "🏆 *PARABÉNS, {student_name}!*\n\nVocê concluiu 100% do {material_label}! 🎉🎉\n\nQue jornada! Seu plano foi encerrado, mas as revisões espaçadas continuam chegando para fixar tudo na memória de longo prazo. 🧠"
 
 # Revisão Espaçada (Fase 4)
-SPACED_REVIEW_INTRO = "🧠 *Revisão Espaçada*\n\nLembra deste conteúdo? Revisitar no momento certo é o segredo da memória de longo prazo. Responda aí! 👇"
+# {interval} = dias desde a 1ª resposta (escada D+3 → D+10 → D+30, ou o valor
+# adaptativo com SRS_ADAPTIVE_ENABLED). Explicitar o degrau ajuda a mapear se a
+# reentrega está caindo no intervalo certo.
+SPACED_REVIEW_INTRO = "🧠 *Revisão Espaçada — D+{interval}*\n\nLembra deste conteúdo? Revisitar no momento certo é o segredo da memória de longo prazo. Responda aí! 👇"
 
 # Mapeamento Aula ↔ Capítulo (Fase 6.5)
 LESSON_CHAPTER_SUGGESTION = "\n\n📚 *Dica:* o conteúdo de hoje complementa o *Capítulo {chapter}* do seu livro. Que tal revisar?"
@@ -111,7 +114,12 @@ ESSAY_PROMPT_PHOTO = "📝 Beleza! Me envie agora a *foto da sua redação* (bem
 ESSAY_RECEIVED = "📝 Recebi sua redação! Lendo e corrigindo com os critérios do professor... ⏳"
 ESSAY_RATE_LIMITED = "📝 Você já usou suas {limit} correções de hoje. Amanhã o contador zera — aproveite para reescrever com o feedback que recebeu! 💪"
 ESSAY_OCR_FAILED = "😕 Não consegui ler o texto da foto. Tente de novo com mais luz, sem sombra e com a folha inteira no enquadramento."
-ESSAY_PHOTO_UNEXPECTED = "📷 Recebi sua foto! Se for uma *redação para corrigir*, envie /corrigir e depois a foto (ou mande a foto com a legenda \"corrigir\").\n\nPara dúvidas sobre a matéria, me mande sua pergunta por texto. 😉"
+ESSAY_PHOTO_UNEXPECTED = "📷 Recebi sua foto! Se for uma *redação para corrigir*, mande a foto com a legenda */corrigir* (ou envie /corrigir e depois a foto).\n\nPara dúvidas sobre a matéria, me mande sua pergunta por texto. 😉"
+# Vertical de Idiomas — correção visual especialista (padrão: só turmas de idioma)
+ESSAY_LANGUAGE_ONLY = "📝 A correção de redação por foto está disponível para *turmas de idiomas*. Fale com seu professor se quiser esse recurso na sua turma. 😉"
+ESSAY_RECEIVED_LANGUAGE = "📝 Recebi sua redação! Um examinador do idioma está lendo sua foto e preparando o feedback... ⏳"
+# DEBUG (ESSAY_OCR_PREVIEW_ENABLED): mostra o texto que o OCR leu antes de corrigir.
+ESSAY_OCR_PREVIEW = "🔎 *Texto lido pelo OCR* (conferência):\n\n{ocr_text}\n\n_Corrigindo a partir desse texto..._"
 
 # ==========================================
 # H1.2 — SENTINELA EMOCIONAL (alerta ao professor)
@@ -226,6 +234,45 @@ CMD_HELP_TEXT = """📚 *Comandos do Professor*
 🔹 /chaves_Turma — Status das chaves de ativação (QR).
 
 _👨‍🎓 Comandos dos alunos: /pausar_leitura, /retomar_leitura, /meu_progresso, /flashcards, /corrigir (redação), /sair_livro_"""
+
+# ── /ajuda do ALUNO — seções montadas por PERFIL (command_worker junta só as
+# seções cujas flags/recursos estão ativos, como o gaming). Mesmos aliases do
+# professor (/ajuda /help /comandos); quem decide o texto é o role da borda. ──
+CMD_STUDENT_HELP_HEADER = """📚 *Comandos do Aluno*
+
+💬 Dúvidas sobre a matéria? É só perguntar por aqui — respondo com base no material do seu curso.
+
+*🎯 Estudo*
+🔹 /flashcards — Rodada de flashcards da sua aula atual.
+🔹 /corrigir — Envie sua redação (foto) para correção guiada.
+🔹 /engajamento — Seu resumo de perguntas e quizzes por disciplina (períodos: /engajamento_7, _15, _30)."""
+
+CMD_STUDENT_HELP_LANGUAGE = """
+🔹 /nivelamento — Teste rápido para calibrar seu nível no idioma."""
+
+CMD_STUDENT_HELP_READING = """
+
+*📖 Jornada de Leitura* (livro/apostila)
+🔹 /meu_progresso — Onde você está no plano de leitura.
+🔹 /pausar_leitura — Pausa os lembretes da jornada.
+🔹 /retomar_leitura — Retoma de onde parou.
+🔹 /sair_livro — Sai da jornada deste livro."""
+
+CMD_STUDENT_HELP_GAMING = """
+
+*🏆 Gamificação*
+🔹 /minha_xp — Sua XP acumulada e a da semana.
+🔹 /meu_ranking — Sua posição e XP na turma.
+🔹 /conquistas — Suas medalhas e sequências (streaks).
+🔹 /ocultar_ranking — Sai/volta do ranking (seu XP continua contando)."""
+
+CMD_STUDENT_HELP_GRADE = """
+🔹 /minha_nota — Seu componente de nota por engajamento."""
+
+CMD_STUDENT_HELP_FOOTER = """
+
+*🔐 Privacidade*
+🔹 /apagar_meus_dados — Apaga seus dados do bot (LGPD)."""
 
 CMD_CLASS_NOT_FOUND = "❌ Turma '{class_query}' não encontrada ou você não tem permissão sobre ela."
 CMD_TEACHER_NOT_FOUND = "❌ Professor não encontrado no sistema."
@@ -376,3 +423,25 @@ MY_GRADE_BODY = (
 )
 MY_GRADE_REMAINING = "Faltam *{gap} XP* pra nota cheia de engajamento. 💪"
 MY_GRADE_FULL = "✅ Você já garantiu a nota cheia de engajamento esta semana! 🎉"
+
+# /minha_xp — XP por DISCIPLINA: acumulado (all-time) + o da semana (que reseta
+# e conta na liga). Eventos antigos sem carimbo de disciplina caem em "Geral".
+# str.format (nunca f-string) — igual ao resto da copy de gamificação.
+MY_XP_HEADER = "⭐ *Sua XP por disciplina*\n"
+MY_XP_ROW = "\n📘 *{label}*\n   🏆 Total: *{total} XP* · 📅 Semana: *{week} XP*"
+MY_XP_FOOTER = (
+    "\n\n_Ganhe XP respondendo quizzes, revisões no prazo, dúvidas e redações. "
+    "A XP da semana zera na virada e conta pro ranking; o total é seu histórico._"
+)
+MY_XP_NONE = "⭐ Você ainda não acumulou XP. Responda quizzes e revisões para começar! 💪"
+
+# /engajamento do ALUNO — resumo por DISCIPLINA (perguntas por iniciativa +
+# quizzes recebidos/respondidos/acertos/%). Períodos: completo, 7, 15, 30 dias.
+STUDENT_ENGAGEMENT_HEADER = "📊 *Seu engajamento — {period}*\n"
+STUDENT_ENGAGEMENT_BLOCK = (
+    "\n📘 *{label}*\n"
+    "   ❓ Perguntas feitas: *{perguntas}*\n"
+    "   📝 Quizzes: *{recebidos}* recebidos · *{respondidos}* respondidos\n"
+    "   ✅ Acertos: *{acertos}* ({pct}% dos respondidos)"
+)
+STUDENT_ENGAGEMENT_NONE = "📊 Ainda não há atividade registrada{period_suffix}. Responda quizzes e mande suas dúvidas! 💪"

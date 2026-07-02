@@ -5,6 +5,7 @@ from fastapi import Response
 from src.shared.config import settings
 from src.shared.telemetry import logger
 from src.channel.interfaces import IMessagingChannel, InboundMessage
+from src.channel.text_utils import chunk_text
 
 class TelegramChannel(IMessagingChannel):
     """Implementação de canal para Telegram Bot API."""
@@ -15,6 +16,7 @@ class TelegramChannel(IMessagingChannel):
         self.bot_token = settings.TELEGRAM_BOT_TOKEN
         self.api_url = f"https://api.telegram.org/bot{self.bot_token}"
         self.secret_token = settings.TELEGRAM_WEBHOOK_SECRET
+        self.max_length = settings.MAX_TEXT_MESSAGE_LENGTH
 
     def get_user_query_column(self) -> str:
         return "telegram_chat_id"
@@ -31,33 +33,43 @@ class TelegramChannel(IMessagingChannel):
             return response.json()
 
     async def send_text(self, user_id: str, text: str, reply_to: str | None = None) -> dict:
-        payload: dict[str, Any] = {
-            "chat_id": user_id,
-            "text": text,
-            "parse_mode": "Markdown",  # Suporta *bold*, _italic_, etc.
-        }
-        
-        if reply_to:
-            payload["reply_to_message_id"] = int(reply_to) if str(reply_to).isdigit() else reply_to
+        # O Telegram REJEITA (400 "message is too long") acima de ~4096 chars —
+        # ao contrário do WhatsApp, não há truncamento silencioso do cliente.
+        # Texto longo (ex.: correção de redação) é dividido em várias mensagens.
+        chunks = chunk_text(text, self.max_length)
+        last_response: dict = {}
+        for i, chunk in enumerate(chunks):
+            if not chunk:
+                continue
 
+            payload: dict[str, Any] = {
+                "chat_id": user_id,
+                "text": chunk,
+                "parse_mode": "Markdown",  # Suporta *bold*, _italic_, etc.
+            }
 
-        try:
-            return await self._send_request("sendMessage", payload)
-        except httpx.HTTPStatusError as e:
-            # O parser "Markdown" legado do Telegram exige entidades perfeitamente
-            # balanceadas (*, _, `, [). Respostas livres do LLM ocasionalmente
-            # contêm markdown malformado (ex.: um "_" solto), o que faz o Telegram
-            # rejeitar com 400 "can't parse entities". Em vez de derrubar o pipeline
-            # e devolver ERROR_TECHNICAL ao aluno, reenviamos como texto puro.
-            if e.response.status_code == 400:
-                logger.warning(
-                    "telegram_markdown_fallback",
-                    user_id=user_id,
-                    detail=e.response.text[:300],
-                )
-                payload.pop("parse_mode", None)
-                return await self._send_request("sendMessage", payload)
-            raise
+            if i == 0 and reply_to:
+                payload["reply_to_message_id"] = int(reply_to) if str(reply_to).isdigit() else reply_to
+
+            try:
+                last_response = await self._send_request("sendMessage", payload)
+            except httpx.HTTPStatusError as e:
+                # O parser "Markdown" legado do Telegram exige entidades perfeitamente
+                # balanceadas (*, _, `, [). Respostas livres do LLM ocasionalmente
+                # contêm markdown malformado (ex.: um "_" solto), o que faz o Telegram
+                # rejeitar com 400 "can't parse entities". Em vez de derrubar o pipeline
+                # e devolver ERROR_TECHNICAL ao aluno, reenviamos como texto puro.
+                if e.response.status_code == 400:
+                    logger.warning(
+                        "telegram_markdown_fallback",
+                        user_id=user_id,
+                        detail=e.response.text[:300],
+                    )
+                    payload.pop("parse_mode", None)
+                    last_response = await self._send_request("sendMessage", payload)
+                else:
+                    raise
+        return last_response
 
     async def send_buttons(self, user_id: str, body: str, buttons: list[dict], footer: str = "") -> dict:
         # Telegram InlineKeyboardMarkup

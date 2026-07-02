@@ -166,3 +166,96 @@ def test_gerencial_nao_vaza_para_legado():
     # gerencial PRIMEIRO, então isso nunca chega ao usuário).
     cmd, _ = parse_command("/engajamento_TurmaA")
     assert cmd == CommandType.UNKNOWN
+
+
+# ==============================================================================
+# /ajuda do ALUNO — help por perfil (mesmos aliases do professor)
+# ==============================================================================
+
+def test_ajuda_aluno_parse():
+    from src.shared.constants.commands import parse_student_command
+    assert parse_student_command("/ajuda") == CommandType.STUDENT_HELP
+    assert parse_student_command("/HELP") == CommandType.STUDENT_HELP
+    assert parse_student_command("/comandos") == CommandType.STUDENT_HELP
+    # allowlist estrita: variações com sufixo continuam rejeitadas na borda
+    assert parse_student_command("/ajuda_agora") is None
+
+
+def test_ajuda_professor_continua_no_fluxo_legado():
+    # O MESMO alias resolve por PERFIL: professor cai no parse_command → HELP.
+    assert parse_command("/ajuda")[0] == CommandType.HELP
+
+
+def test_ajuda_aluno_gating_por_flags(mocker):
+    """As seções do help do aluno seguem as MESMAS flags das funcionalidades:
+    anunciar /meu_ranking com o gaming OFF seria apontar para um comando que a
+    borda rejeita com ERROR_UNAUTHORIZED."""
+    from src.shared.config import settings
+    from src.workers.command_worker import build_student_help_text
+
+    mocker.patch.object(settings, "GAMIFICATION_ENABLED", False)
+    mocker.patch.object(settings, "LANGUAGE_MODE_ENABLED", False)
+    t = build_student_help_text()
+    assert "/flashcards" in t and "/meu_progresso" in t and "/apagar_meus_dados" in t
+    assert "/meu_ranking" not in t and "/nivelamento" not in t and "/minha_nota" not in t
+
+    mocker.patch.object(settings, "GAMIFICATION_ENABLED", True)
+    mocker.patch.object(settings, "GRADE_COMPONENT_ENABLED", False)
+    mocker.patch.object(settings, "LANGUAGE_MODE_ENABLED", True)
+    t = build_student_help_text()
+    assert "/meu_ranking" in t and "/nivelamento" in t
+    assert "/minha_nota" not in t  # componente de nota (F2) tem flag própria
+
+    mocker.patch.object(settings, "GRADE_COMPONENT_ENABLED", True)
+    assert "/minha_nota" in build_student_help_text()
+
+
+# ==============================================================================
+# /minha_xp — comando de aluno para conferir a XP acumulada (gamificação)
+# ==============================================================================
+
+def test_minha_xp_parse():
+    from src.shared.constants.commands import parse_student_command
+    assert parse_student_command("/minha_xp") == CommandType.MY_XP
+    assert parse_student_command("/meu_xp") == CommandType.MY_XP   # alias (gênero)
+    assert parse_student_command("/MINHA_XP") == CommandType.MY_XP
+    assert parse_student_command("/minha_xp_agora") is None        # allowlist estrita
+
+
+def test_minha_xp_gateada_pela_flag_mestre_na_borda():
+    """/minha_xp é comando de gamificação: na borda só conta como comando com o
+    mestre ON (GAMIFICATION_STUDENT_COMMANDS). Com a flag OFF, cai em
+    ERROR_UNAUTHORIZED, igual a /meu_ranking."""
+    from src.shared.constants.commands import GAMIFICATION_STUDENT_COMMANDS
+    assert "minha_xp" in GAMIFICATION_STUDENT_COMMANDS
+    assert "meu_xp" in GAMIFICATION_STUDENT_COMMANDS
+
+
+# ==============================================================================
+# /engajamento do ALUNO — 4 variantes (histórico, _7, _15, _30) por disciplina
+# ==============================================================================
+
+def test_engajamento_aluno_parse_variantes():
+    from src.shared.constants.commands import parse_student_command, parse_engagement_days
+    for txt in ("/engajamento", "/engajamento_7", "/engajamento_15", "/engajamento_30"):
+        assert parse_student_command(txt) == CommandType.STUDENT_ENGAGEMENT, txt
+    assert parse_engagement_days("/engajamento") is None       # histórico completo
+    assert parse_engagement_days("/engajamento_7") == 7
+    assert parse_engagement_days("/engajamento_15") == 15
+    assert parse_engagement_days("/engajamento_30") == 30
+    # Allowlist estrita: períodos fora do cardápio não são comando de aluno
+    assert parse_student_command("/engajamento_20") is None
+    assert parse_student_command("/engajamento_TurmaA") is None
+
+
+def test_engajamento_aluno_sempre_disponivel():
+    # Telemetria pedagógica: NÃO é gateada pela flag de gamificação na borda.
+    from src.shared.constants.commands import GAMIFICATION_STUDENT_COMMANDS
+    assert "engajamento" not in GAMIFICATION_STUDENT_COMMANDS
+
+
+def test_engajamento_professor_continua_gerencial():
+    # O MESMO prefixo resolve por PERFIL: professor cai no comando gerencial.
+    assert parse_management_command("/engajamento_TurmaA") == (
+        CommandType.ENGAGEMENT, "TurmaA", ""
+    )

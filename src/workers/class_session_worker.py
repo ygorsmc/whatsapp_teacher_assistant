@@ -5,7 +5,12 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy import text
 
 from src.db.database import AsyncSessionLocal
-from src.rag.review_generator import get_all_lesson_topics, generate_review
+from src.rag.review_generator import (
+    get_all_lesson_topics,
+    generate_review,
+    generate_language_review,
+    class_language_context,
+)
 from src.workers.micro_learning import deliver_next_pending_quiz
 from src.shared.constants.messages import CLASS_REVIEW_SEPARATOR
 
@@ -26,10 +31,13 @@ async def handle_class_session_start(payload: dict):
         # Pega a turma e informações do professor/disciplina
         result = await session.execute(
             text("""
-                SELECT c.name as class_name, c.teacher_id, c.subject_id, t.name as teacher_name, sub.name as subject_name
+                SELECT c.name as class_name, c.teacher_id, c.subject_id,
+                       t.name as teacher_name, sub.name as subject_name,
+                       co.name as course_name, c.is_language, c.proficiency_level
                 FROM "Classes" c
                 LEFT JOIN "Teachers" t ON c.teacher_id = t.id
                 LEFT JOIN "Subjects" sub ON c.subject_id = sub.id
+                LEFT JOIN "Courses" co ON c.course_id = co.id
                 WHERE c.id = :class_id
             """),
             {"class_id": class_id}
@@ -37,7 +45,41 @@ async def handle_class_session_start(payload: dict):
         cls_row = result.fetchone()
         if not cls_row:
             return
-            
+
+    # Turma de IDIOMA: no avanço NÃO fazemos a Sessão Mista packed (fluxo do
+    # PIBEP). Apenas AQUECEMOS o QuizBank com o pacote de idioma da aula — o
+    # MESMO banco que a revisão diária relê e a Revisão Espaçada reentrega. A
+    # entrega fica a cargo da revisão diária; from_bank=False gera+salva uma vez.
+    delivery, target_language = class_language_context(
+        cls_row.course_name, cls_row.is_language, cls_row.proficiency_level
+    )
+    if delivery is not None and target_language is not None:
+        try:
+            review = await generate_language_review(
+                teacher_id=cls_row.teacher_id,
+                student_id="broadcast",
+                student_name="Turma",
+                course_id=course_id,
+                course_name=cls_row.course_name,
+                subject_name=cls_row.subject_name,
+                current_lesson_number=lesson_number,
+                lesson_label=f"Aula {lesson_number}",
+                delivery=delivery,
+                target_language=target_language,
+                subject_id=cls_row.subject_id,
+                from_bank=False,
+            )
+            logger.info(
+                "class_session_language_bank_warmed",
+                class_id=class_id, lesson_number=lesson_number,
+                quiz_bank_id=getattr(review, "quiz_bank_id", None),
+            )
+        except Exception as e:
+            logger.error("class_session_language_warm_failed", class_id=class_id, error=str(e)[:300])
+        return
+
+    async with AsyncSessionLocal() as session:
+
         # Pega os alunos matriculados ativos
         result = await session.execute(
             text("""

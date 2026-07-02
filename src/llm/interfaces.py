@@ -13,6 +13,11 @@ class LLMProvider(ABC):
         """Generates a structured Pydantic response from the model asynchronously."""
         pass
 
+    async def agenerate_vision(self, prompt: str, image_bytes: bytes, mime_type: str = "image/jpeg") -> str:
+        """Gera resposta a partir de prompt + IMAGEM (multimodal). Default (não
+        abstrato) para não obrigar providers sem suporte a visão."""
+        raise NotImplementedError("Este provider não suporta entrada de imagem (visão).")
+
 class EmbeddingProvider(ABC):
     @abstractmethod
     async def aembed_query(self, text: str) -> List[float]:

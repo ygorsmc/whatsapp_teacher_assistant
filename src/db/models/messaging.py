@@ -43,6 +43,10 @@ class StudentInteractions(Base):
     id = Column(String(255), primary_key=True)
     student_id = Column(String(255), ForeignKey("Students.id"), nullable=False)
     course_id = Column(String(255), ForeignKey("Courses.id"), nullable=True)
+    # Disciplina do evento (analytics POR DISCIPLINA: /minha_xp, /engajamento
+    # do aluno). Carimbo SEM FK de propósito: linhas antigas ficam NULL
+    # ("Geral") e apagar/renomear disciplina não quebra o histórico.
+    subject_id = Column(String(255), nullable=True)
     interaction_type = Column(String(255), nullable=False) # 'message_received', 'quiz_answered', 'review_sent'
     is_correct = Column(Boolean, nullable=True)
     message_content = Column(Text, nullable=True)
@@ -65,4 +69,6 @@ class StudentInteractions(Base):
         Index('idx_interaction_student_type_time', 'student_id', 'interaction_type', 'timestamp'),
         # Rollup semanal de XP por aluno (filtra xp_event da semana).
         Index('idx_interaction_xp_week', 'student_id', 'xp_week_id'),
+        # Agrupamentos por disciplina (/minha_xp, /engajamento do aluno).
+        Index('idx_interaction_student_subject', 'student_id', 'subject_id'),
     )
