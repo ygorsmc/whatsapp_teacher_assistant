@@ -194,16 +194,29 @@ async def send_existing_quiz(channel, sender_id: str, quiz_row) -> str:
     return quiz_id
 
 async def deliver_next_pending_quiz(channel, sender_id: str, student_id: str, course_id: str, lesson_id: str, exclude_quiz_id: str | None = None) -> bool:
-    """Busca o próximo quiz pendente da aula e envia. Retorna True se enviou."""
+    """Busca o próximo quiz pendente da SESSÃO DE AULA e envia. Retorna True se enviou.
+
+    A fila contínua é exclusiva da Sessão Mista (class_session_worker): só
+    entram quizzes marcados pelo CLASS_REVIEW_SEPARATOR e ainda não expirados.
+    Sem o filtro, qualquer quiz pendente avulso do mesmo (curso, aula) — revisão
+    diária, revisão espaçada, desafio — entraria no meio da sequência da aula
+    (e vice-versa: a sequência vazaria para fora do momento da aula).
+    """
     from src.db.database import AsyncSessionLocal
     from sqlalchemy import text
-    
+
     async with AsyncSessionLocal() as session:
         exclude_clause = "AND quiz_id != :exclude_id" if exclude_quiz_id else ""
-        params = {"student_id": student_id, "course_id": course_id, "lesson_id": lesson_id}
+        params = {
+            "student_id": student_id,
+            "course_id": course_id,
+            "lesson_id": lesson_id,
+            "session_marker": CLASS_REVIEW_SEPARATOR,
+            "now": datetime.now(timezone.utc).replace(tzinfo=None),
+        }
         if exclude_quiz_id:
             params["exclude_id"] = exclude_quiz_id
-            
+
         result = await session.execute(
             text(f"""
                 SELECT * FROM "PendingQuizzes"
@@ -211,6 +224,8 @@ async def deliver_next_pending_quiz(channel, sender_id: str, student_id: str, co
                   AND course_id = :course_id
                   AND lesson_id = :lesson_id
                   AND status = 'pending'
+                  AND position(:session_marker in question_text) > 0
+                  AND expires_at > :now
                   {exclude_clause}
                 ORDER BY created_at ASC
                 LIMIT 1

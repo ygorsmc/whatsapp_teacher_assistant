@@ -40,6 +40,74 @@ def test_consistency_bonus_only_first_act():
     assert xp.consistency_bonus(False, bonus=5) == 0
 
 
+# ────────────── /minha_xp — dobra por (curso, disciplina) ──────────────
+
+def _xrow(course_id, course_name, subject_id, subject_name, total, week):
+    return xp.XpSubjectRow(course_id, course_name, subject_id, subject_name, total, week)
+
+
+def test_minha_xp_dobra_sem_carimbo_na_disciplina_unica():
+    # Cenário real reportado: English Course tinha só B1 com interação, mas
+    # dúvidas/voz sem carimbo gravaram subject NULL (35) à parte do quiz (B1, 5).
+    # Devem virar UMA linha 'B1 - English Course' = 40 (não duas).
+    rows = [
+        _xrow("crs_eng", "English Course", None, None, 35, 35),
+        _xrow("crs_eng", "English Course", "sub_b1", "B1", 5, 5),
+        _xrow("crs_ia", "AI Course", "sub_ia", "Inteligência Artificial", 30, 30),
+    ]
+    lines = xp.fold_xp_lines(rows)
+    assert [(ln.label, ln.total, ln.week) for ln in lines] == [
+        ("B1 - English Course", 40, 40),
+        ("Inteligência Artificial - AI Course", 30, 30),
+    ]
+
+
+def test_minha_xp_rotulo_sempre_inclui_curso():
+    lines = xp.fold_xp_lines([_xrow("c", "English Course", "s", "B1", 10, 10)])
+    assert lines[0].label == "B1 - English Course"
+
+
+def test_minha_xp_multiplas_disciplinas_nao_dobra_o_sem_carimbo():
+    # Com 2+ disciplinas no curso a atribuição do sem-carimbo é ambígua:
+    # ele vira 'Geral - {curso}', e cada disciplina fica na sua linha.
+    rows = [
+        _xrow("c", "Curso X", None, None, 7, 7),
+        _xrow("c", "Curso X", "s1", "Álgebra", 20, 20),
+        _xrow("c", "Curso X", "s2", "Geometria", 10, 0),
+    ]
+    lines = xp.fold_xp_lines(rows)
+    assert [(ln.label, ln.total, ln.week) for ln in lines] == [
+        ("Álgebra - Curso X", 20, 20),
+        ("Geometria - Curso X", 10, 0),
+        ("Geral - Curso X", 7, 7),
+    ]
+
+
+def test_minha_xp_ignora_secoes_zeradas():
+    rows = [
+        _xrow("c", "Curso X", "s1", "Viva", 5, 0),
+        _xrow("c", "Curso X", "s2", "Zerada", 0, 0),
+    ]
+    lines = xp.fold_xp_lines(rows)
+    assert [ln.label for ln in lines] == ["Viva - Curso X"]
+
+
+def test_minha_xp_ordena_por_total_desc_e_rotulo():
+    rows = [
+        _xrow("a", "A", "s1", "Baixa", 5, 5),
+        _xrow("b", "B", "s2", "Alta", 50, 0),
+    ]
+    lines = xp.fold_xp_lines(rows)
+    assert [ln.label for ln in lines] == ["Alta - B", "Baixa - A"]
+
+
+def test_xp_line_label_fallbacks():
+    assert xp.xp_line_label("B1", "English Course") == "B1 - English Course"
+    assert xp.xp_line_label(None, "English Course") == "Geral - English Course"
+    assert xp.xp_line_label("B1", None) == "B1"
+    assert xp.xp_line_label(None, None) == "Geral"
+
+
 # ─────────────────────── Anti-gaming ───────────────────────
 
 def test_flash_answer_detection():

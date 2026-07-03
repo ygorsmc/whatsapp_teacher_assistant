@@ -16,6 +16,7 @@ streak/aprendizado, mas não soma XP competitivo.
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Iterable, NamedTuple
 
 from src.shared.config import settings
 
@@ -78,3 +79,75 @@ def consistency_bonus(is_first_valid_act_today: bool, *, bonus: int | None = Non
     if bonus is None:
         bonus = settings.XP_CONSISTENCY_BONUS
     return int(bonus) if is_first_valid_act_today else 0
+
+
+# ==============================================================================
+# /minha_xp — dobra e rotulagem por (curso, disciplina) — lógica pura
+# ==============================================================================
+
+class XpSubjectRow(NamedTuple):
+    """Linha agregada do ledger por (curso, disciplina). `subject_*` vem NULL
+    quando o evento não carimbou disciplina (ex.: dúvida/voz/redação numa turma
+    sem Disciplina cadastrada) — nesse caso o LEFT JOIN devolve nome NULL."""
+    course_id: str | None
+    course_name: str | None
+    subject_id: str | None
+    subject_name: str | None
+    total: int
+    week: int
+
+
+class XpLine(NamedTuple):
+    """Seção renderizável do /minha_xp: rótulo 'Disciplina - Curso' + valores."""
+    label: str
+    total: int
+    week: int
+
+
+def xp_line_label(subject_name: str | None, course_name: str | None) -> str:
+    """Rótulo da seção. Sempre inclui o curso quando conhecido (pedido do prof.):
+    'B1 - English Course'. Sem disciplina identificada ⇒ 'Geral - {curso}'."""
+    if subject_name and course_name:
+        return f"{subject_name} - {course_name}"
+    if subject_name:
+        return subject_name
+    if course_name:
+        return f"Geral - {course_name}"
+    return "Geral"
+
+
+def fold_xp_lines(rows: Iterable[XpSubjectRow]) -> list[XpLine]:
+    """Agrega o XP em seções 'Disciplina - Curso', ordenadas por total desc.
+
+    O ponto-chave é a DOBRA por curso: eventos sem disciplina (subject NULL)
+    não podem virar uma 'linha de curso' à parte da disciplina. Quando o curso
+    tem UMA única disciplina identificada, todo o XP sem carimbo é atribuído a
+    ela (o não-carimbo é falha de stamping, não uma disciplina de verdade) —
+    assim 'English Course' (sem carimbo) e 'B1' viram uma só linha somada.
+    Com 2+ disciplinas no curso a atribuição fica ambígua: o XP sem carimbo
+    vira uma linha honesta 'Geral - {curso}'. Sem disciplina alguma, idem.
+    """
+    by_course: dict[str | None, list[XpSubjectRow]] = {}
+    for r in rows:
+        by_course.setdefault(r.course_id, []).append(r)
+
+    # bucket: (course_id, subject_name|None) -> [total, week, course_name]
+    buckets: dict[tuple[str | None, str | None], list] = {}
+    for _course_id, crows in by_course.items():
+        course_name = next((r.course_name for r in crows if r.course_name), None)
+        named = sorted({r.subject_name for r in crows if r.subject_name})
+        sole = named[0] if len(named) == 1 else None
+        for r in crows:
+            subject_name = r.subject_name or sole  # dobra o sem-carimbo na única disciplina
+            key = (_course_id, subject_name)
+            bucket = buckets.setdefault(key, [0, 0, course_name])
+            bucket[0] += int(r.total or 0)
+            bucket[1] += int(r.week or 0)
+
+    lines = [
+        XpLine(label=xp_line_label(subject_name, course_name), total=total, week=week)
+        for (_course_id, subject_name), (total, week, course_name) in buckets.items()
+        if total > 0 or week > 0
+    ]
+    lines.sort(key=lambda ln: (-ln.total, ln.label))
+    return lines

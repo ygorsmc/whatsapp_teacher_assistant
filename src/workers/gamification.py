@@ -656,8 +656,13 @@ async def run_achievements_command(channel, sender_id: str) -> None:
 async def run_my_xp_command(channel, sender_id: str) -> None:
     """/minha_xp — XP POR DISCIPLINA (acumulado + semana), em todas as turmas
     do aluno. Só dados do PRÓPRIO aluno (sem colegas — LGPD ok); exclui eventos
-    suspeitos (anti-gaming), igual ao ranking/nota. Eventos antigos sem carimbo
-    de disciplina caem em 'Geral' (nome do curso quando conhecido)."""
+    suspeitos (anti-gaming), igual ao ranking/nota.
+
+    Cada seção é rotulada 'Disciplina - Curso' (ex.: 'B1 - English Course'). O
+    XP sem carimbo de disciplina (dúvida/voz/redação numa turma sem Disciplina
+    cadastrada grava subject_id=NULL) é DOBRADO na única disciplina do curso —
+    senão o mesmo curso apareceria duas vezes: uma pelo nome do curso (eventos
+    sem carimbo) e outra pela disciplina. Ver `xp_logic.fold_xp_lines`."""
     if not gamification_on() or not settings.XP_LEDGER_ENABLED:
         return
     try:
@@ -667,7 +672,8 @@ async def run_my_xp_command(channel, sender_id: str) -> None:
                 return
             week_id = current_week_id()
             rows = (await session.execute(
-                text('''SELECT COALESCE(sub.name, c.name, 'Geral') AS label,
+                text('''SELECT si.course_id AS course_id, c.name AS course_name,
+                               si.subject_id AS subject_id, sub.name AS subject_name,
                                COALESCE(SUM(CASE WHEN si.xp_suspect = false
                                                  THEN si.xp_awarded ELSE 0 END), 0) AS total,
                                COALESCE(SUM(CASE WHEN si.xp_suspect = false AND si.xp_week_id = :wk
@@ -677,19 +683,25 @@ async def run_my_xp_command(channel, sender_id: str) -> None:
                         LEFT JOIN "Courses" c ON c.id = si.course_id
                         WHERE si.interaction_type = 'xp_event'
                           AND si.student_id = :sid
-                        GROUP BY label
-                        ORDER BY total DESC, label'''),
+                        GROUP BY si.course_id, c.name, si.subject_id, sub.name'''),
                 {"sid": scope.id, "wk": week_id},
             )).fetchall()
 
-        rows = [r for r in rows if int(r.total or 0) > 0 or int(r.week or 0) > 0]
-        if not rows:
+        lines = xp_logic.fold_xp_lines(
+            xp_logic.XpSubjectRow(
+                course_id=r.course_id, course_name=r.course_name,
+                subject_id=r.subject_id, subject_name=r.subject_name,
+                total=int(r.total or 0), week=int(r.week or 0),
+            )
+            for r in rows
+        )
+        if not lines:
             await channel.send_text(sender_id, M.MY_XP_NONE)
             return
 
         body = M.MY_XP_HEADER + "".join(
-            M.MY_XP_ROW.format(label=r.label, total=int(r.total or 0), week=int(r.week or 0))
-            for r in rows
+            M.MY_XP_ROW.format(label=ln.label, total=ln.total, week=ln.week)
+            for ln in lines
         ) + M.MY_XP_FOOTER
         await channel.send_text(sender_id, body[:4000])
     except Exception as e:

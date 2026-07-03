@@ -16,6 +16,7 @@ from src.shared.constants.messages import (
     ERROR_MESSAGE_TOO_LONG,
     ERROR_TECHNICAL,
     TEACHER_CHAT_REPLY,
+    CLASS_REVIEW_SEPARATOR,
 )
 from src.channel.factory import get_channel
 from src.rag.review_generator import generate_review
@@ -422,13 +423,17 @@ async def handle_quiz_response(
         "is_reading_checkin": bool(quiz.reading_plan_id),
     })
 
-    # Fase 5: Sessão Mista — se for quiz de aula, busca e envia o próximo da fila contínua
-    if not quiz.reading_plan_id:
+    # Fase 5: Sessão Mista — encadeia o PRÓXIMO tópico apenas quando o quiz
+    # respondido pertence à PRÓPRIA sessão de aula (fila packed marcada pelo
+    # CLASS_REVIEW_SEPARATOR). Responder um quiz avulso (revisão diária,
+    # revisão espaçada, desafio) NÃO drena a fila da sessão: a sequência de
+    # tópicos só flui no momento da aula; o restante do banco sai nas janelas
+    # agendadas da aba Alunos (com prioridade para a revisão espaçada).
+    if not quiz.reading_plan_id and CLASS_REVIEW_SEPARATOR in (quiz.question_text or ""):
         from src.workers.micro_learning import deliver_next_pending_quiz
         sent_next = await deliver_next_pending_quiz(channel, sender_id, student_id, quiz.course_id, quiz.lesson_id, exclude_quiz_id=quiz_id)
         if not sent_next:
-            if "Revisão do Tópico" in quiz.question_text:
-                await channel.send_text(sender_id, "🎉 Você concluiu todos os tópicos desta aula. Parabéns pela dedicação!")
+            await channel.send_text(sender_id, "🎉 Você concluiu todos os tópicos desta aula. Parabéns pela dedicação!")
 
 
 async def _find_linked_chapter(course_id: str, quiz_bank_id: str | None, lesson_id: str) -> int | None:
@@ -487,6 +492,17 @@ async def handle_review_request(channel, sender_id: str, student_context: dict) 
     subject_name = subject.name if subject else None
     subject_id = subject.id if subject else None
     current_lesson = student_context["class_obj"].current_lesson_number
+
+    # PRIORIDADE DA JANELA AGENDADA (aba Alunos): revisão espaçada vencida
+    # (D+3/D+10/D+30) ocupa o slot — reentrega $0 direto do QuizBank. Sem
+    # revisão vencida, segue o fluxo normal (quiz ainda não enviado ao aluno).
+    # Best-effort: falha aqui NUNCA derruba a revisão clássica.
+    try:
+        from src.workers.spaced_repetition import deliver_due_srs_for_student
+        if await deliver_due_srs_for_student(channel, sender_id, student.id, course.id):
+            return
+    except Exception as e:
+        logger.error("review_srs_priority_failed", student_id=student.id, error=str(e)[:300])
 
     from src.rag.prompt_builder import resolve_lesson_label
     lesson_label = await resolve_lesson_label(course.id, str(current_lesson))

@@ -219,10 +219,174 @@ def _shuffled_quiz_from_bank(bank: dict):
     )
 
 
+def _postpone_sql():
+    return text("""
+        UPDATE "SpacedRepetitionQueue"
+        SET next_review_at = :next, updated_at = CURRENT_TIMESTAMP
+        WHERE id = :id
+    """)
+
+
+async def _send_srs_item(session, item, channel, sender_id: str, now_utc: datetime) -> bool:
+    """Núcleo da reentrega de UMA revisão vencida (cache hit puro do QuizBank).
+
+    Compartilhado entre o free-run do scheduler e a entrega priorizada na
+    janela agendada (deliver_due_srs_for_student). Retorna True se o quiz foi
+    enviado; False se a questão foi invalidada nesse meio-tempo (linha marcada
+    como 'skipped'). Commita a própria transação: a reentrega empurra
+    next_review_at em +1 dia até a RESPOSTA chegar — quem fecha o degrau da
+    escada é o register_quiz_answer.
+    """
+    from src.rag.quiz_bank import get_quiz_package, find_unseen_quiz
+
+    bank = await get_quiz_package(item.quiz_bank_id)
+    if not bank:
+        # Questão invalidada entre o agendamento e a entrega
+        # (corrida com o CASCADE) — marca como pulada.
+        await session.execute(
+            text("""
+                UPDATE "SpacedRepetitionQueue"
+                SET status = 'skipped', updated_at = CURRENT_TIMESTAMP
+                WHERE id = :id
+            """),
+            {"id": item.srq_id},
+        )
+        await session.commit()
+        return False
+
+    # Generalização de Tópicos: tenta achar uma variação irmã (mesmo tópico) inédita pro aluno
+    sister_bank = await find_unseen_quiz(
+        student_id=item.student_id,
+        course_id=bank["course_id"],
+        subject_id=bank.get("subject_id"),
+        lesson_number=bank["lesson_number"],
+        topic=bank["topic"],
+        material_type=bank["material_type"],
+    )
+
+    quiz_bank_id_to_send = item.quiz_bank_id
+    if sister_bank:
+        bank = sister_bank
+        quiz_bank_id_to_send = bank["id"]
+        # Atualiza a fila para apontar para a nova variação (para consistência futura)
+        await session.execute(
+            text('UPDATE "SpacedRepetitionQueue" SET quiz_bank_id = :qid WHERE id = :id'),
+            {"qid": quiz_bank_id_to_send, "id": item.srq_id}
+        )
+
+    quiz_output = _shuffled_quiz_from_bank(bank)
+
+    # Explicita o degrau da escada (D+3/D+10/D+30, ou o valor
+    # adaptativo) e a disciplina — sem isso, disciplinas parecidas
+    # do mesmo curso (ex.: "Design Thinking" dentro de IA) ficam
+    # indistinguíveis para o aluno mapear se está indo bem em cada uma.
+    await channel.send_text(
+        sender_id,
+        SPACED_REVIEW_INTRO.format(interval=item.interval_days, subject_name=item.subject_name),
+    )
+
+    from src.workers.micro_learning import send_quiz_to_student
+    await send_quiz_to_student(
+        channel=channel,
+        student={
+            "id": item.student_id,
+            "sender_id": sender_id,
+            "course_id": item.course_id,
+            "lesson_pointer": str(item.lesson_number),
+        },
+        quiz=quiz_output,
+        quiz_bank_id=quiz_bank_id_to_send,
+    )
+
+    # Vertical de Idiomas: reentrega de VOCABULÁRIO refala a palavra-alvo
+    # (áudio persistido no QuizBank). Best-effort — não derruba o SRS.
+    if item.material_type == "vocab" and bank.get("audio_script") and settings.LANGUAGE_MODE_ENABLED:
+        from src.shared.language import detect_language_course
+        from src.rag.review_generator import synthesize_listening
+        spec = detect_language_course(item.course_name, default_target=settings.DEFAULT_TARGET_LANGUAGE)
+        target_lang = spec.target_language if spec else settings.DEFAULT_TARGET_LANGUAGE
+        try:
+            audio = await synthesize_listening(bank["audio_script"], target_lang)
+            if audio:
+                # Transcrição logo abaixo da nota de voz (flashcard de
+                # pronúncia — ver a palavra/exemplo é o objetivo).
+                await channel.send_audio(sender_id, audio, caption=bank["audio_script"])
+        except Exception as e:
+            logger.warning("srs_vocab_audio_failed", srq_id=item.srq_id, error=str(e)[:200])
+
+    # Empurra +1 dia até a RESPOSTA chegar: quem fecha o degrau é o
+    # register_quiz_answer. Se o aluno ignorar, reentrega amanhã.
+    await session.execute(_postpone_sql(), {"next": now_utc + timedelta(days=1), "id": item.srq_id})
+    await session.commit()
+
+    track_event("srs_review_sent", {
+        "student_id": item.student_id,
+        "quiz_bank_id": item.quiz_bank_id,
+        "interval_days": item.interval_days,
+    })
+    logger.info(
+        "srs_review_sent",
+        srq_id=item.srq_id,
+        interval=item.interval_days,
+        channel=getattr(channel, "channel_name", "?"),
+    )
+    return True
+
+
+async def deliver_due_srs_for_student(channel, sender_id: str, student_id: str, course_id: str) -> bool:
+    """PRIORIDADE DA JANELA AGENDADA (aba Alunos): entrega a revisão espaçada
+    vencida mais antiga do aluno neste curso, direto do QuizBank ($0).
+
+    Chamada pelo handle_review_request ANTES de gerar um quiz inédito: em dia
+    de revisão (D+3/D+10/D+30 vencida) a janela é ocupada pela reentrega — uma
+    por janela, no espírito microdose; sem vencida, retorna False e o fluxo
+    normal envia um quiz ainda não enviado. A janela de 24h já está aberta por
+    definição (o aluno acabou de interagir ou o scheduler validou antes de
+    simular o clique). Best-effort: erro ⇒ False (a revisão clássica segue).
+    """
+    now_utc = _naive_utc_now()
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                text("""
+                    SELECT srq.id AS srq_id, srq.student_id, srq.quiz_bank_id, srq.interval_days,
+                           qb.course_id, qb.lesson_number, qb.material_type, c.name AS course_name,
+                           COALESCE(sub.name, c.name, 'Geral') AS subject_name
+                    FROM "SpacedRepetitionQueue" srq
+                    JOIN "QuizBank" qb ON qb.id = srq.quiz_bank_id
+                    LEFT JOIN "Courses" c ON c.id = qb.course_id
+                    LEFT JOIN "Subjects" sub ON sub.id = qb.subject_id
+                    WHERE srq.student_id = :sid
+                      AND qb.course_id = :cid
+                      AND srq.status = 'pending'
+                      AND srq.next_review_at <= :now
+                    ORDER BY srq.next_review_at ASC
+                    FOR UPDATE OF srq SKIP LOCKED
+                """),
+                {"sid": student_id, "cid": course_id, "now": now_utc},
+            )
+            due = result.fetchall()
+
+            # Uma revisão por janela; o loop só avança se a questão do topo
+            # tiver sido invalidada (marcada 'skipped' pelo _send_srs_item).
+            for item in due:
+                if await _send_srs_item(session, item, channel, sender_id, now_utc):
+                    return True
+            return False
+    except Exception as e:
+        logger.error("srs_window_delivery_failed", student_id=student_id, error=str(e)[:300])
+        return False
+
+
 async def process_spaced_repetition():
     """Varre a SpacedRepetitionQueue vencida e reentrega o quiz salvo no
     QuizBank (sem LLM). Se o aluno estiver fora da janela de 24h do WhatsApp,
-    empurra a revisão em +1 dia (a janela do Telegram não existe)."""
+    empurra a revisão em +1 dia (a janela do Telegram não existe).
+
+    Free-run APENAS para quem não tem janela agendada no curso (ex.: leitores
+    via QR): aluno com StudentSchedule ativo recebe a revisão espaçada na
+    própria janela, com prioridade (deliver_due_srs_for_student) — nunca em
+    horário aleatório, e nunca em dobro."""
     now_utc = _naive_utc_now()
     default_ct = settings.CHANNEL_BACKEND.lower()
 
@@ -247,6 +411,13 @@ async def process_spaced_repetition():
                 WHERE srq.status = 'pending'
                   AND srq.next_review_at <= :now
                   AND s.is_active = true
+                  AND NOT EXISTS (
+                        SELECT 1 FROM "StudentSchedule" ss
+                        JOIN "Classes" cl ON cl.id = ss.class_id
+                        WHERE ss.student_id = srq.student_id
+                          AND ss.is_active = true
+                          AND cl.course_id = qb.course_id
+                  )
                   {consent_clause}
                 FOR UPDATE OF srq SKIP LOCKED
             """),
@@ -264,13 +435,6 @@ async def process_spaced_repetition():
             try:
                 ct = (item.preferred_channel or default_ct).lower()
                 sender_id = item.telegram_chat_id if ct == "telegram" else item.phone
-
-                def _postpone_sql():
-                    return text("""
-                        UPDATE "SpacedRepetitionQueue"
-                        SET next_review_at = :next, updated_at = CURRENT_TIMESTAMP
-                        WHERE id = :id
-                    """)
 
                 if not sender_id:
                     await session.execute(_postpone_sql(), {"next": now_utc + timedelta(days=1), "id": item.srq_id})
@@ -290,94 +454,8 @@ async def process_spaced_repetition():
                         logger.info("srs_postponed_window_closed", srq_id=item.srq_id)
                         continue
 
-                from src.rag.quiz_bank import get_quiz_package, find_unseen_quiz
-                bank = await get_quiz_package(item.quiz_bank_id)
-                if not bank:
-                    # Questão invalidada entre o agendamento e a entrega
-                    # (corrida com o CASCADE) — marca como pulada.
-                    await session.execute(
-                        text("""
-                            UPDATE "SpacedRepetitionQueue"
-                            SET status = 'skipped', updated_at = CURRENT_TIMESTAMP
-                            WHERE id = :id
-                        """),
-                        {"id": item.srq_id},
-                    )
-                    await session.commit()
-                    continue
-
-                # Generalização de Tópicos: tenta achar uma variação irmã (mesmo tópico) inédita pro aluno
-                sister_bank = await find_unseen_quiz(
-                    student_id=item.student_id,
-                    course_id=bank["course_id"],
-                    subject_id=bank.get("subject_id"),
-                    lesson_number=bank["lesson_number"],
-                    topic=bank["topic"],
-                    material_type=bank["material_type"],
-                )
-                
-                quiz_bank_id_to_send = item.quiz_bank_id
-                if sister_bank:
-                    bank = sister_bank
-                    quiz_bank_id_to_send = bank["id"]
-                    # Atualiza a fila para apontar para a nova variação (para consistência futura)
-                    await session.execute(
-                        text('UPDATE "SpacedRepetitionQueue" SET quiz_bank_id = :qid WHERE id = :id'),
-                        {"qid": quiz_bank_id_to_send, "id": item.srq_id}
-                    )
-
                 channel = get_channel(ct)
-                quiz_output = _shuffled_quiz_from_bank(bank)
-
-                # Explicita o degrau da escada (D+3/D+10/D+30, ou o valor
-                # adaptativo) e a disciplina — sem isso, disciplinas parecidas
-                # do mesmo curso (ex.: "Design Thinking" dentro de IA) ficam
-                # indistinguíveis para o aluno mapear se está indo bem em cada uma.
-                await channel.send_text(
-                    sender_id,
-                    SPACED_REVIEW_INTRO.format(interval=item.interval_days, subject_name=item.subject_name),
-                )
-
-                from src.workers.micro_learning import send_quiz_to_student
-                await send_quiz_to_student(
-                    channel=channel,
-                    student={
-                        "id": item.student_id,
-                        "sender_id": sender_id,
-                        "course_id": item.course_id,
-                        "lesson_pointer": str(item.lesson_number),
-                    },
-                    quiz=quiz_output,
-                    quiz_bank_id=quiz_bank_id_to_send,
-                )
-
-                # Vertical de Idiomas: reentrega de VOCABULÁRIO refala a palavra-alvo
-                # (áudio persistido no QuizBank). Best-effort — não derruba o SRS.
-                if item.material_type == "vocab" and bank.get("audio_script") and settings.LANGUAGE_MODE_ENABLED:
-                    from src.shared.language import detect_language_course
-                    from src.rag.review_generator import synthesize_listening
-                    spec = detect_language_course(item.course_name, default_target=settings.DEFAULT_TARGET_LANGUAGE)
-                    target_lang = spec.target_language if spec else settings.DEFAULT_TARGET_LANGUAGE
-                    try:
-                        audio = await synthesize_listening(bank["audio_script"], target_lang)
-                        if audio:
-                            # Transcrição logo abaixo da nota de voz (flashcard de
-                            # pronúncia — ver a palavra/exemplo é o objetivo).
-                            await channel.send_audio(sender_id, audio, caption=bank["audio_script"])
-                    except Exception as e:
-                        logger.warning("srs_vocab_audio_failed", srq_id=item.srq_id, error=str(e)[:200])
-
-                # Empurra +1 dia até a RESPOSTA chegar: quem fecha o degrau é o
-                # register_quiz_answer. Se o aluno ignorar, reentrega amanhã.
-                await session.execute(_postpone_sql(), {"next": now_utc + timedelta(days=1), "id": item.srq_id})
-                await session.commit()
-
-                track_event("srs_review_sent", {
-                    "student_id": item.student_id,
-                    "quiz_bank_id": item.quiz_bank_id,
-                    "interval_days": item.interval_days,
-                })
-                logger.info("srs_review_sent", srq_id=item.srq_id, interval=item.interval_days, channel=ct)
+                await _send_srs_item(session, item, channel, sender_id, now_utc)
 
             except Exception as e:
                 logger.error("srs_delivery_failed", srq_id=item.srq_id, error=str(e)[:400])
