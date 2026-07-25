@@ -29,6 +29,10 @@ def load_azure_secrets(settings) -> None:
             # TTS/STT/pronúncia/Partner (exatamente o vetor F01/F02).
             "AZURE-SPEECH-KEY", "ELEVENLABS-API-KEY",
             "GOOGLE-TTS-API-KEY", "GOOGLE-STT-API-KEY", "PARTNER-API-KEY",
+            # Reranker managed (F4) — RERANKER_PROVIDER=cohere|voyage em produção.
+            # Os dois ficam disponíveis para o eval decidir entre providers sem
+            # exigir outra mudança de infra (regra da casa: nunca "no feeling").
+            "COHERE-API-KEY", "VOYAGE-API-KEY",
         ]
         
         for kv_key in keys_to_fetch:

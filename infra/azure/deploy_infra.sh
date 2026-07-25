@@ -55,7 +55,11 @@ az deployment group create \
     googleDriveFolderId="$GOOGLE_DRIVE_FOLDER_ID" \
     googleSheetId="$GOOGLE_SHEET_ID" \
     defaultLlmProvider="${DEFAULT_LLM_PROVIDER:-gemini}" \
-    defaultEmbedderProvider="${DEFAULT_EMBEDDER_PROVIDER:-azure}"
+    defaultEmbedderProvider="${DEFAULT_EMBEDDER_PROVIDER:-azure}" \
+    cohereApiKey="$COHERE_API_KEY" \
+    voyageApiKey="$VOYAGE_API_KEY" \
+    rerankerProvider="${RERANKER_PROVIDER:-none}" \
+    cohereRerankModel="${COHERE_RERANK_MODEL:-rerank-v4.0-fast}"
 
 echo ""
 echo "✅ Infraestrutura Azure criada com sucesso!"

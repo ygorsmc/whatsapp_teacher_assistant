@@ -161,9 +161,16 @@ _instance_name: Optional[str] = None
 
 
 def get_reranker(name: str | None = None) -> Optional[IRerankerProvider]:
-    """Factory do reranker. `none` (default) → None = estágio desligado."""
+    """Factory do reranker. `none` (default) → None = estágio desligado.
+
+    `name is None` = usa o provider configurado (`settings.RERANKER_PROVIDER`);
+    um `name` explícito porém vazio (`""`)/`"none"` é OFF determinístico — não
+    consulta a config global (mantém a factory hermética e previsível).
+    """
     global _instance, _instance_name
-    provider_name = (name or settings.RERANKER_PROVIDER or "none").lower()
+    if name is None:
+        name = settings.RERANKER_PROVIDER
+    provider_name = (name or "none").lower()
     if provider_name in ("none", ""):
         return None
     if _instance is not None and _instance_name == provider_name:

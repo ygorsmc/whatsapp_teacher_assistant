@@ -1,0 +1,15 @@
+# HTTPS automático (Let's Encrypt) pro webhook do WhatsApp.
+# WEBHOOK_DOMAIN e ACME_EMAIL vêm do .env.oracle (injetados no container do Caddy).
+#
+# Pré-requisitos pro cert emitir:
+#   - WEBHOOK_DOMAIN com A record apontando pro IP público da VM
+#   - portas 80 e 443 abertas na VCN (security list) E no iptables da VM
+{
+	email {$ACME_EMAIL}
+}
+
+{$WEBHOOK_DOMAIN} {
+	encode gzip
+	# O webhook (FastAPI/uvicorn) escuta na porta 80 dentro da rede do compose.
+	reverse_proxy webhook:80
+}

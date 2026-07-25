@@ -51,6 +51,18 @@ param telegramBotToken string = ''
 @description('Telegram webhook secret token')
 param telegramWebhookSecret string = ''
 
+// Reranker managed (F4) — RERANKER_PROVIDER='none' por padrão (comportamento
+// clássico intocado). Ambas as chaves ficam disponíveis condicionalmente para
+// o eval (scripts/eval_rag.py) decidir Cohere vs Voyage sem outra mudança de
+// infra — "nenhuma decisão de modelo no feeling" (RAG_OPERATIONS.md §7.1).
+@secure()
+@description('Cohere Rerank API key')
+param cohereApiKey string = ''
+
+@secure()
+@description('Voyage Rerank API key')
+param voyageApiKey string = ''
+
 // Endpoints semi-sensíveis que o app busca DO KEY VAULT (azure_kv.load_azure_secrets
 // faz fetch de QDRANT-URL e AZURE-OPENAI-ENDPOINT). Mantê-los aqui evita env em
 // claro no Container App e garante reconstrução determinística.
@@ -83,6 +95,16 @@ param defaultLlmProvider string = 'gemini'
 
 @description('Provider de embeddings padrão (get_embedder)')
 param defaultEmbedderProvider string = 'azure'
+
+// F4 — Reranker: 'none' (default, comportamento clássico) até o eval registrar
+// o delta (tests/golden/results.md) e a equipe decidir ligar 'cohere'|'voyage'.
+// Mudar isto SEMPRE por aqui (redeploy do bicep) — nunca via `az containerapp
+// update` (AGENTS.md: hand-edits de infra drift no próximo deploy_infra).
+@description('Provider de reranking (IRerankerProvider): none | cohere | voyage')
+param rerankerProvider string = 'none'
+
+@description('Variante do Cohere Rerank v4 (Fast = mais barato/rápido, Pro = mais preciso)')
+param cohereRerankModel string = 'rerank-v4.0-fast'
 
 // --- Nomes dos recursos com sufixo único ---
 var pgServerName = '${baseName}-pg-${uniqueString(resourceGroup().id)}'
@@ -247,6 +269,18 @@ resource secretTelegramWebhook 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = 
   properties: { value: telegramWebhookSecret }
 }
 
+resource secretCohereApi 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(cohereApiKey)) {
+  parent: keyVault
+  name: 'COHERE-API-KEY'
+  properties: { value: cohereApiKey }
+}
+
+resource secretVoyageApi 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(voyageApiKey)) {
+  parent: keyVault
+  name: 'VOYAGE-API-KEY'
+  properties: { value: voyageApiKey }
+}
+
 // Endpoints buscados por azure_kv.load_azure_secrets (QDRANT-URL / AZURE-OPENAI-ENDPOINT).
 resource secretQdrantUrl 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(qdrantUrl)) {
   parent: keyVault
@@ -352,6 +386,10 @@ var workerConfigEnv = [
   { name: 'GOOGLE_DRIVE_FOLDER_ID', value: googleDriveFolderId }
   { name: 'GOOGLE_SHEET_ID', value: googleSheetId }
   { name: 'DOCUMENT_INTELLIGENCE_ENDPOINT', value: documentIntelligenceEndpoint }
+  // F4 — reranker managed (API key vem do Key Vault via azure_kv.load_azure_secrets;
+  // aqui só o nome do provider/modelo, que não é sensível).
+  { name: 'RERANKER_PROVIDER', value: rerankerProvider }
+  { name: 'COHERE_RERANK_MODEL', value: cohereRerankModel }
 ]
 
 // Container App: Webhook

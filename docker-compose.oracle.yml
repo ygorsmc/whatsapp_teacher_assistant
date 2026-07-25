@@ -1,0 +1,204 @@
+# ============================================================================
+# Stack UNIFICADO single-VM — Oracle Cloud Always Free (ARM Ampere A1, 4 OCPU/24 GB)
+# ============================================================================
+# Sobe TUDO numa VM só, sem depender de nada pago:
+#   Cloudflare Tunnel -> webhook  +  worker-llm  +  worker-scheduler
+#   Postgres 16  +  Redis 7  +  Qdrant  +  Ollama (embeddings bge-m3)
+#
+# SEM GPU: o reranker fica 'none' (ou managed Cohere/Voyage via .env). A imagem
+# do app é leve — não faz inferência local (só numpy/matplotlib); os embeddings
+# saem pro Ollama por HTTP. Isso é o que faz caber com folga no A1.
+#
+# USO:
+#   cp .env.oracle.example .env.oracle   # e preencha os segredos
+#   docker compose -f docker-compose.oracle.yml up -d            # core (sempre-ligado)
+#   docker compose -f docker-compose.oracle.yml --profile ingest up -d   # + ingestão do Drive
+#   docker compose -f docker-compose.oracle.yml logs -f worker-scheduler
+#
+# NADA de ${interpolação} aqui de propósito: toda config vem do env_file
+# (.env.oracle) injetada em cada container, então um único `up` basta.
+# ============================================================================
+
+# --- Config comum aos containers da APLICAÇÃO (webhook + workers + migrate) ---
+x-app-common: &app-common
+  env_file: [.env.oracle]
+  restart: unless-stopped
+  # service_account.json montado em runtime (NÃO fica na imagem). Só é usado se
+  # MATERIAL_SOURCE_BACKEND/REGISTRY_BACKEND=gdrive. Com backends 'local' é inócuo.
+  volumes:
+    - ./service_account.json:/app/service_account.json:ro
+
+# --- Build/imagem compartilhados pelos serviços de WORKER (mesma imagem) -------
+x-worker-build: &worker-build
+  build:
+    context: .
+    dockerfile: Dockerfile.worker
+  image: whatsapp-worker:local
+
+services:
+  # ─────────────────────── Borda pública (Cloudflare Tunnel) ────────────────
+  # Disca pra Cloudflare de DENTRO da VM (saída-only): NÃO publica porta, NÃO
+  # exige abrir VCN security list nem iptables. Roteia o hostname público →
+  # webhook:80 conforme o dashboard (Zero Trust → Networks → Tunnels). Serve
+  # Telegram (/v1/webhook/telegram) E WhatsApp (/v1/webhook/whatsapp) pelo mesmo
+  # container. O cloudflared lê TUNNEL_TOKEN do ambiente automaticamente.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    env_file: [.env.oracle]
+    command: ["tunnel", "--no-autoupdate", "run"]
+    depends_on: [webhook]
+
+  # Alternativa ao túnel: domínio próprio + HTTPS Let's Encrypt. Opt-in via
+  # `--profile caddy` (aí SIM precisa abrir 80/443 na VCN security list + iptables).
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["caddy"]
+    restart: unless-stopped
+    depends_on: [webhook]
+    ports:
+      - "80:80"
+      - "443:443"
+    env_file: [.env.oracle]   # Caddyfile lê {$WEBHOOK_DOMAIN} e {$ACME_EMAIL}
+    volumes:
+      - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # ─────────────────────────── Aplicação ───────────────────────────────────
+  webhook:
+    <<: *app-common
+    build:
+      context: .
+      dockerfile: Dockerfile.webhook
+    image: whatsapp-webhook:local
+    # Sem `ports:` — quem fala com a internet é o Caddy; o webhook fica interno na porta 80.
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis:   { condition: service_healthy }
+    mem_limit: 512m
+
+  worker-llm:
+    <<: [*app-common, *worker-build]
+    environment:
+      WORKER_TYPE: llm   # consome inbound_messages + command_messages (igual à prod)
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis:   { condition: service_healthy }
+      qdrant:  { condition: service_started }
+      ollama:  { condition: service_healthy }
+    mem_limit: 1g
+
+  worker-scheduler:
+    <<: [*app-common, *worker-build]
+    environment:
+      WORKER_TYPE: scheduler   # dispara as mensagens automáticas (SRS, revisões, digests)
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis:   { condition: service_healthy }
+      qdrant:  { condition: service_started }
+      ollama:  { condition: service_healthy }
+    mem_limit: 768m
+
+  # Ingestão de material (Drive -> parse -> embeddings -> Qdrant). NÃO fica no ar
+  # o tempo todo: só sobe com `--profile ingest`. Precisa do Gotenberg (docx/pptx)
+  # e, pra PDF, de um PARSER_BACKEND que funcione sem Azure (ver .env.oracle.example).
+  worker-ingestion:
+    <<: [*app-common, *worker-build]
+    profiles: ["ingest"]
+    environment:
+      WORKER_TYPE: ingestion
+    depends_on:
+      migrate:   { condition: service_completed_successfully }
+      redis:     { condition: service_healthy }
+      qdrant:    { condition: service_started }
+      ollama:    { condition: service_healthy }
+      gotenberg: { condition: service_started }
+    mem_limit: 2g
+
+  # Migração do schema (alembic upgrade head) ANTES de qualquer worker subir.
+  # One-shot: roda, aplica as migrations e sai 0. Workers só partem se ele sair 0.
+  migrate:
+    <<: [*app-common, *worker-build]
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # ─────────────────────────── Infra local ─────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: [.env.oracle]   # lê POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    mem_limit: 2g
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # noeviction: as filas (Redis Streams) NÃO podem perder mensagens sob pressão.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    mem_limit: 512m
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    mem_limit: 3g
+
+  # Ollama serve o bge-m3 (denso 1024d) por HTTP — é o "embedder local".
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    mem_limit: 6g
+
+  # One-shot: baixa o modelo bge-m3 pro volume do Ollama no 1º boot (~1.2 GB).
+  # Depois disso o volume persiste e ele sai na hora. Se trocar o modelo, ajuste aqui.
+  ollama-pull:
+    image: ollama/ollama:latest
+    restart: "no"
+    depends_on:
+      ollama: { condition: service_healthy }
+    environment:
+      OLLAMA_HOST: "http://ollama:11434"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ollama pull bge-m3"]
+
+  # Gotenberg: converte docx/pptx -> PDF na ingestão. Só sobe no profile 'ingest'.
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+    profiles: ["ingest"]
+    command: ["gotenberg", "--api-port=3000"]
+    mem_limit: 1g
+
+volumes:
+  postgres_data:
+  redis_data:
+  qdrant_data:
+  ollama_data:
+  caddy_data:
+  caddy_config:
