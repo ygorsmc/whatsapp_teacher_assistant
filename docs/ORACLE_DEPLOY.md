@@ -2,14 +2,14 @@
 
 Roda o stack inteiro numa VM ARM Ampere A1 (**4 OCPU / 24 GB**), sem nada pago:
 webhook + workers + Postgres + Redis + Qdrant + Ollama (embeddings), exposto por
-**Cloudflare Tunnel**. Comparado com o footprint always-on da prod no Azure
-(~2 vCPU, ~5 GB), sobra folga.
+**ngrok** (domínio estático grátis). Comparado com o footprint always-on da prod
+no Azure (~2 vCPU, ~5 GB), sobra folga.
 
 Canal ativo por padrão: **Telegram**. O WhatsApp fica com o caminho pronto — é só
 config (mesmo webhook, mesma VM), sem mudar infra.
 
 Arquivos deste deploy:
-- [`docker-compose.oracle.yml`](../docker-compose.oracle.yml) — o stack unificado (borda = `cloudflared`)
+- [`docker-compose.oracle.yml`](../docker-compose.oracle.yml) — o stack unificado (borda = `ngrok`)
 - [`.env.oracle.example`](../.env.oracle.example) — segredos/config
 - [`scripts/oracle_create_instance.sh`](../scripts/oracle_create_instance.sh) — criação da VM com retry
 - [`docker/caddy/Caddyfile`](../docker/caddy/Caddyfile) — só se usar o fallback `--profile caddy`
@@ -46,21 +46,24 @@ export OCI_SSH_KEY=$HOME/.ssh/id_rsa.pub
 O `cloud-init` embutido instala Docker + plugin compose. Quando sair "VM criada e
 RUNNING", anote o **IP público** (só pro SSH).
 
-> Com o Cloudflare Tunnel você **NÃO** precisa abrir 80/443 na VCN security list
-> nem no iptables — o túnel é saída-only. (O cloud-init até abre as portas, mas
-> isso só importa no fallback `--profile caddy`.)
+> Com o ngrok você **NÃO** precisa abrir 80/443 na VCN security list nem no
+> iptables — o agente é saída-only. (O cloud-init até abre as portas, mas isso só
+> importa no fallback `--profile caddy`.)
 
-## 2. Criar o Cloudflare Tunnel
+## 2. Configurar o ngrok
 
-No **Cloudflare Zero Trust** → Networks → Tunnels → *Create a tunnel* (tipo
-`cloudflared`):
-1. Dê um nome, copie o **token** do tunnel (o `docker run ... --token XXXX`; você
-   só precisa do `XXXX`) → vai em `TUNNEL_TOKEN` no `.env.oracle`.
-2. Aba **Public Hostname**: crie um hostname (ex.: `bot.seudominio.com`, num
-   domínio que você tenha na Cloudflare) → **Service** = `HTTP` → `webhook:80`.
-   Como o `cloudflared` roda na mesma rede do compose, ele resolve `webhook:80`.
+Em [dashboard.ngrok.com](https://dashboard.ngrok.com):
+1. **Your Authtoken** → copie → `NGROK_AUTHTOKEN` no `.env.oracle`.
+2. **Domains → Create Domain** → o plano free dá 1 domínio estático (ex.:
+   `abc-123.ngrok-free.app`) → `NGROK_DOMAIN` no `.env.oracle`.
 
-Esse hostname é a base pública do webhook (estável — não muda em restart).
+Esse domínio é fixo (não muda em restart) e é a base pública do webhook. O agente
+ngrok roda na rede do compose e encaminha pra `webhook:80` sozinho.
+
+> **Limites do free** (confira os atuais no painel): franquia mensal de dados —
+> tranquilo pra mensagens de texto, fique de olho se usar muito áudio/imagem — e
+> uma página-interstício em acessos de navegador (POSTs JSON de Telegram/Meta
+> normalmente passam direto). Se um dia apertar, dá pra trocar a borda (§6).
 
 ## 3. Subir o stack
 
@@ -69,7 +72,7 @@ ssh ubuntu@<ip>
 git clone <seu-repo> app && cd app          # ou rsync do seu código
 
 cp .env.oracle.example .env.oracle
-nano .env.oracle                            # preencha TUNNEL_TOKEN, Telegram, senha do PG...
+nano .env.oracle                            # ngrok, Telegram, senha do PG...
 cp /caminho/service_account.json .          # se usar Drive/Sheets (gdrive)
 
 docker compose -f docker-compose.oracle.yml up -d
@@ -77,8 +80,8 @@ docker compose -f docker-compose.oracle.yml logs -f
 ```
 
 Ordem de boot automática: `postgres` saudável → `migrate` (alembic) sai 0 →
-webhook + workers + `cloudflared` sobem. O `ollama-pull` baixa o bge-m3 (~1.2 GB)
-em paralelo; a primeira busca RAG espera esse download terminar.
+webhook + workers + `ngrok` sobem. O `ollama-pull` baixa o bge-m3 (~1.2 GB) em
+paralelo; a primeira busca RAG espera esse download terminar.
 
 Ingestão de material do Drive (não fica no ar o tempo todo):
 ```bash
@@ -87,12 +90,12 @@ docker compose -f docker-compose.oracle.yml --profile ingest up -d
 
 ## 4. Registrar o webhook do Telegram
 
-Aponte o bot pro seu hostname do túnel (rode de qualquer lugar):
+Aponte o bot pro seu domínio ngrok (rode de qualquer lugar):
 ```bash
 export TELEGRAM_BOT_TOKEN=...            # o mesmo do .env.oracle
 export TELEGRAM_WEBHOOK_SECRET=...       # idem
 curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
-  --data-urlencode "url=https://SEU_HOSTNAME/v1/webhook/telegram" \
+  --data-urlencode "url=https://SEU-DOMINIO.ngrok-free.app/v1/webhook/telegram" \
   --data-urlencode "secret_token=${TELEGRAM_WEBHOOK_SECRET}"
 
 # conferir:
@@ -103,23 +106,38 @@ curl -sS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getWebhookInfo"
 
 ## 5. Ligar o WhatsApp depois (caminho pronto)
 
-Sem tocar em infra — mesma VM, mesmo túnel, mesmo webhook:
+Sem tocar em infra — mesma VM, mesmo ngrok, mesmo webhook:
 1. No `.env.oracle`: `CHANNEL_BACKEND=whatsapp`, `SCHEDULER_MODE=template` e
    preencha o bloco WhatsApp (token permanente / System User, `META_APP_SECRET`,
    `META_VERIFY_TOKEN`, `PHONE_NUMBER_ID`).
-2. Adicione um **Public Hostname** no mesmo tunnel (ou reuse o mesmo) → o webhook
-   já responde `/v1/webhook/whatsapp`.
-3. Na Meta (WhatsApp → Configuration → Webhook):
-   - **Callback URL**: `https://SEU_HOSTNAME/v1/webhook/whatsapp`
+2. Na Meta (WhatsApp → Configuration → Webhook):
+   - **Callback URL**: `https://SEU-DOMINIO.ngrok-free.app/v1/webhook/whatsapp`
    - **Verify token**: o `META_VERIFY_TOKEN`
    - Assine o campo `messages`.
-4. `docker compose -f docker-compose.oracle.yml up -d` (recria os containers com o
+3. `docker compose -f docker-compose.oracle.yml up -d` (recria os containers com o
    novo canal).
 
-> Dá pra rodar os dois canais ao mesmo tempo? O `CHANNEL_BACKEND` define o canal
-> padrão do **scheduler** (mensagens automáticas). As duas rotas de entrada
-> (`/telegram` e `/whatsapp`) ficam sempre ativas; o que muda é por qual canal o
-> bot dispara as mensagens proativas.
+> `CHANNEL_BACKEND` define o canal padrão do **scheduler** (mensagens automáticas).
+> As duas rotas de entrada (`/telegram` e `/whatsapp`) ficam sempre ativas; o que
+> muda é por qual canal o bot dispara as mensagens proativas.
+
+## 6. Trocar a borda (se precisar)
+
+A borda é plugável por profile. O ngrok é o default; pra usar outra, **pare o
+ngrok** (`docker compose -f docker-compose.oracle.yml stop ngrok`) e suba a
+alternativa. Depois de trocar, refaça o `setWebhook`/Callback URL com o novo host.
+
+| Borda | Grátis | Estável | Abre porta? | Precisa domínio? |
+|---|---|---|---|---|
+| **ngrok** (default) | sim (com limites) | sim (domínio estático) | não | não |
+| **Cloudflare** (`--profile cloudflare`) | sim, ilimitado | sim | não | **sim**, na conta Cloudflare* |
+| **Tailscale Funnel** | sim | sim (`*.ts.net`) | não | não |
+| **Caddy** (`--profile caddy`) | sim | sim | **sim** (80/443) | sim (pode ser DuckDNS grátis) |
+
+\* Domínio grátis por 1 ano pelo **GitHub Student Developer Pack** (Namecheap `.me`,
+`.tech`) resolve o Cloudflare a custo zero — aí é `TUNNEL_TOKEN` + Public Hostname
+→ `http://webhook:80` no painel Zero Trust. (Tailscale Funnel não está no compose
+ainda; peça se quiser que eu adicione.)
 
 ---
 
@@ -129,7 +147,7 @@ Sem tocar em infra — mesma VM, mesmo túnel, mesmo webhook:
 |---|---|
 | Status | `docker compose -f docker-compose.oracle.yml ps` |
 | Logs do scheduler | `docker compose -f docker-compose.oracle.yml logs -f worker-scheduler` |
-| Logs do túnel | `docker compose -f docker-compose.oracle.yml logs -f cloudflared` |
+| Logs da borda | `docker compose -f docker-compose.oracle.yml logs -f ngrok` |
 | Re-migrar DB | `docker compose -f docker-compose.oracle.yml run --rm migrate` |
 | Reiniciar 1 serviço | `docker compose -f docker-compose.oracle.yml restart worker-llm` |
 | Backup do Postgres | `docker compose -f docker-compose.oracle.yml exec postgres pg_dump -U whatsapp whatsapp_assistant > backup.sql` |

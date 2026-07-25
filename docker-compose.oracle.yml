@@ -2,7 +2,7 @@
 # Stack UNIFICADO single-VM — Oracle Cloud Always Free (ARM Ampere A1, 4 OCPU/24 GB)
 # ============================================================================
 # Sobe TUDO numa VM só, sem depender de nada pago:
-#   Cloudflare Tunnel -> webhook  +  worker-llm  +  worker-scheduler
+#   ngrok (borda) -> webhook  +  worker-llm  +  worker-scheduler
 #   Postgres 16  +  Redis 7  +  Qdrant  +  Ollama (embeddings bge-m3)
 #
 # SEM GPU: o reranker fica 'none' (ou managed Cohere/Voyage via .env). A imagem
@@ -36,21 +36,32 @@ x-worker-build: &worker-build
   image: whatsapp-worker:local
 
 services:
-  # ─────────────────────── Borda pública (Cloudflare Tunnel) ────────────────
-  # Disca pra Cloudflare de DENTRO da VM (saída-only): NÃO publica porta, NÃO
-  # exige abrir VCN security list nem iptables. Roteia o hostname público →
-  # webhook:80 conforme o dashboard (Zero Trust → Networks → Tunnels). Serve
-  # Telegram (/v1/webhook/telegram) E WhatsApp (/v1/webhook/whatsapp) pelo mesmo
-  # container. O cloudflared lê TUNNEL_TOKEN do ambiente automaticamente.
+  # ───────────────────────── Borda pública (ngrok — DEFAULT) ────────────────
+  # Agente ngrok disca pra fora (saída-only): NÃO abre porta na VM. Usa o
+  # domínio ESTÁTICO grátis do plano free (1 por conta) → URL fixa mesmo SEM
+  # você ter domínio próprio. Serve Telegram e WhatsApp pelo mesmo webhook.
+  # NGROK_AUTHTOKEN é lido do ambiente; NGROK_DOMAIN vem do .env.oracle.
+  # (O `$$` é escape do compose → o shell do container expande $NGROK_DOMAIN.)
+  ngrok:
+    image: ngrok/ngrok:latest
+    restart: unless-stopped
+    env_file: [.env.oracle]
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["ngrok http webhook:80 --domain=$$NGROK_DOMAIN --log=stdout"]
+    depends_on: [webhook]
+
+  # Alternativa 1: Cloudflare Tunnel (grátis/ilimitado, sem abrir porta) — precisa
+  # de domínio na conta Cloudflare. Opt-in: `--profile cloudflare` (pare o ngrok).
   cloudflared:
     image: cloudflare/cloudflared:latest
+    profiles: ["cloudflare"]
     restart: unless-stopped
     env_file: [.env.oracle]
     command: ["tunnel", "--no-autoupdate", "run"]
     depends_on: [webhook]
 
-  # Alternativa ao túnel: domínio próprio + HTTPS Let's Encrypt. Opt-in via
-  # `--profile caddy` (aí SIM precisa abrir 80/443 na VCN security list + iptables).
+  # Alternativa 2: Caddy + HTTPS Let's Encrypt (domínio próprio, abre 80/443).
+  # Opt-in: `--profile caddy` (pare o ngrok).
   caddy:
     image: caddy:2-alpine
     profiles: ["caddy"]
