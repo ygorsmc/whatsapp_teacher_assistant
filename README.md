@@ -4,7 +4,6 @@ Assistente pedagógico que combate a **curva do esquecimento**: entre uma aula e
 
 O professor também não precisa de plataforma: organiza os materiais numa pasta do **Google Drive**, mantém turmas e alunos numa **planilha** e conduz o curso por **comandos de chat** (`/aula`, `/quiz`, `/sinc_materiais`, `/engajamento`…).
 
-> Sistema em produção (Azure Container Apps + Qdrant Cloud + PostgreSQL), com alunos e professores reais.
 
 ---
 
